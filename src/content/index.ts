@@ -521,8 +521,9 @@ function handleConsent(h: FieldHandle, d: Decision | undefined, ctrl: AbortContr
         ? { type: "options", texts: boxes }
         : pick
           ? { type: "options", texts: [pick] }
-          : // Options not read yet (Twitch's 16th dropdown, "considered for future opportunities?"): pick by meaning.
-            h.desc.kind === "dropdown" && !options
+          : // Options not read yet (Twitch's 16th dropdown, "considered for future opportunities?"; Eightfold's Yes/No
+            // combobox "A recruiter may contact me regarding opportunities."): pick by meaning.
+            (h.desc.kind === "dropdown" || h.desc.kind === "typeahead") && !options
             ? { type: "intended", answer: accept ? "Yes" : "No" }
             : null;
   const tooltip = `${accept ? "Auto-accepted" : "Auto-declined"}${pref ? " (Profile)" : optional ? " (optional)" : ""}`;
