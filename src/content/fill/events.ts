@@ -205,9 +205,11 @@ export function focus(el: HTMLElement) {
 
 export function blur(el: HTMLElement) {
   dispatching(() => {
+    // Focus leaves first, as in a browser: Workday's date box commits its date only when its blur handler finds
+    // document.activeElement outside it, so it saved none while the box still had focus.
+    el.blur();
     el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
     el.dispatchEvent(new FocusEvent("blur"));
-    el.blur();
   });
 }
 
