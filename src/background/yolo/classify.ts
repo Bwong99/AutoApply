@@ -34,7 +34,7 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
   if (f.fields < 2 && RE_CLOSED.test(f.text)) return "closed";
   if (!f.fields && !f.onward && RE_FLAGGED.test(f.text)) return hidden ? "blocked" : "flagged";
   // Workday's sign-in turns an unverified account away with an alert over its form.
-  if (RE_VERIFY.test(f.text) && (f.codeInput || !f.passwords || RE_VERIFY.test(f.alerts))) return "verify";
+  if ((RE_VERIFY.test(f.text) && (f.codeInput || !f.passwords)) || RE_VERIFY.test(f.alerts)) return "verify";
   if (!f.passwords && RE_FORGOT.test(f.headings)) return "verify";
   if (f.passwords >= 2) return RE_RESET.test(f.headings) ? "reset" : "signup";
   if (f.passwords === 1)
