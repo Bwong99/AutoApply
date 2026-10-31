@@ -39,6 +39,9 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
   if (f.passwords >= 2) return RE_RESET.test(f.headings) ? "reset" : "signup";
   if (f.passwords === 1)
     return RE_SIGNUP.test(f.headings) && !/sign ?in|log ?in/i.test(f.headings) ? "signup" : "signin";
+  // An email-first sign-in (Eightfold's "Email · Continue · First time here? Create an account"): no password yet.
+  if (!f.passwords && f.fields <= 1 && /\b(sign ?in|log ?in)\b/i.test(f.headings) && RE_SIGNUP.test(f.text))
+    return "signin";
   if (f.fields < 3 && f.embedded) return "embedded";
   // A posting with a search box or two (Indeed's What / Where) is still a posting. More page chrome can produce
   // several scan-visible controls, so a real navigation link always opens the posting's application. A custom

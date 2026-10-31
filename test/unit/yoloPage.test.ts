@@ -21,6 +21,11 @@ describe("YOLO page kinds", () => {
     expect(classify(1)).toBe("signup");
     setBody(`<h2>Reset your password</h2><input type="password"><input type="password">`);
     expect(classify(0)).toBe("reset");
+    // Eightfold asks for the address first.
+    setBody(
+      `<h2>Sign in</h2><input type="email"><button>Continue</button><p>First time here?</p><button>Create an account</button>`,
+    );
+    expect(classify(1)).toBe("signin");
   });
 
   it("knows confirmation, closed and bot-wall pages", () => {
