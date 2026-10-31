@@ -8,7 +8,7 @@ import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
-import { forgotPassword, handleAuth, handleVerify } from "./auth";
+import { emailSignIn, forgotPassword, handleAuth, handleVerify } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
 import { alertText, findApply, findNext, findSubmit, labelOf, press, validationErrors } from "./nav";
 
@@ -118,6 +118,13 @@ export async function drive(deps: DriverDeps) {
         });
       const before = snapshot();
       const needs = (reason: string) => result({ status: "needs", reason, guesses: deps.guesses() });
+      // A sign-in that opens on a choice of providers, before any field shows (Workday's, again after signing up).
+      const viaEmail = !facts.passwords && facts.fields < 3 ? emailSignIn() : null;
+      if (viaEmail) {
+        press(viaEmail);
+        await changed(before, 20_000);
+        continue;
+      }
       switch (kind) {
         case "success":
           return result({ status: "submitted", doneUrl: location.href, guesses: deps.guesses() });

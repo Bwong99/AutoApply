@@ -95,6 +95,12 @@ export async function handleAuth(
   return { ok: true };
 }
 
+/** A sign-in that opens on a choice of providers (Workday's "Sign in with Apple / Google / email"): email shows the form. */
+export const emailSignIn = () =>
+  findButton(/^(sign ?in|log ?in|sign ?up|continue|register) with (your )?e-?mail( address)?$/i, [
+    '[data-automation-id="SignInWithEmailButton"]',
+  ]);
+
 /** "This email is already registered" with no password stored: reset it through the inbox. */
 export async function forgotPassword(): Promise<AuthOutcome> {
   const link = findButton(RE_FORGOT, ['[data-automation-id="forgotPasswordLink"]']);
