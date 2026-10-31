@@ -208,6 +208,11 @@ export async function drive(deps: DriverDeps) {
           // Still rendering (Oracle's next section takes several seconds), or a page we don't know: give up only once
           // it stops changing.
           if (await changed(before, 15_000)) continue;
+          // Workday's "Something went wrong. Please refresh the page and then try again." (the step loop guard caps it)
+          if (/\b(refresh|reload) the page\b/i.test(pageText())) {
+            location.reload();
+            return;
+          }
           return result({ status: "failed", reason: "Unrecognized page", guesses: deps.guesses() });
       }
       await changed(before, 20_000);
