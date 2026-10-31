@@ -531,14 +531,17 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       },
     } as unknown as Gemini;
     const profile = emptyProfile();
-    const ask = async (options: string[]) =>
+    const ask = async (
+      options: string[],
+      label = "Which work term lengths are you available for? (select all that apply)",
+    ) =>
       (
         await mapFields(
           { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
           {
             fields: [
               field("l", {
-                label: "Which work term lengths are you available for? (select all that apply)",
+                label,
                 kind: "checkbox_group",
                 options,
                 multiple: true,
@@ -554,6 +557,10 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     profile.coop.acceptableTermLengths = ["All"];
     expect(await ask(["4 months", "8 months", "12 months"])).toBe("4 months, 8 months, 12 months");
     expect(await ask(["4 months", "Other"])).toBe("flag");
+    // Bare lengths, whatever the wording.
+    const kepler = ["4 months", "8 months", "12 months", "16 months"];
+    expect(await ask(kepler, "Please indicate your availability for the internship.")).toBe(kepler.join(", "));
+    expect(await ask(["4 months", "Other"], "Please indicate your availability.")).toBe("flag");
     profile.coop.acceptableTermLengths = ["4 months", "8 months"];
     expect(await ask(["4-month term", "8-month term", "12-month term"])).toBe("4-month term, 8-month term");
     // Asked for one: "Either" when two or more suit.

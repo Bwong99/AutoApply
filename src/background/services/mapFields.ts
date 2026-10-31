@@ -1096,7 +1096,13 @@ const monthsIn = (o: string) => Number(o.match(/\b(\d{1,2})[- ]?months?\b/i)?.[1
 function termLengthsDecision(f: FieldDescriptor, coop: Profile["coop"]): Decision | null {
   const lengths = coop.acceptableTermLengths.map((t) => t.trim()).filter(Boolean);
   if (!f.options || !lengths.length) return null;
-  if (!/\b(lengths?|durations?|how long|months?)\b/i.test(f.label) && (isMulti(f) || !/\bterms?\b/i.test(f.label)))
+  // Bare lengths ("4 months", "8 months") answer any wording: Kepler's "indicate your availability for the internship".
+  const bare = f.options.every((o) => /^\d{1,2}[- ]?months?$/i.test(o.trim()));
+  if (
+    !bare &&
+    !/\b(lengths?|durations?|how long|months?)\b/i.test(f.label) &&
+    (isMulti(f) || !/\bterms?\b/i.test(f.label))
+  )
     return null;
   const months = f.options.map(monthsIn);
   const any = lengths.some((t) => /^(all|any)$/i.test(t));
