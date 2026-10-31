@@ -184,16 +184,20 @@ test("fills again a field the page rejected, though it holds what we typed", asy
   await outcome(sw).toBe("submitted");
 });
 
-test("hands a CAPTCHA to the user instead of trying it", async ({ sw, page }) => {
+test("hands a CAPTCHA to the user instead of trying it, after a background tab", async ({ sw, page }) => {
+  test.setTimeout(120_000);
   await seed(sw, { caps: true });
   void page;
   await queue(sw, `${BASE}yolo-captcha.html`);
   await outcome(sw).toBe("needs");
   const [a] = await storage<Application[]>(sw, "applications");
   expect(a.reason).toBe("CAPTCHA");
+  // The hidden frame met the bot check: the site's later jobs start in a tab.
+  expect(await storage(sw, "yoloTabHosts")).toEqual(["localhost"]);
 });
 
 test("hands a DataDome CAPTCHA to the user instead of failing the hidden run", async ({ sw, page }) => {
+  test.setTimeout(120_000);
   await seed(sw, { caps: true });
   void page;
   await queue(sw, `${BASE}yolo-datadome-captcha.html`);

@@ -18,9 +18,13 @@ const RE_FLAGGED = /flagged as (possible )?spam|suspicious activity|recaptcha (v
 const RE_REFUSED =
   /already (exists|registered|in use|have an account)|account (with|for) this email|email (address )?is (already )?(taken|registered)|incorrect|invalid (email|password|credentials|username|login)|wrong (email|password|credentials)|account (might|may) be locked|not recognized/i;
 
-/** `hidden`: the run is in the hidden frame, where a Cloudflare check can't pass but a tab often does. */
+/**
+ * `hidden`: the run is in the hidden frame, where bot checks fail but a tab often passes them, or never shows them:
+ * the frame is a cross-site one (the site's own cookies set by script are dropped, and Cloudflare's checks can't run)
+ * in a document with no window or screen. Its bot checks are "blocked", for the tab retry.
+ */
 export function kindOf(f: PageFacts, hidden: boolean): StepKind {
-  if (f.captcha) return f.cloudflare && hidden ? "blocked" : "captcha";
+  if (f.captcha) return hidden ? "blocked" : "captcha";
   if (
     f.fields < 3 &&
     (RE_APPLIED.test(f.text) || /\/(thanks|thank-you|confirmation|success|submitted)\b/i.test(f.path))
@@ -28,7 +32,7 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
     return "success";
   if (f.text.length < 2000 && (RE_BLOCKED.test(f.text) || RE_BLOCKED.test(f.title))) return "blocked";
   if (f.fields < 2 && RE_CLOSED.test(f.text)) return "closed";
-  if (!f.fields && !f.onward && RE_FLAGGED.test(f.text)) return "flagged";
+  if (!f.fields && !f.onward && RE_FLAGGED.test(f.text)) return hidden ? "blocked" : "flagged";
   if (RE_VERIFY.test(f.text) && (f.codeInput || !f.passwords)) return "verify";
   if (!f.passwords && RE_FORGOT.test(f.headings)) return "verify";
   if (f.passwords >= 2) return RE_RESET.test(f.headings) ? "reset" : "signup";
@@ -41,9 +45,7 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
   // validation/refills and the dry-run stop still apply.
   if (
     f.applyKind === "link" ||
-    (f.applyKind === "entry" &&
-      !f.requiredFields &&
-      (f.fields < 3 || (!f.applyInForm && !f.onward)))
+    (f.applyKind === "entry" && !f.requiredFields && (f.fields < 3 || (!f.applyInForm && !f.onward)))
   )
     return "job";
   // A review step has nothing to fill, only the way on.

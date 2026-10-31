@@ -1,7 +1,7 @@
 // YOLO's driver: runs in the page a YOLO run loaded and takes it from posting to confirmation, one step at a time
 // (Apply → account → each form page → Submit). A step that loads a new document ends this script there; the new
 // page's driver asks the background where the run stands and carries on.
-import { CAPTCHA_WAIT_MS } from "../../shared/constants";
+import { CAPTCHA_SELF_CLEAR_MS, CAPTCHA_WAIT_MS } from "../../shared/constants";
 import { send, type StepKind, type YoloResult } from "../../shared/messages";
 import { collapse } from "../../shared/normalize";
 import type { Guess } from "../../shared/yolo";
@@ -122,8 +122,12 @@ export async function drive(deps: DriverDeps) {
         case "success":
           return result({ status: "submitted", doneUrl: location.href, guesses: deps.guesses() });
         case "captcha":
-          // Never solved by us. In a visible tab the user solves it and the run goes on.
-          if (!hello.visible) return needs("CAPTCHA");
+          // Never solved by us. In a visible tab the user solves it and the run goes on. In a background tab, a check
+          // that passes by itself (Cloudflare's "Verifying…") gets a moment first.
+          if (!hello.visible) {
+            if (await waitFor(() => !captchaShown(), CAPTCHA_SELF_CLEAR_MS)) continue;
+            return needs("CAPTCHA");
+          }
           // Everything else first, so the user only has the challenge left to do.
           if (facts.fields) await fill();
           await waitFor(() => !captchaShown(), CAPTCHA_WAIT_MS);
@@ -182,6 +186,8 @@ export async function drive(deps: DriverDeps) {
                 .map((g) => `${g.q} = ${g.a}`)
                 .join("\n")}`,
             );
+          // Invisible CAPTCHAs score the page as it submits: it gets its own built-ins back first (pageTimers.ts).
+          if (!next) busy(false);
           press(b);
           if (!(await changed(before, 20_000))) continue;
           const errors = validationErrors();

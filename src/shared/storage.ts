@@ -119,6 +119,8 @@ export const LOCAL_SCHEMAS = {
   yoloLogs: list(z.object({ at: z.number(), text: z.string() })),
   /** Job keys already looked at → when first seen. */
   yoloSeen: rec(z.number()),
+  /** Hosts whose bot checks stopped YOLO's hidden frame, latest last: their jobs start in a background tab. */
+  yoloTabHosts: list(z.string()),
   /** Company → its ATS board ("greenhouse:lyft"), "" when none was found (yolo/careers.ts). */
   employerBoards: rec(z.string()),
   /** Validators of each source URL's last response, for conditional requests. */

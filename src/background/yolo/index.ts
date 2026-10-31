@@ -59,6 +59,7 @@ export interface YoloDeps {
 let yolo: Yolo = defaultYolo();
 let deps: YoloDeps;
 
+const hostOf = (u: string) => new URL(u).hostname.replace(/^www\./, "");
 const startOfToday = () => new Date().setHours(0, 0, 0, 0);
 const submittedToday = (apps: Application[]) =>
   apps.filter((a) => a.mode === "yolo" && a.status === "submitted" && a.at >= startOfToday()).length;
@@ -190,7 +191,8 @@ async function pump() {
     const [item, ...rest] = inQueueOrder(queue, yolo);
     await store.set({ yoloQueue: rest });
     await setState({ pauseReason: "" });
-    await start(item, "apply", "frame");
+    const tab = yolo.tabFallback && (await store.get("yoloTabHosts")).includes(hostOf(applyUrl(item.url)));
+    await start(item, "apply", tab ? "tab" : "frame");
   } finally {
     pumping = false;
   }
@@ -454,7 +456,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   async YOLO_STEP({ facts, url, guesses }, sender) {
     const run = await getRun();
     if (!fromRun(run, sender)) return { kind: "unknown", stop: "Not running" };
-    const kind = kindOf(facts, run.host === "frame");
+    // Without the tab retry, a bot check in the frame is the user's, like anywhere else.
+    const kind = kindOf(facts, run.host === "frame" && yolo.tabFallback);
     const sig = signature(kind, facts);
     run.guesses = mergeGuesses(run.guesses, guesses);
     // The page reloads to retry a submission flagged as spam: its steps repeat from the start, only the flags count.
@@ -464,8 +467,11 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     if (kind === "success") run.confirmation = confirmation(facts);
     // Reached the employer's own posting from a board link: it may be one applied to through another source.
     let stop: string | undefined;
-    const host = (u: string) => new URL(u).hostname.replace(/^www\./, "");
-    if (!run.atsUrl && /^(form|signin|signup)$/.test(kind) && host(url) !== host(run.item.url)) {
+    if (kind === "blocked" && run.host === "frame") {
+      const hosts = (await store.get("yoloTabHosts")).filter((h) => h !== hostOf(url));
+      await store.set({ yoloTabHosts: [...hosts, hostOf(url)].slice(-200) });
+    }
+    if (!run.atsUrl && /^(form|signin|signup)$/.test(kind) && hostOf(url) !== hostOf(run.item.url)) {
       run.atsUrl = url;
       if (applied(await store.get("applications"), jobKey(url), run.item.alt, yolo.reapplyManual))
         stop = "Already applied through another link";

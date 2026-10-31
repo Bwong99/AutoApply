@@ -30,9 +30,8 @@ export interface PageFacts {
   fields: number;
   passwords: number;
   codeInput: boolean;
-  /** A visible CAPTCHA challenge, and whether it is Cloudflare's (which often passes on its own in a real tab). */
+  /** A visible CAPTCHA challenge. */
   captcha: boolean;
-  cloudflare: boolean;
   /** An ATS form in an iframe the run could load on its own. */
   embedded: boolean;
   apply: boolean;

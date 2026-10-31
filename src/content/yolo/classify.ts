@@ -90,7 +90,6 @@ const headings = () =>
 
 /** `fields`: how many fields the fill scan sees on the page. */
 export function pageFacts({ fields, requiredFields }: Pick<PageFacts, "fields" | "requiredFields">): PageFacts {
-  const c = challenge();
   const apply = findApply();
   const applyDetails = applyInfo(apply);
   return {
@@ -102,8 +101,7 @@ export function pageFacts({ fields, requiredFields }: Pick<PageFacts, "fields" |
     fields,
     passwords: visiblePasswords().length,
     codeInput: !!codeInput(),
-    captcha: !!c,
-    cloudflare: !!c && /cloudflare/.test(c.src),
+    captcha: captchaShown(),
     embedded: !!embeddedForm(),
     apply: applyDetails.kind !== "none",
     applyKind: applyDetails.kind,

@@ -38,6 +38,8 @@ describe("YOLO page kinds", () => {
       `<h2>We couldn't submit your application</h2><p>Your application submission was flagged as possible spam.</p>`,
     );
     expect(classify(0)).toBe("flagged");
+    // The hidden frame's score won't improve on a reload: the tab retry gets it.
+    expect(classify(0, true)).toBe("blocked");
   });
 
   it("quotes a confirmation page's message, else its headings", () => {
@@ -100,8 +102,9 @@ describe("YOLO page kinds", () => {
       toJSON() {},
     });
     expect(captchaShown()).toBe(true);
-    // Unlike Cloudflare, this challenge should be handed to the user instead of retried in a background tab.
-    expect(classify(0, true)).toBe("captcha");
+    // Its pass cookie, set by script, is dropped in the cross-site hidden frame: a tab may not even be shown it.
+    expect(classify(0, true)).toBe("blocked");
+    expect(classify(0, false)).toBe("captcha");
   });
 
   it("sees hCaptcha's challenge in its page-sized frame only while shown (Lever)", () => {
@@ -147,7 +150,9 @@ describe("YOLO page kinds", () => {
     });
     expect(embeddedForm()).toBeNull();
     expect(pageFacts({ fields: 0, requiredFields: 0 }).embedded).toBe(false);
-    setBody(`<iframe src="https://jobs.smartrecruiters.com/oneclick-ui/company/WesternDigital/publication/id"></iframe>`);
+    setBody(
+      `<iframe src="https://jobs.smartrecruiters.com/oneclick-ui/company/WesternDigital/publication/id"></iframe>`,
+    );
     const application = document.querySelector("iframe")!;
     application.getBoundingClientRect = f.getBoundingClientRect;
     expect(embeddedForm()).toBe("https://jobs.smartrecruiters.com/oneclick-ui/company/WesternDigital/publication/id");
@@ -181,13 +186,19 @@ describe("YOLO page kinds", () => {
     expect(classify(2)).toBe("job");
     // A job page can have several scan-visible filters/newsletter controls. Its specific CTA must still open the
     // application; a generic "Apply" at the end of a form does not get this exception.
-    setBody(`<input aria-label="Keywords"><input aria-label="Location"><input aria-label="Email"><select aria-label="Team"><option>All</option></select><button>Apply to this job</button>`);
+    setBody(
+      `<input aria-label="Keywords"><input aria-label="Location"><input aria-label="Email"><select aria-label="Team"><option>All</option></select><button>Apply to this job</button>`,
+    );
     expect(classify(4)).toBe("job");
     // A form action with the same wording must stay a form: its required fields need the normal fill, validation,
     // and (in test builds) dry-run path rather than a navigation click.
-    setBody(`<form><input required><input required><input required><button type="submit">Apply to this job</button></form>`);
+    setBody(
+      `<form><input required><input required><input required><button type="submit">Apply to this job</button></form>`,
+    );
     expect(classify(3, false, 3)).toBe("form");
-    setBody(`<input aria-required="true"><input aria-required="true"><input aria-required="true"><button type="button">Apply to this job</button>`);
+    setBody(
+      `<input aria-required="true"><input aria-required="true"><input aria-required="true"><button type="button">Apply to this job</button>`,
+    );
     expect(classify(3, false, 3)).toBe("form");
     // A page-wide form (ASP.NET) makes the posting's own Apply a native submit.
     setBody(

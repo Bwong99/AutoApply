@@ -13,4 +13,6 @@ test("page scroll calls are blocked only while locked", async () => {
   document.dispatchEvent(new Event("autoapply-scroll-unlock"));
   el.scrollIntoView();
   expect(spy).toHaveBeenCalledOnce();
+  // Unlocked, the page has its own functions back (bot checks look for patched ones).
+  expect(Element.prototype.scrollIntoView).toBe(spy);
 });
