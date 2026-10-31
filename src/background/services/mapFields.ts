@@ -1728,6 +1728,7 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
   if (!school && /\b(master|ph\.?\s?d|doctora|mba)/i.test(f.label)) return null;
   const [year, month] = date.split("-").map(Number);
   if (!f.options) return school || !month ? null : graduationText(f, year, month);
+  if (f.options.some((o) => /^yes\W*$/i.test(o.trim()))) return school ? null : graduatingSoonDecision(f, year, month);
   const hits = f.options.flatMap((o, i) => {
     if (!new RegExp(`\\b${year}\\b`).test(o)) return [];
     const names = MONTHS.filter((m) => new RegExp(`\\b${m}`, "i").test(o));
@@ -1744,6 +1745,37 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
     intendedAnswer: f.options[i],
     confidence: "high",
     sources: [school ? "highSchool" : "education"],
+  };
+}
+
+/**
+ * "Are you graduating in the next 6-12 months or recently graduated?" (Yes/No), against the graduation month: HeyGen's
+ * got "Yes" for a May 2028 graduate in October 2026. Also "graduating in 2027?" and "graduated by June 2027?".
+ */
+function graduatingSoonDecision(f: FieldDescriptor, year: number, month = 12): Decision | null {
+  const [ty, tm] = todayIso().split("-").map(Number);
+  const away = (year - ty) * 12 + month - tm;
+  const win = /\b(?:next|within(?: the next)?)\s+(\d+)(?:\s*(?:-|–|to)\s*(\d+))?\s*(month|year)s?\b/i.exec(f.label);
+  const by = /\bby (?:([a-z]{3,9})\.? )?(\d{4})\b/i.exec(f.label);
+  const inYear = /\bin (\d{4})\b/.exec(f.label);
+  let yes: boolean;
+  if (win) yes = away >= 0 && away <= Number(win[2] ?? win[1]) * (/year/i.test(win[3]) ? 12 : 1);
+  else if (/\b(next|this) year\b/i.test(f.label)) yes = away >= 0 && year <= ty + (/next/i.test(f.label) ? 1 : 0);
+  else if (by) {
+    const m = by[1] ? MONTHS.indexOf(by[1].slice(0, 3).toLowerCase()) + 1 : 12;
+    if (!m) return null;
+    yes = year * 12 + month <= Number(by[2]) * 12 + m;
+  } else if (inYear) yes = Number(inYear[1]) === year;
+  else return null;
+  const i = f.options!.findIndex((o) => (yes ? /^yes\W*$/i : /^no\W*$/i).test(o.trim()));
+  if (i < 0) return null;
+  return {
+    fieldId: f.id,
+    action: "fill",
+    optionIndexes: [i],
+    intendedAnswer: f.options![i],
+    confidence: "high",
+    sources: ["education"],
   };
 }
 

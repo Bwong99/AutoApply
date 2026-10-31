@@ -1206,6 +1206,43 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     ]);
   });
 
+  it("answers yes/no graduation-timing questions from the graduation month", async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const [y, m] = todayIso().split("-").map(Number);
+    const grad = new Date(Date.UTC(y, m - 1 + 18)); // 18 months away
+    const gy = grad.getUTCFullYear();
+    const profile = emptyProfile();
+    profile.education = [
+      {
+        ...profile.education[0],
+        school: "UBC",
+        expectedGraduation: `${gy}-${String(grad.getUTCMonth() + 1).padStart(2, "0")}`,
+      },
+    ];
+    const yn = (id: string, label: string) => field(id, { label, kind: "radio_group", options: ["Yes", "No"] });
+    const r = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      {
+        fields: [
+          yn("a", "Are you a graduating Senior in the next 6-12 months or recently graduated?"),
+          yn("b", "Will you graduate within the next 2 years?"),
+          yn("c", `Are you graduating in ${gy}?`),
+          yn("d", `Will you have graduated by June ${gy - 1}?`),
+          yn("e", "Have you graduated?"),
+        ],
+        profile,
+        documents: [],
+        job: null,
+      },
+    );
+    expect(r.decisions.map((d) => d.intendedAnswer ?? d.action)).toEqual(["No", "Yes", "Yes", "No", "flag"]);
+  });
+
   it("picks the company's site for how they heard when the profile says company website", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
