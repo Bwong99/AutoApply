@@ -57,6 +57,10 @@ describe("YOLO page kinds", () => {
     expect(classify(0)).toBe("verify");
     setBody(`<h2>Forgot your password?</h2><input type="email"><button>Submit</button>`);
     expect(classify(1)).toBe("verify");
+    // Workday's sign-in refusing an unverified account.
+    setBody(`<h2>Sign In</h2><div role="alert">Verify your account before you sign in or request a verification email.</div>
+      <input type="email" value="a@b.c"><input type="password"><button>Sign In</button>`);
+    expect(classify(1)).toBe("verify");
   });
 
   it("finds a visible CAPTCHA challenge, never the invisible score badge", () => {
