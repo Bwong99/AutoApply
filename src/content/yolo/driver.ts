@@ -205,11 +205,9 @@ export async function drive(deps: DriverDeps) {
           continue;
         }
         default:
-          // Still rendering, or a page we don't know: give it a moment, then give up.
-          if (i < 3) {
-            await sleep(2000);
-            continue;
-          }
+          // Still rendering (Oracle's next section takes several seconds), or a page we don't know: give up only once
+          // it stops changing.
+          if (await changed(before, 15_000)) continue;
           return result({ status: "failed", reason: "Unrecognized page", guesses: deps.guesses() });
       }
       await changed(before, 20_000);
