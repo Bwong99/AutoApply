@@ -1625,6 +1625,11 @@ describe("mapFields chunking and splitting (§10.7)", () => {
             kind: "select",
             options: ["0", "1", "2-3", "4+"],
           }),
+          field("w", {
+            label: "How many previous work-term experiences have you had? [Co-op / Internships only]",
+            kind: "select",
+            options: ["0", "1", "2", "3", "4+"],
+          }),
           field("c", { label: "Name pronounciation", required: true }),
           field("d", { label: "How do you pronounce your name?" }),
           field("e", { label: "Please write out how your name is pronounced phonetically." }),
@@ -1637,6 +1642,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(r.decisions.map((d) => d.intendedAnswer ?? d.text ?? d.action)).toEqual([
       "2",
       "2-3",
+      "2",
       "flag",
       "skip",
       "skip",

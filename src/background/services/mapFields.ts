@@ -985,10 +985,10 @@ function skillsDecision(f: FieldDescriptor, profile: Profile): Decision | null {
 
 /**
  * "How many prior internships have you had?" counted from the profile's internship and co-op roles: Harvey and Notion
- * got "1" for two.
+ * got "1" for two, and Manulife's "How many previous work-term experiences have you had?" a guessed "1".
  */
 function internshipsDecision(f: FieldDescriptor, experience: Profile["experience"]): Decision | null {
-  if (!/\bhow many\b[^?]*\b(internships?|co-?ops?)\b/i.test(f.label) || isMulti(f)) return null;
+  if (!/\bhow many\b[^?]*\b(internships?|co-?ops?|work[- ]terms?)\b/i.test(f.label) || isMulti(f)) return null;
   const n = experience.filter((e) => /\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`)).length;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["experience"] };
   if (!f.options) return f.kind === "text" || f.kind === "number" ? { ...base, text: String(n) } : null;
