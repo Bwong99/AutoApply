@@ -26,6 +26,10 @@ describe("YOLO page kinds", () => {
       `<h2>Sign in</h2><input type="email"><button>Continue</button><p>First time here?</p><button>Create an account</button>`,
     );
     expect(classify(1)).toBe("signin");
+    // Workday's sign-up still rendering: no fields yet under its "Create Account/Sign In" step.
+    setBody(`<h2 data-automation-id="progressBarActiveStep">Create Account/Sign In</h2><p>Create Account</p>`);
+    expect(classify(0)).toBe("unknown");
+    expect(classify(1)).not.toBe("signin");
   });
 
   it("knows confirmation, closed and bot-wall pages", () => {
