@@ -708,3 +708,22 @@ describe("place typeaheads", () => {
     expect(r).toMatchObject({ outcome: "ok", shown: "Canada" });
   }, 15000);
 });
+
+describe("typeText", () => {
+  it("follows focus onward to a popup's box, never back to an earlier field", async () => {
+    const { typeText } = await import("../../src/content/fill/events");
+    setBody(`<input id="prev"><input id="cur"><input id="popup">`);
+    const [prev, cur, popup] = ["prev", "cur", "popup"].map((id) => document.getElementById(id) as HTMLInputElement);
+    cur.focus();
+    // A page handing focus back to an earlier field mid-word (Eightfold's selects in the hidden frame).
+    cur.addEventListener("input", () => prev.focus(), { once: true });
+    await typeText(cur, "Asian", 0);
+    expect([prev.value, cur.value]).toEqual(["", "Asian"]);
+    cur.value = "";
+    cur.focus();
+    // select2 3.x moves focus, with the first key, to its list's search box.
+    cur.addEventListener("input", () => popup.focus(), { once: true });
+    await typeText(cur, "UBC", 0);
+    expect([cur.value, popup.value]).toEqual(["U", "BC"]);
+  });
+});

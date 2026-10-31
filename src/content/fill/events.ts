@@ -242,9 +242,13 @@ export async function typeText(el: HTMLInputElement | HTMLTextAreaElement, text:
   for (const ch of text) {
     const now = follow ? activeDeep() : el;
     if (
+      now &&
       now !== el &&
       (now instanceof HTMLTextAreaElement ||
-        (now instanceof HTMLInputElement && /^(text|search|email|tel|url)$/.test(now.type)))
+        (now instanceof HTMLInputElement && /^(text|search|email|tel|url)$/.test(now.type))) &&
+      // Only onward, to a popup's search box: a page handing focus back to an earlier field late (Eightfold's selects,
+      // in the hidden frame's slow timers) got the rest of the word ("Asian" → "A" here, "sian" in Pronouns).
+      el.compareDocumentPosition(now) & Node.DOCUMENT_POSITION_FOLLOWING
     ) {
       el = now;
       prefix = el.value;
