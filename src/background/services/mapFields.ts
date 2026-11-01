@@ -889,6 +889,8 @@ function obtainedEducationDecision(f: FieldDescriptor, profile: Profile): Decisi
   )
     return null;
   if (!done.test(f.label) || /\b(pursu\w*|enrolled|in progress|working (toward|on))\b/i.test(f.label)) return null;
+  // An education entry's "Highest Degree Achieved" (Westinghouse's, beside its school) is that entry's degree.
+  if (RE_ENTRY_SECTION.test(f.section ?? "")) return null;
   if (!profile.highSchool.graduationYear) return null;
   const today = todayIso().slice(0, 7);
   const finished = profile.education.some(
