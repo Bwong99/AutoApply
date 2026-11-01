@@ -2437,6 +2437,10 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           field("c", { label: "Expected compensation", kind: "number" }),
           field("d", { label: "Current salary" }),
           field("e", { label: "Desired salary", kind: "select", options: ["Under $90k", "$90k+"] }),
+          field("f", {
+            label: "Salary Requirements",
+            hint: 'The form said: "Salary Requirements: Input should be numeric"',
+          }),
         ],
         profile,
         documents: [],
@@ -2450,6 +2454,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "100000",
       "flag",
       "flag",
+      "100000",
     ]);
     // The model sees the pay to answer for this job, not the rule.
     expect(asked[0]).toContain('"amount":"100000"');
