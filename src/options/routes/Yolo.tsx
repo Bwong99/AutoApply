@@ -192,7 +192,7 @@ export function Yolo() {
   const urls = (v: string[]) => v.filter((u) => /^https?:\/\//i.test(u));
   return (
     <section class="yolo">
-      <h1>YOLO mode</h1>
+      <h1>YOLO Mode</h1>
       <p class="intro">
         While on, AutoApply checks your searches on a timer and applies to new matching jobs by itself: it creates site
         accounts when needed, fills every field (with its best guess where your profile has no answer), and submits. It
