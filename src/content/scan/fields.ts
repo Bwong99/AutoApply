@@ -205,7 +205,20 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
             precedingText(container, el, [...memberLabels, labelElementFor(el) ?? el])) ||
       labelAbove(u, container, owner, collected.order) ||
       fallbackLabel(u.searchInput ?? el);
-    const label = finishLabel(rawLabel);
+    let label = finishLabel(rawLabel);
+    // Jobvite keeps each attachment's file box in its own menu dialog, named only "File" ("Dropbox · File · Type or
+    // Paste Resume"): the document it offers to paste names it, and the menu's opener ("Add Resume") is no question.
+    const menu =
+      u.kind === "file" && /^(file|upload|browse|choose( a)? file)$/i.test(label) && el.closest("[role=dialog]");
+    const doc = menu && /\b(resume|cv|cover letter|transcript)\b/i.exec(menu.textContent ?? "")?.[0];
+    if (doc) label = doc;
+    if (
+      u.kind === "dropdown" &&
+      el.hasAttribute("aria-haspopup") &&
+      /^(add|attach|upload)\b.*\b(resume|cv|cover letter|attachment|file|document)s?$/i.test(label) &&
+      document.querySelector("[role=dialog] input[type=file]")
+    )
+      continue;
     const nameId = `${el.getAttribute("name") ?? ""} ${el.id} ${el.getAttribute("data-automation-id") ?? ""}`;
     if (RE_SKIP_LABEL.test(label) || RE_SKIP_LABEL.test(nameId)) continue;
     if (excludedContext(el, label, mainForm)) continue;

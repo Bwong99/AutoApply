@@ -184,6 +184,18 @@ describe("grouping (§11.5)", () => {
     expect(fields().map((h) => [h.desc.kind, h.desc.options])).toEqual([["radio_group", ["YES", "NO"]]]);
   });
 
+  it("names a file box in an attachment menu by the document it offers, not its opener (Jobvite)", () => {
+    const menu = (i: number, doc: string) =>
+      `<div role="dialog" aria-label="Attachment Options"><span role="button">Dropbox</span><label for="file-input-${i}">File</label><input id="file-input-${i}" type="file"><span role="button">Type or Paste ${doc}</span></div>`;
+    setBody(
+      `<h3 id="rh">Add Resume*</h3><button type="button" aria-haspopup="true" aria-expanded="false" aria-labelledby="rh" aria-required="true">Select</button>${menu(0, "Resume")}${menu(1, "Cover Letter")}`,
+    );
+    expect(fields().map((h) => [h.desc.kind, h.desc.label])).toEqual([
+      ["file", "Resume"],
+      ["file", "Cover Letter"],
+    ]);
+  });
+
   it("readonly radios named apart in one radiogroup make one question (Eightfold)", () => {
     const opt = (i: number, v: string) =>
       `<div><input type="radio" id="c${i}" name="consent-choice-${i}" readonly value="${v}"><label for="c${i}">${v}</label></div>`;
