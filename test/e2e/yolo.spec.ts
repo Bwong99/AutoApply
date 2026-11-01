@@ -1,6 +1,7 @@
 // YOLO mode end to end in the built extension: a queued job applied to in the hidden host, with the Gemini mock.
 import type { Worker } from "@playwright/test";
 import type { Application } from "../../src/shared/yolo";
+import { EXPERIENCE } from "../mockGemini";
 import { BASE, expect, fillPage, PROFILE, seed, storage, test, waitDone } from "./extension";
 
 const queue = (sw: Worker, url: string, yolo: Record<string, unknown> = {}) =>
@@ -182,6 +183,59 @@ test("fills again a field the page rejected, though it holds what we typed", asy
   void page;
   await queue(sw, `${BASE}yolo-rejected-place.html`);
   await outcome(sw).toBe("submitted");
+});
+
+test("replaces the work entries a site's résumé parser wrote with the profile's", async ({ sw, page }) => {
+  test.setTimeout(120_000);
+  await seed(sw, { caps: true, settings: { debugLogging: true }, profile: { ...PROFILE, experience: EXPERIENCE } });
+  void page;
+  await queue(sw, `${BASE}yolo-parsed-entries.html`);
+  await outcome(sw).toBe("submitted");
+  const text = (await storage<{ text: string }[]>(sw, "yoloLogs")).at(-1)!.text;
+  for (const want of ["Analytical Engines Ltd", "Software Engineer Intern", "Built analytics tooling.", "2026-01-01"])
+    expect(text).toContain(`= ${want} [`);
+  for (const want of ["Babbage & Co", "IT Technician Intern", "Kept the lab running.", "2023-06-01", "2023-08-01"])
+    expect(text).toContain(`= ${want} [`);
+  // The project listed as a job, and the third entry for a profile with two, are gone; no parsed value is kept.
+  for (const parsed of [
+    "Difference Engine",
+    "Title Unknown",
+    "A side project.",
+    "Built tools.",
+    "Fixed things.",
+    "2026-04-01",
+  ])
+    expect(text).not.toContain(parsed);
+  expect(text).not.toContain("[prefilled]");
+});
+
+test("refills a site's fixed work slots from the profile and empties the one past it", async ({ sw, page }) => {
+  test.setTimeout(120_000);
+  await seed(sw, { caps: true, settings: { debugLogging: true }, profile: { ...PROFILE, experience: EXPERIENCE } });
+  void page;
+  await queue(sw, `${BASE}yolo-parsed-slots.html`);
+  await outcome(sw).toBe("submitted");
+  const text = (await storage<{ text: string }[]>(sw, "yoloLogs")).at(-1)!.text;
+  const rows = text
+    .split("\n")
+    .map((l) => l.trim().replace(/ \[\w+\]$/, ""))
+    .filter((l) => /^(Employer|Title|Start Date Month|Start Date Year) = /.test(l));
+  expect(rows.sort()).toEqual(
+    [
+      "Employer = Analytical Engines Ltd",
+      "Title = Software Engineer Intern",
+      "Start Date Month = Jan",
+      "Start Date Year = 2026",
+      "Employer = Babbage & Co",
+      "Title = IT Technician Intern",
+      "Start Date Month = Jun",
+      "Start Date Year = 2023",
+      "Employer = (blank)",
+      "Title = (blank)",
+      "Start Date Month = (blank)",
+      "Start Date Year = (blank)",
+    ].sort(),
+  );
 });
 
 test("hands a CAPTCHA to the user instead of trying it, after a background tab", async ({ sw, page }) => {

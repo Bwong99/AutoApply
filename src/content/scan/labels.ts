@@ -83,6 +83,7 @@ function ownName(el: HTMLElement): string {
   if (nameFromContent && !el.getAttribute("aria-label") && !el.getAttribute("title")) return "";
   try {
     const name = collapse(computeAccessibleName(el));
+    if (unseenPlaceholder(el) && name === collapse(el.getAttribute("placeholder") ?? "")) return "";
     // Workday's questionnaire triggers name only their value: aria-label " Select One Required" on "Select One".
     return nameFromContent && name.replace(/\s*\b(required|optional)$/i, "") === textOf(el) ? "" : name;
   } catch {
@@ -141,10 +142,32 @@ export function precedingText(container: Element, control: Element, skip: Elemen
   return label || text.slice(-300).replace(/^\S*\s/, "");
 }
 
+/**
+ * A date box draws its own "mm/dd/yyyy", never its placeholder: Breezy's start and end dates both carry "Company".
+ */
+export const unseenPlaceholder = (el: Element) =>
+  el instanceof HTMLInputElement && /^(date|month|week|time|datetime-local)$/.test(el.type);
+
+const CONTROLS = "input:not([type=hidden]),select,textarea,button";
+
+/** Text since the previous control, beside a box (Breezy's "Start date" / "End date" spans). */
+function textBefore(el: Element): string {
+  const parts: string[] = [];
+  for (
+    let n = el.previousElementSibling;
+    n && !n.matches(CONTROLS) && !n.querySelector(CONTROLS);
+    n = n.previousElementSibling
+  )
+    parts.unshift(textOf(n));
+  return collapse(parts.join(" "));
+}
+
 /** Step 6. */
 export function fallbackLabel(el: HTMLElement): string {
-  const ph = el.getAttribute("placeholder") || el.getAttribute("aria-placeholder");
-  if (ph) return collapse(ph);
+  const shown = unseenPlaceholder(el)
+    ? textBefore(el)
+    : el.getAttribute("placeholder") || el.getAttribute("aria-placeholder");
+  if (shown) return collapse(shown);
   const title = el.getAttribute("title");
   if (title) return collapse(title);
   const name = el.getAttribute("name") || el.id;

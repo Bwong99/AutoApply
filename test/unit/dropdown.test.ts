@@ -408,6 +408,26 @@ describe("text fills", () => {
       shown: "08/2026",
     });
   });
+
+  it("gives a date in numbers to a widget that misreads a month's name (SmartRecruiters)", async () => {
+    setBody(`<label>From <input id="from" placeholder="Pick a date"></label>`);
+    const input = document.querySelector("input")!;
+    // Its month-year picker reads "1/2026" or "2026-01" as January 2026, and any month's name as August 2027.
+    const read = () => {
+      const v = input.value;
+      if (!v) return;
+      const num = /^(\d{1,2})\/(\d{4})$/.exec(v);
+      const iso = /^(\d{4})-(\d{2})$/.exec(v);
+      input.value = num ? `${num[1].padStart(2, "0")}/${num[2]}` : iso ? `${iso[2]}/${iso[1]}` : "08/2027";
+    };
+    input.addEventListener("change", read);
+    input.addEventListener("blur", read);
+    const h = scan(newScanState()).handles[0];
+    expect(await fill(h, { type: "text", value: "January 2026" }, deps())).toMatchObject({
+      outcome: "ok",
+      shown: "01/2026",
+    });
+  });
 });
 
 describe("dates split into Month / Day / Year boxes (Workday)", () => {

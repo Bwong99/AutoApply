@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Candidate Profile – Software Engineer Intern</title>
+  </head>
+  <body>
+    <h1>Candidate Profile</h1>
+    <!-- iCIMS: the profile after its résumé parser ran, with fixed experience slots and no Delete. The parser put a club
+         first, cut the job's employer short and filled a third slot the profile doesn't have. -->
+    <form
+      id="f"
+      onsubmit="
+        event.preventDefault();
+        location.href = 'yolo-thanks.html';
+      "
+    >
+      <p><label for="fn">First Name *</label> <input id="fn" required /></p>
+      <h2>Professional Experience</h2>
+      <div id="slots"></div>
+      <button type="submit">Submit profile</button>
+    </form>
+    <script>
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const slots = [
+        ["Coding Society", "Co-founder", "Sep", "2022"],
+        ["Babbage", "IT Technician", "Jun", "2023"],
+        ["", "Game Dev Programmer", "Sep", "2024"],
+      ];
+      document.getElementById("slots").innerHTML = slots
+        .map(
+          ([employer, title, month, year], i) => `<div>
+            <p><label for="e${i}">Employer</label> <input id="e${i}" value="${employer}" /></p>
+            <p><label for="t${i}">Title</label> <input id="t${i}" value="${title}" /></p>
+            <p><label for="m${i}">Start Date Month</label>
+              <select id="m${i}"><option value=""></option>${months
+                .map((m) => `<option${m === month ? " selected" : ""}>${m}</option>`)
+                .join("")}</select></p>
+            <p><label for="y${i}">Start Date Year</label> <input id="y${i}" value="${year}" /></p>
+          </div>`,
+        )
+        .join("");
+    </script>
+  </body>
+</html>

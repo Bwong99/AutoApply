@@ -9,6 +9,7 @@ import { fillDropdown, harvestOptions, searchOptions } from "./dropdown";
 import { holdScroll, sleep, waitFor } from "./events";
 import { compatibleDoc, fillFile } from "./file";
 import {
+  clearValue,
   fillCheckbox,
   fillCheckboxGroup,
   fillContentEditable,
@@ -26,7 +27,9 @@ export type FillOp =
   | { type: "options"; texts: string[] }
   | { type: "intended"; answer: string; query?: string }
   | { type: "checked"; value: boolean }
-  | { type: "file"; documentId: string };
+  | { type: "file"; documentId: string }
+  /** Empties a text box or native select. */
+  | { type: "clear" };
 
 export interface EngineDeps {
   documents: DocumentMeta[];
@@ -122,6 +125,7 @@ async function dispatch(h: FieldHandle, op: FillOp, deps: EngineDeps): Promise<F
 
 async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promise<FillResult> {
   const kind = h.desc.kind;
+  if (op.type === "clear") return clearValue(h);
   switch (kind) {
     case "text":
     case "email":

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Apply – Software Engineer Intern</title>
+  </head>
+  <body>
+    <h1>Software Engineer Intern</h1>
+    <!-- Breezy: uploading the résumé runs its parser, which lists a project as a job and gets a job's dates wrong.
+         Entries are named only by placeholders (dates by an unseen "Company"), each with a Delete link. -->
+    <form
+      id="f"
+      onsubmit="
+        event.preventDefault();
+        location.href = 'yolo-thanks.html';
+      "
+    >
+      <p>
+        <label for="resume">Resume *</label>
+        <input id="resume" type="file" required />
+      </p>
+      <p><label for="fn">First name *</label> <input id="fn" required /></p>
+      <div class="section">
+        <h2>Experience</h2>
+        <h3>Work History</h3>
+        <ul id="work"></ul>
+        <a href="" id="add">Add Position</a>
+      </div>
+      <button type="submit">Submit application</button>
+    </form>
+    <script>
+      const work = document.getElementById("work");
+      const entry = (company, title, summary, start, end) => {
+        const li = document.createElement("li");
+        li.innerHTML =
+          `<input placeholder="Company" type="text"><input placeholder="Title" type="text">` +
+          `<textarea placeholder="Summary"></textarea>` +
+          `<span>Start date</span><input placeholder="Company" type="date">` +
+          `<span>End date</span><input placeholder="Company" type="date">` +
+          `<a href="" class="del">Delete</a>`;
+        const [c, t, s, a, b] = li.querySelectorAll("input,textarea");
+        [c.value, t.value, s.value, a.value, b.value] = [company, title, summary, start, end];
+        li.querySelector(".del").addEventListener("click", (e) => {
+          e.preventDefault();
+          li.remove();
+        });
+        work.append(li);
+      };
+      document.getElementById("add").addEventListener("click", (e) => {
+        e.preventDefault();
+        entry("", "", "", "", "");
+      });
+      // Parsed while the rest of the form fills (timers crawl in the hidden frame).
+      document.getElementById("resume").addEventListener("change", () =>
+        Promise.resolve().then(() => {
+          entry("Difference Engine (Python)", "Title Unknown", "A side project.", "2026-08-01", "2026-08-01");
+          entry("Analytical Engines Ltd", "Software Engineer Intern", "Built tools.", "2026-04-01", "2026-04-01");
+          entry("Babbage & Co", "IT Technician Intern", "Fixed things.", "2023-06-01", "2023-08-01");
+        }),
+      );
+    </script>
+  </body>
+</html>

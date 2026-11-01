@@ -4,7 +4,7 @@ import type { FieldHandle } from "../scan/fields";
 import { datePart } from "../scan/groups";
 import { labelElementFor } from "../scan/labels";
 import { isVisible } from "../scan/visibility";
-import { nativeOptions } from "../scan/widgets";
+import { isPlaceholderOption, nativeOptions } from "../scan/widgets";
 import { blur, dispatching, focus, realClick, setNativeValue, sleep, typeText } from "./events";
 import { isOn, readValue, sameValue } from "./verify";
 
@@ -117,6 +117,16 @@ export async function fillText(h: FieldHandle, raw: string): Promise<FillResult>
   blur(el);
   await sleep(0);
   if (sameValue(value, el.value, h.desc.kind === "tel" ? "digits" : "alnum")) return ok(el.value);
+  // A date widget that misreads a month's name takes it in numbers (SmartRecruiters: "January 2026" → "08/2027").
+  const p = parseDate(value);
+  if (p && parseDate(el.value))
+    for (const v of [p.d ? `${pad(p.m)}/${pad(p.d)}/${p.y}` : `${pad(p.m)}/${p.y}`, `${p.y}-${pad(p.m)}`]) {
+      focus(el);
+      setNativeValue(el, v);
+      blur(el);
+      await sleep(0);
+      if (sameDate(v, el.value)) return ok(el.value);
+    }
   if (isDateField(el)) return { outcome: "flag", note: `Pick the date manually: ${value}` };
   return el.value
     ? { outcome: "mismatch", note: `Expected "${value}", shows "${el.value}"` }
@@ -141,6 +151,24 @@ export async function fillContentEditable(h: FieldHandle, text: string): Promise
   return sameValue(text, el.innerText ?? el.textContent ?? "")
     ? ok(text)
     : { outcome: "failed", note: "Editor rejected the text" };
+}
+
+/** Empties a text box, or picks a native select's prompt option ("Month" left at "", iCIMS). */
+export async function clearValue(h: FieldHandle): Promise<FillResult> {
+  const el = h.el;
+  if (el instanceof HTMLSelectElement) {
+    const i = [...el.options].findIndex((o, k) => isPlaceholderOption(o, k));
+    if (el.multiple || i < 0) return { outcome: "flag", note: "No empty option" };
+    dispatching(() => {
+      el.selectedIndex = i;
+      el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    return ok("");
+  }
+  if (h.sections || !(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement))
+    return { outcome: "flag", note: "Clear it manually" };
+  return fillText(h, "");
 }
 
 // ---------- choices ----------

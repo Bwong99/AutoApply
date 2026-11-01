@@ -8,6 +8,7 @@ import {
   RE_APPLIED,
   RE_CONSENT,
   RE_COVER_LETTER,
+  RE_ENTRY_SECTION,
   RE_OPTIONAL_CONSENT,
   RE_RESUME_ONLY,
 } from "../shared/constants";
@@ -31,7 +32,7 @@ import { harvestOptions } from "./fill/dropdown";
 import { fill, serial, type FillOp } from "./fill/engine";
 import { isFilling, sleep, waitFor } from "./fill/events";
 import { findDropzones } from "./fill/file";
-import { addEntries, expandSections, saveEntries } from "./fill/sections";
+import { addEntries, expandSections, resumeEntries, saveEntries, trimEntries, type EntryKind } from "./fill/sections";
 import { readValue } from "./fill/verify";
 import {
   consentPair,
@@ -49,7 +50,7 @@ import { createOverlay, type Overlay } from "./ui/overlay";
 import { claimFrame, relayClicksToTop } from "./ui/root";
 import { nextMidnightPacific } from "../shared/time";
 import type { Guess } from "../shared/yolo";
-import { isVisible } from "./scan/visibility";
+import { composedContains, isVisible } from "./scan/visibility";
 import { RE_SIGNUP_BOX } from "./yolo/classify";
 import { drive, type FillReport } from "./yolo/driver";
 import { DRIVER_FRAME, endTransitions, IN_HOST, throttled } from "./yolo/frame";
@@ -388,7 +389,80 @@ function rescan(): FieldHandle[] {
     if (old) states.set(h.id, states.get(old.id)!);
     handles.set(h.id, h);
   }
+  if (yolo) markEntries(all);
   return all;
+}
+
+// ---------- résumé entries a site's parser wrote (YOLO) ----------
+/** Entries ("experience 2") that held values before we filled them. */
+const parsedEntries = new Set<string>();
+/** Each field's work or education entry, by field id. */
+const entryOf = new Map<string, { kind: EntryKind; n: number }>();
+
+/**
+ * A numbered work or education section ("Professional Experience 3"), or a lone one; `own`: only one the page itself
+ * numbers as an entry ("Work Experience 2", iCIMS's "Experience (2)").
+ */
+function sectionEntry(section = "", own = false): { kind: EntryKind; n: number } | null {
+  const s = section.replace(/\s*\((\d+)\)$/, " $1");
+  if (own && !RE_ENTRY_SECTION.test(s)) return null;
+  const [, base, n] = /^(.*?)(?: (\d+))?$/.exec(s)!;
+  const kind: EntryKind | null = /education/i.test(base)
+    ? "education"
+    : /^(?!.*volunteer).*(experience|employment|work history)/i.test(base)
+      ? "experience"
+      : null;
+  return kind && (n || RE_ENTRY_SECTION.test(s)) ? { kind, n: Number(n) || 1 } : null;
+}
+
+/**
+ * A work or education entry holding values before we filled it was written by the site's résumé parser (Breezy,
+ * iCIMS, Avature: projects as employers, titles and companies mismatched, wrong dates), not by the candidate, who
+ * never types into a YOLO page. Its fields are answered from the profile entry of its place ("Work Experience 2"),
+ * without the parser's values, never kept as prefilled.
+ */
+function markEntries(hs: FieldHandle[]) {
+  const boxes = resumeEntries();
+  for (const h of hs) {
+    // The page's own entry headings first: Workday's "Education 1" and iCIMS's "Experience (1)" have no Delete.
+    const e =
+      sectionEntry(h.desc.section, true) ??
+      boxes.find((b) => composedContains(b.box, h.el)) ??
+      sectionEntry(h.desc.section);
+    if (!e) {
+      entryOf.delete(h.id);
+      continue;
+    }
+    entryOf.set(h.id, { kind: e.kind, n: e.n });
+    if (h.prefilled && !states.has(h.id)) parsedEntries.add(`${e.kind} ${e.n}`);
+  }
+  for (const h of hs) {
+    const e = parsedEntry(h);
+    if (!e) continue;
+    h.desc.section = `${e.kind === "education" ? "Education" : "Work Experience"} ${e.n}`;
+    if (states.has(h.id)) continue;
+    h.prefilled = false;
+    delete h.desc.currentValue;
+  }
+}
+
+function parsedEntry(h: FieldHandle) {
+  const e = entryOf.get(h.id);
+  return e && parsedEntries.has(`${e.kind} ${e.n}`) ? e : undefined;
+}
+
+/** Ours: an entry holding a field we filled. */
+const oursIn = (box: Element) =>
+  [...applied.keys()].some((id) => {
+    const h = handles.get(id);
+    return !!h && composedContains(box, h.el);
+  });
+
+/** What a parser left in an entry field the profile has nothing for is emptied, not kept. */
+function skipOrClear(h: FieldHandle, ctrl: AbortController, jobs: Promise<void>[]) {
+  if (parsedEntry(h) && !h.sections && /^(text|textarea|date|month|number|select)$/.test(h.desc.kind) && readValue(h))
+    jobs.push(doFill(h, { type: "clear" }, "skipped", "Not in your Profile", ctrl));
+  else setStatus(h, "skipped");
 }
 
 /**
@@ -582,6 +656,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
     report(); // running: the top frame waits for us while we reveal
     if (!TOP && !IN_HOST && rescan().length) await revealFrame();
     await expandSections(ctrl.signal);
+    if (yolo) await trimEntries(config.entryCounts, oursIn, ctrl.signal);
     unsaved.push(...(await addEntries(config.entryCounts, ctrl.signal)));
     const all = rescan();
     mark("scan");
@@ -617,6 +692,12 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
     const pending: FieldHandle[] = [];
     const cityField = all.some((h) => RE_CITY_FIELD.test(h.desc.label));
     for (const h of targets) {
+      // A parsed entry past the profile's that has no Delete (iCIMS's fixed slots).
+      const entry = parsedEntry(h);
+      if (entry && entry.n > config.entryCounts[entry.kind]) {
+        skipOrClear(h, ctrl, jobs);
+        continue;
+      }
       // Not one the page rejected: what it holds is ours, and wrong (a typed place never picked from its list).
       if (h.prefilled && !config.settings.overwritePrefilled && !defaultCountry(h) && !rejected.has(h.id)) {
         setStatus(h, "prefilled");
@@ -663,7 +744,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
         if (d.value) jobs.push(doFill(h, op, "filled", d.path, ctrl));
         // An optional box the profile leaves empty (Fivetran's "Address Line 2") needs nothing.
         else if (h.desc.required) setStatus(h, "needs", "Not set in your Profile");
-        else setStatus(h, "skipped");
+        else skipOrClear(h, ctrl, jobs);
         continue;
       }
       const l = matchLearned(h.desc, det.learnedAnswers);
@@ -769,7 +850,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
               essays.push({ fieldId: h.id, question: h.desc.label, hint: h.desc.hint, ...limits, kind });
             } else setStatus(h, "needs", "Write this yourself");
           } else if (d.action === "consent") handleConsent(h, d, ctrl, jobs);
-          else if (d.action === "skip") setStatus(h, "skipped");
+          else if (d.action === "skip") skipOrClear(h, ctrl, jobs);
           else setStatus(h, "needs", d.note ?? "AI could not answer", suggestion);
         }
         // Drafted now, not after the other mapping calls: an essay needs nothing from them.

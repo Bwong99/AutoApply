@@ -1860,6 +1860,15 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
     if (d?.text && when?.major && /\bmajor\b|\bfield of study\b/i.test(f.label)) d.text = `${when.major}, ${d.text}`;
     return d;
   }
+  // "Did You Graduate?" in an education entry (iCIMS), from that entry: flash-lite answered Yes, then No, for a May
+  // 2028 graduate.
+  const entry = /^education(?: \(?(\d+)\)?)?$/i.exec(f.section ?? "");
+  if (entry && /^did you graduate\??$/i.test(f.label.trim())) {
+    const e = profile.education[(Number(entry[1]) || 1) - 1];
+    const end = (e?.endDate || e?.expectedGraduation || "").split("-").map(Number);
+    const [ty, tm] = todayIso().split("-").map(Number);
+    return end[0] ? yesNoAnswer(f, end[0] * 12 + (end[1] || 12) <= ty * 12 + tm) : null;
+  }
   if (f.options.some((o) => /^yes\W*$/i.test(o.trim()))) return school ? null : graduatingSoonDecision(f, year, month);
   const hits = f.options.flatMap((o, i) => {
     if (!new RegExp(`\\b${year}\\b`).test(o)) return [];
@@ -1899,6 +1908,10 @@ function graduatingSoonDecision(f: FieldDescriptor, year: number, month = 12): D
     yes = year * 12 + month <= Number(by[2]) * 12 + m;
   } else if (inYear) yes = Number(inYear[1]) === year;
   else return null;
+  return yesNoAnswer(f, yes);
+}
+
+function yesNoAnswer(f: FieldDescriptor, yes: boolean): Decision | null {
   const i = f.options!.findIndex((o) => (yes ? /^yes\W*$/i : /^no\W*$/i).test(o.trim()));
   if (i < 0) return null;
   return {
@@ -1922,7 +1935,11 @@ const monthYear = (year: number, month: number) =>
 function graduationText(f: FieldDescriptor, year: number, month: number): Decision | null {
   const typed = f.kind === "date" || f.kind === "month";
   if (!typed && (f.kind !== "text" || !/\b(date|when|month|year|term)\b/i.test(f.label))) return null;
-  const yearOnly = !typed && /\byear\b/i.test(f.label) && !/\b(date|month|term)\b/i.test(f.label);
+  // Also a date's own year box (iCIMS's "Graduation Date Year"): "May 2028" cut to its 4 characters was "May".
+  const yearOnly =
+    !typed &&
+    /\byear\b/i.test(f.label) &&
+    (!/\b(date|month|term)\b/i.test(f.label) || (/\byear$/i.test(f.label.trim()) && !/\bmonth\b/i.test(f.label)));
   const text = yearOnly ? String(year) : monthYear(year, month);
   return { fieldId: f.id, action: "fill", text, confidence: "high", sources: ["education"] };
 }

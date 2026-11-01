@@ -1201,6 +1201,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           field("d", { label: "Expected Graduation Date", kind: "date" }),
           field("t", { label: "When do you expect to graduate?", kind: "text" }),
           field("y", { label: "Graduation year", kind: "text" }),
+          field("gy", { label: "Graduation Date Year", kind: "text", maxLength: 4, section: "Education 1" }),
           field("c", { label: "When do you expect to complete your degree program?", kind: "date" }),
           field("w", { label: "Why did you choose to graduate early?", kind: "textarea" }),
           field("m", {
@@ -1223,6 +1224,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "flag",
       "May 2028",
       "May 2028",
+      "2028",
       "2028",
       "May 2028",
       "flag",
@@ -1289,13 +1291,26 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           yn("c", `Are you graduating in ${gy}?`),
           yn("d", `Will you have graduated by June ${gy - 1}?`),
           yn("e", "Have you graduated?"),
+          // An education entry's own question (iCIMS), answered from that entry.
+          { ...yn("f", "Did You Graduate?"), section: "Education (1)" },
+          { ...yn("g", "Did You Graduate?"), section: "Education 1" },
+          yn("h", "Did You Graduate?"),
         ],
         profile,
         documents: [],
         job: null,
       },
     );
-    expect(r.decisions.map((d) => d.intendedAnswer ?? d.action)).toEqual(["No", "Yes", "Yes", "No", "flag"]);
+    expect(r.decisions.map((d) => d.intendedAnswer ?? d.action)).toEqual([
+      "No",
+      "Yes",
+      "Yes",
+      "No",
+      "flag",
+      "No",
+      "No",
+      "flag",
+    ]);
   });
 
   it("picks the company's site for how they heard when the profile says company website", async () => {

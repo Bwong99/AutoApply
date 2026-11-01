@@ -19,7 +19,29 @@ interface Field {
   label: string;
   options?: string[];
   optionsKnown?: boolean;
+  section?: string;
+  placeholder?: string;
 }
+
+/** Jobs of a test profile that has them; "Work Experience N" fields answer from the Nth. */
+export const EXPERIENCE = [
+  {
+    company: "Analytical Engines Ltd",
+    title: "Software Engineer Intern",
+    startDate: "2026-01",
+    endDate: "2026-08",
+    current: false,
+    description: "Built analytics tooling.",
+  },
+  {
+    company: "Babbage & Co",
+    title: "IT Technician Intern",
+    startDate: "2023-06",
+    endDate: "2023-08",
+    current: false,
+    description: "Kept the lab running.",
+  },
+];
 
 export const MODELS = [
   "embedding-001",
@@ -102,6 +124,19 @@ function decide(f: Field): Json {
       ? fill({ optionIndexes: idx, sources: [source] })
       : { fieldId: f.id, action: "flag", confidence: "low", note: "No option" };
   };
+  const nth = /^Work Experience (\d+)$/.exec(f.section ?? "")?.[1];
+  if (nth) {
+    const job = EXPERIENCE[Number(nth) - 1];
+    const asked = `${L} ${f.placeholder ?? ""}`;
+    const text = /company|employer/i.test(asked)
+      ? job?.company
+      : /title/i.test(asked)
+        ? job?.title
+        : /summary|description/i.test(asked)
+          ? job?.description
+          : undefined;
+    return text ? fill({ text, sources: ["experience"] }) : { fieldId: f.id, action: "skip", confidence: "high" };
+  }
   if (/relocat/i.test(L)) return choose(/^i am willing/i, "preferences.willingToRelocate");
   if (/sponsor/i.test(L)) return choose(/will not require/i, "workAuthorization.entries.requiresSponsorshipNow");
   if (/gender/i.test(L)) return choose(/don.t wish|decline|prefer not/i, "demographics.gender");

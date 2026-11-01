@@ -178,6 +178,97 @@ export async function addEntries(want: EntryCounts, signal: AbortSignal): Promis
   return saveButtons().filter((b) => !before.has(b));
 }
 
+// ---------- résumé entries a site's parser wrote (YOLO) ----------
+export type EntryKind = "experience" | "education";
+export interface Entry {
+  kind: EntryKind;
+  /** The number its Delete names it by (iCIMS: "Delete Experience (2)"), else its place among its kind's, from 1. */
+  n: number;
+  box: Element;
+  remove: HTMLElement;
+}
+
+const RE_REMOVE = /^(delete|remove)\b/i;
+/** A file's own Remove (iCIMS's "Delete File"), not an entry's. */
+const RE_FILE_WORD = /\b(files?|resumes?|résumés?|cvs?|attachments?|documents?|photos?)\b/i;
+const RE_SCHOOL_WORD = /\b(schools?|institution|university|college|degree|major|field of study|specialization)\b/i;
+const RE_JOB_WORD = /\b(company|employer|job title|position)\b/i;
+const FIELDS = "input:not([type=hidden]),textarea,select";
+
+/**
+ * Named by its Delete (iCIMS: "Delete Experience (2)"), else by what its
+ * fields ask: labels and placeholders (Breezy names its boxes only by placeholders), then its text. School words first:
+ * Breezy's education dates carry the placeholder "Company".
+ */
+function entryKind(box: Element, remove: HTMLElement): EntryKind | null {
+  const named = /^(?:delete|remove) (experience|education)\b/i.exec(textOf(remove))?.[1];
+  if (named) return named.toLowerCase() as EntryKind;
+  const fields = deepQueryAll(FIELDS, box);
+  if (fields.some((f) => (f as HTMLInputElement).type === "file")) return null;
+  const asked = [
+    ...deepQueryAll("label", box).map(textOf),
+    ...fields.map((f) => `${f.getAttribute("placeholder") ?? ""} ${f.getAttribute("aria-label") ?? ""}`),
+  ].join(" ");
+  for (const t of [asked, textOf(box)]) {
+    if (RE_SCHOOL_WORD.test(t)) return "education";
+    if (RE_JOB_WORD.test(t)) return "experience";
+  }
+  return null;
+}
+
+/**
+ * Work and education entries that each have their own Delete or Remove (Breezy, Avature, iCIMS), in page order. An
+ * entry is the widest box around its Delete that holds no other Delete, nor, once it holds fields, an Add button
+ * (iCIMS keeps an "Add more (Experience)" just outside each entry).
+ */
+export function resumeEntries(): Entry[] {
+  const removes: HTMLElement[] = [];
+  const adds: HTMLElement[] = [];
+  for (const el of deepElements(document.body)) {
+    if (!(el instanceof HTMLElement) || !el.matches(`${BUTTONS},a`)) continue;
+    const t = textOf(el);
+    if (RE_ADD.test(t)) adds.push(el);
+    else if (RE_REMOVE.test(t) && !RE_FILE_WORD.test(t) && isVisible(el)) removes.push(el);
+  }
+  const count = { experience: 0, education: 0 };
+  return removes.flatMap((remove) => {
+    let box: Element = remove;
+    for (let p = parentOf(box); p && p !== document.body; p = parentOf(p)) {
+      if (removes.some((r) => r !== remove && composedContains(p, r))) break;
+      if (deepQueryAll(FIELDS, box).length && adds.some((a) => composedContains(p, a))) break;
+      box = p;
+    }
+    const kind = entryKind(box, remove);
+    if (!kind) return [];
+    count[kind]++;
+    const named = /^(?:delete|remove) (?:experience|education) \((\d+)\)$/i.exec(textOf(remove))?.[1];
+    return [{ kind, n: named ? Number(named) : count[kind], box, remove }];
+  });
+}
+
+/**
+ * YOLO: deletes the entries a site's résumé parser added past the profile's (Breezy listed 7 jobs for 2, projects
+ * among them), latest first. Entries `ours` holds (filled by us) stay.
+ */
+export async function trimEntries(
+  want: EntryCounts,
+  ours: (box: Element) => boolean,
+  signal: AbortSignal,
+): Promise<void> {
+  const next = () =>
+    resumeEntries().findLast((e) => e.n > want[e.kind] && !ours(e.box) && clickable(e.remove, textOf(e.remove)));
+  let e = next();
+  if (!e) return;
+  await holdScroll(async () => {
+    for (let i = 0; e && i < 30 && !signal.aborted; i++, e = next()) {
+      const { remove } = e;
+      dispatching(() => remove.click());
+      // A Delete that removed nothing is never pressed again. iCIMS only hides the entry.
+      if (!(await waitFor(() => !remove.isConnected || !isVisible(remove), 2000))) break;
+    }
+  });
+}
+
 /**
  * Saves the entries addEntries opened, once their fields are filled. Only those editors' own Save buttons: never the
  * application's Save/Submit/Next, and never a button that would submit a form.

@@ -29,6 +29,7 @@ import {
   precedingText,
   sectionFor,
   textOf,
+  unseenPlaceholder,
 } from "./labels";
 import { collect, type Collected } from "./traverse";
 import { composedContains, parentOf } from "./visibility";
@@ -310,7 +311,7 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     d.required = !!required;
     const input = (u.searchInput ?? el) as HTMLInputElement;
     const ph = input.getAttribute?.("placeholder");
-    if (ph) d.placeholder = clip(ph, 120);
+    if (ph && !unseenPlaceholder(input)) d.placeholder = clip(ph, 120);
     if (u.sections) d.placeholder = u.sections.map((e) => ({ m: "MM", d: "DD", y: "YYYY" })[datePart(e)!]).join("/");
     if (el instanceof HTMLInputElement) d.inputType = el.type;
     const ac = input.getAttribute?.("autocomplete");

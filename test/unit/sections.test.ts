@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { setBody, stubLayout } from "./dom";
-import { addEntries, expandSections, saveEntries } from "../../src/content/fill/sections";
+import { addEntries, expandSections, resumeEntries, saveEntries, trimEntries } from "../../src/content/fill/sections";
 import { newScanState, scan } from "../../src/content/scan/fields";
 import type { EntryCounts } from "../../src/shared/types";
 
@@ -187,5 +187,88 @@ describe("entry editors with their own Save (SmartRecruiters)", () => {
     // A second fill finds the saved entries and adds no more.
     expect(await addEntries({ ...none, experience: 2 }, new AbortController().signal)).toEqual([]);
     expect(document.querySelectorAll(".title")).toHaveLength(0);
+  });
+});
+
+// Breezy: entries named only by placeholders, each with a Delete link; work and education share one section.
+const breezyEntry = (job: boolean, company = "") =>
+  `<li><input placeholder="${job ? "Company" : "School"}" value="${company}"><input placeholder="${job ? "Title" : "Field of Study"}">` +
+  `<span>Start date</span><input type="date" placeholder="Company"><a href="" class="del">Delete</a></li>`;
+function breezy(jobs: string[], schools = 1) {
+  setBody(`<div class="section"><h3>Work History</h3><ul>${jobs.map((c) => breezyEntry(true, c)).join("")}</ul>
+    <a href="">Add Position</a><h3>Education</h3><ul>${Array.from({ length: schools }, () => breezyEntry(false)).join("")}</ul>
+    <a href="">Add Education</a></div>`);
+  for (const a of document.querySelectorAll<HTMLElement>(".del"))
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      a.closest("li")!.remove();
+    });
+}
+const companies = () =>
+  [...document.querySelectorAll<HTMLInputElement>("[placeholder=Company]:not([type])")].map((i) => i.value);
+const signal = () => new AbortController().signal;
+
+// iCIMS: each entry a fieldset with its own "Experience (n)" legend and, past the first, a Delete that hides it; an
+// "Add more (Experience)" follows each.
+function icims(n: number) {
+  setBody(
+    Array.from(
+      { length: n },
+      (_, i) => `<div><fieldset><legend>Experience (${i + 1})</legend>${
+        i ? `<div><a href="javascript:void(0)" role="button" aria-label="Delete Experience (${i + 1})"></a></div>` : ""
+      }<label for="e${i}">Employer</label><input id="e${i}" value="Parsed ${i + 1}"></fieldset>
+      <div><a href="javascript:void(0)">Add more (Experience)</a></div></div>`,
+    ).join(""),
+  );
+  for (const a of document.querySelectorAll<HTMLElement>("[aria-label^=Delete]"))
+    a.addEventListener("click", () => (a.closest("fieldset")!.style.display = "none"));
+}
+
+describe("résumé entries a site's parser wrote", () => {
+  it("finds each work and education entry by its Delete, numbered per kind", () => {
+    breezy(["Karuta", "FORM Swim", "Langley"]);
+    const es = resumeEntries();
+    expect(es.map((e) => `${e.kind} ${e.n}`)).toEqual(["experience 1", "experience 2", "experience 3", "education 1"]);
+    // Each job is its <li>; the lone school runs to its list, up to the Add link.
+    expect(es.map((e) => e.box.tagName)).toEqual(["LI", "LI", "LI", "UL"]);
+  });
+
+  it("reads an entry's kind from its labels (Avature), else its Delete's words and number (iCIMS)", () => {
+    setBody(`<div><label for="t1">Position Title *</label><input id="t1"><label for="c1">Company *</label><input id="c1">
+        <button type="button">REMOVE</button></div>
+      <div><label for="t2">Position Title *</label><input id="t2"><label for="c2">Company *</label><input id="c2">
+        <button type="button">REMOVE</button></div>
+      <button type="button">ADD ANOTHER</button>
+      <div><label for="s1">Institution/Program *</label><input id="s1"><button type="button">REMOVE</button></div>
+      <button type="button">ADD ANOTHER</button>
+      <div><label for="cv">Resume</label><input id="cv" type="file"><button type="button">Remove</button></div>
+      <button type="button">Delete File</button>`);
+    expect(resumeEntries().map((e) => `${e.kind} ${e.n}`)).toEqual(["experience 1", "experience 2", "education 1"]);
+    icims(3);
+    const es = resumeEntries();
+    expect(es.map((e) => `${e.kind} ${e.n}`)).toEqual(["experience 2", "experience 3"]);
+    expect(es.map((e) => e.box.tagName)).toEqual(["FIELDSET", "FIELDSET"]);
+  });
+
+  it("deletes the entries past the profile's, latest first, and keeps ours", async () => {
+    breezy(["Karuta", "FORM Swim", "Langley", "HabitKicker"], 2);
+    const mine = document.querySelectorAll("li")[3];
+    await trimEntries({ ...none, experience: 2, education: 1 }, (box) => box === mine, signal());
+    expect(companies()).toEqual(["Karuta", "FORM Swim", "HabitKicker"]);
+    expect(document.querySelectorAll("[placeholder=School]")).toHaveLength(1);
+  });
+
+  it("deletes every entry of a kind the profile has none of, and nothing when counts fit", async () => {
+    breezy(["Karuta"], 1);
+    await trimEntries({ ...none, experience: 1, education: 1 }, () => false, signal());
+    expect(companies()).toEqual(["Karuta"]);
+    await trimEntries({ ...none, education: 1 }, () => false, signal());
+    expect(companies()).toEqual([]);
+  });
+
+  it("deletes by the number the page gives each entry, the first having no Delete (iCIMS)", async () => {
+    icims(4);
+    await trimEntries({ ...none, experience: 2 }, () => false, signal());
+    expect([...document.querySelectorAll("fieldset")].map((f) => f.style.display)).toEqual(["", "", "none", "none"]);
   });
 });

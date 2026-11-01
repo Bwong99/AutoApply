@@ -80,6 +80,15 @@ describe("label extraction (§11.5)", () => {
     expect(fields().map((h) => h.desc.label)).toEqual(["Your city", "preferred start date"]);
   });
 
+  it("names a date box by the text beside it, never by the placeholder it doesn't show (Breezy)", () => {
+    setBody(`<ul><li><input placeholder="Company" type="text"><textarea placeholder="Summary"></textarea>
+      <div></div><span>Start date</span><input placeholder="Company" type="date">
+      <div></div><span>End date</span><input placeholder="Company" type="date"><a href="">Delete</a></li></ul>`);
+    const hs = fields();
+    expect(hs.map((h) => h.desc.label)).toEqual(["Company", "Summary", "Start date", "End date"]);
+    expect(hs.map((h) => h.desc.placeholder)).toEqual(["Company", "Summary", undefined, undefined]);
+  });
+
   it("descends into open shadow roots and resolves labels there", () => {
     setBody(`<x-form></x-form>`);
     const host = document.querySelector("x-form")!;
