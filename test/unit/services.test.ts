@@ -1174,7 +1174,9 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       },
     } as unknown as Gemini;
     const profile = emptyProfile();
-    profile.education = [{ ...profile.education[0], school: "UBC", expectedGraduation: "2028-05" }];
+    profile.education = [
+      { ...profile.education[0], school: "UBC", expectedGraduation: "2028-05", major: "Computer Science" },
+    ];
     profile.highSchool.graduationYear = "2024";
     const label = "What is your anticipated graduation month and year?";
     const ask = (options: string[]) => field(options.join(), { label, kind: "select", options });
@@ -1201,6 +1203,11 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           field("y", { label: "Graduation year", kind: "text" }),
           field("c", { label: "When do you expect to complete your degree program?", kind: "date" }),
           field("w", { label: "Why did you choose to graduate early?", kind: "textarea" }),
+          field("m", {
+            label:
+              "For your anticipated degree, please indicate your major AND your anticipated graduation date (month/year)",
+            kind: "text",
+          }),
         ],
         profile,
         documents: [],
@@ -1219,6 +1226,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "2028",
       "May 2028",
       "flag",
+      "Computer Science, May 2028",
     ]);
   });
 

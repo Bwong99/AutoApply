@@ -1853,7 +1853,13 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
   if (isMulti(f) || !RE_GRADUATION.test(f.label) || !date) return null;
   if (!school && /\b(master|ph\.?\s?d|doctora|mba)/i.test(f.label)) return null;
   const [year, month] = date.split("-").map(Number);
-  if (!f.options) return school || !month ? null : graduationText(f, year, month);
+  if (!f.options) {
+    const d = school || !month ? null : graduationText(f, year, month);
+    // Asked with the major (John Deere: "please indicate your major AND your anticipated graduation date"), which
+    // was left out ("May 2028").
+    if (d?.text && when?.major && /\bmajor\b|\bfield of study\b/i.test(f.label)) d.text = `${when.major}, ${d.text}`;
+    return d;
+  }
   if (f.options.some((o) => /^yes\W*$/i.test(o.trim()))) return school ? null : graduatingSoonDecision(f, year, month);
   const hits = f.options.flatMap((o, i) => {
     if (!new RegExp(`\\b${year}\\b`).test(o)) return [];
