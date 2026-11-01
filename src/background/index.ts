@@ -304,6 +304,12 @@ const handlers: Handlers = {
     const tab = await runTab(sender);
     const job = await yoloJob(sender);
     if (job) ctx = { ...ctx, company: job.company || ctx.company, jobTitle: job.title || ctx.jobTitle };
+    // A run's pages are all one job: Paccar's career site ("portalcareer") names no location, the posting did
+    // ("Kirkland, WA, US"), and "authorized to work in the country where position is based?" got the home country's Yes.
+    if (!ctx.location && tab?.id !== undefined && (await yoloOverrides(sender))) {
+      const prev = await getJobContext(tab.id);
+      if (prev?.location) ctx = { ...ctx, location: prev.location };
+    }
     // A YOLO frame's driver is the page's top frame; it has no tab.
     if (tab?.id !== undefined)
       await setJobContext(tab.id, ctx, sender.frameId && sender.tab ? (tab.url ?? "") : undefined);
