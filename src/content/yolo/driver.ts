@@ -8,7 +8,7 @@ import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
-import { emailSignIn, forgotPassword, handleAuth, handleVerify } from "./auth";
+import { emailSignIn, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
 import { alertText, findApply, findNext, findSubmit, labelOf, press, validationErrors } from "./nav";
 
@@ -107,7 +107,7 @@ export async function drive(deps: DriverDeps) {
         url: location.href,
         guesses: deps.guesses(),
       });
-      const kind: StepKind = step.kind;
+      let kind: StepKind = step.kind;
       if (step.stop)
         return result({
           // Turned down as a bot each time: a visible tab (the user's browser) usually passes.
@@ -124,6 +124,13 @@ export async function drive(deps: DriverDeps) {
         press(viaEmail);
         await changed(before, 20_000);
         continue;
+      }
+      // A login inside the application form (iCIMS' Candidate Profile: résumé, contact details and a password): set
+      // it, then fill and submit the page as a form step, with its checks and refills.
+      if (kind === "signup" && facts.requiredFields > 3) {
+        const r = await setLogin();
+        if ("fail" in r) return needs(r.fail);
+        kind = "form";
       }
       switch (kind) {
         case "success":

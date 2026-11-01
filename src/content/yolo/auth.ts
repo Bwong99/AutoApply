@@ -112,6 +112,14 @@ export const emailSignIn = () =>
     '[data-automation-id="SignInWithEmailButton"]',
   ]);
 
+/** A login asked for inside the application form itself (iCIMS' Candidate Profile): set it; the rest is a form. */
+export async function setLogin(): Promise<AuthOutcome> {
+  const creds = await send({ type: "YOLO_CREDENTIAL", site: siteKey(), create: true });
+  if (!creds) return { fail: "Couldn't store a password" };
+  await fillCredentials(creds.email, creds.password);
+  return { ok: true };
+}
+
 /** "This email is already registered" with no password stored: reset it through the inbox. */
 export async function forgotPassword(): Promise<AuthOutcome> {
   const link = findButton(RE_FORGOT, ['[data-automation-id="forgotPasswordLink"]']);

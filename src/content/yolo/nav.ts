@@ -11,7 +11,7 @@ export const RE_APPLY = new RegExp(`^(apply|${APPLY_OPENING})(\\s*[→›»])?$`
 export const RE_APPLY_OPENING = new RegExp(`^(${APPLY_OPENING})(\\s*[→›»])?$`, "i");
 export type ApplyKind = "none" | "link" | "entry" | "submit";
 export const RE_NEXT =
-  /^(next( step| page)?|continue( to (the )?(next step|review|application))?|save (and|&) (continue|next)|proceed|review( (and|&) submit| (my |your )?application)?|go to review|i accept|i agree|(accept|agree) and continue)(\s*[→›»])?$/i;
+  /^(next( step| page)?|continue( to (the )?(next step|review|application))?|save (and|&) (continue|next)|proceed|review( (and|&) submit| (my |your )?application)?|go to review|i accept|i agree|(accept|agree) and continue|submit profile)(\s*[→›»])?$/i;
 export const RE_SUBMIT =
   /^(submit( (my |your |the )?application)?|send( (my )?application)?|apply|complete( (my )?application)?|finish|submit and finish|confirm (and|&) submit)$/i;
 /** Other ways in (third-party profiles, résumé parsers), and buttons that go back or out. */
