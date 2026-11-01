@@ -726,7 +726,15 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
       };
       const mapAndApply = async (hs: FieldHandle[], fields: FieldDescriptor[]) => {
         if (!hs.length || ctrl.signal.aborted) return;
-        const res = await send({ type: "MAP_FIELDS", fields, host: HOST, groupId, yolo });
+        const uploads = [...handles.values()].flatMap((h) => (h.desc.kind === "file" ? [h.desc.label] : []));
+        const res = await send({
+          type: "MAP_FIELDS",
+          fields,
+          host: HOST,
+          groupId,
+          yolo,
+          ...(uploads.length ? { uploads } : {}),
+        });
         if (isErr(res)) {
           lastError = res.error;
           for (const h of hs) setStatus(h, "needs", res.error.message);
@@ -745,7 +753,14 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
             const op = opFromDecision(h, d);
             if (op) jobs.push(doFill(h, op, "ai", (d.sources ?? []).join(", ") || "AI", ctrl));
             else setStatus(h, "needs", d.note ?? "No usable AI answer", suggestion);
-          } else if (d.action === "essay") {
+          } else if (
+            d.action === "essay" ||
+            // "Write optional cover letters" covers a cover-letter box the AI would leave empty.
+            (d.action === "skip" &&
+              config.settings.coverLetterPdfs &&
+              (h.desc.kind === "textarea" || h.desc.kind === "contenteditable") &&
+              RE_COVER_LETTER.test(h.desc.label))
+          ) {
             if (config.settings.draftEssays) {
               const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
               const kind = RE_COVER_LETTER.test(h.desc.label) ? "cover_letter" : "essay";

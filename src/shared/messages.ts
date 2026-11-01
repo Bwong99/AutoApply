@@ -78,7 +78,8 @@ export type Message =
   | { type: "PICK_RESUME" }
   /** `passive`: read on page load, outside a fill. */
   | { type: "SET_JOB_PAY"; pays: Pay[]; passive?: boolean }
-  | { type: "MAP_FIELDS"; fields: FieldDescriptor[]; host: string; groupId: string; yolo?: boolean }
+  /** `uploads`: labels of the page's upload boxes, for questions about attached documents. */
+  | { type: "MAP_FIELDS"; fields: FieldDescriptor[]; host: string; groupId: string; yolo?: boolean; uploads?: string[] }
   /** The user submitted a form we filled; `doneUrl` once its confirmation shows. */
   | { type: "APPLY_ATTEMPT"; job: { url: string; company: string; title: string }; doneUrl?: string }
   // YOLO driver C → B

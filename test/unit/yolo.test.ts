@@ -601,13 +601,15 @@ describe("YOLO best guesses", () => {
     expect(yolo.decisions[0]).toMatchObject({ action: "fill", text: "No", sources: ["guess"], confidence: "medium" });
   });
 
-  it("guesses only required fields, and never a choice whose options read blank", async () => {
+  it("guesses required fields and optional single choices, never opt-ins, optional text or blank options", async () => {
     const asked: string[][] = [];
     const gemini = {
       call: async (s: { system: string; payload: { fields?: { id: string }[]; items?: unknown[] } }) => {
         if (s.payload.items) return { data: { verdicts: [] }, usedModel: "m", keyLabel: "k" };
         const fields = s.payload.fields ?? [];
-        if (/best chance/.test(s.system)) asked.push(fields.map((f) => f.id));
+        if (/best chance/.test(s.system)) {
+          asked.push(fields.map((f) => f.id));
+        }
         const decisions = fields.map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
         return { data: { decisions }, usedModel: "m", keyLabel: "k" };
       },
@@ -616,12 +618,19 @@ describe("YOLO best guesses", () => {
       field("deadline", { label: "Do you have any offer deadlines?" }),
       field("optin", { kind: "checkbox", label: "Send me job alerts", required: false }),
       field("blank", { kind: "radio_group", label: "Are you a citizen of Iran?", options: [" ", ""] }),
+      field("heard", {
+        kind: "radio_group",
+        label: "Where did you first hear about this position?",
+        options: ["Newsletter", "Colleague"],
+        required: false,
+      }),
+      field("note", { kind: "textarea", label: "Anything else?", required: false }),
     ];
     await mapFields(
       { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
       { fields, profile: emptyProfile(), documents: [], job: null, yolo: true },
     );
-    expect(asked).toEqual([["deadline"]]);
+    expect(asked).toEqual([["deadline", "heard"]]);
   });
 });
 

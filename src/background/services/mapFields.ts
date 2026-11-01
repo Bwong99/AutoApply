@@ -83,6 +83,7 @@ const flag = (fieldId: string, note: string, suggestion?: string): Decision => (
 });
 
 const NOT_IN_PROFILE = "Not in your profile";
+const SINGLE_CHOICE = new Set<FieldKind>(["select", "radio_group", "dropdown"]);
 const NOT_APPLICABLE = "N/A";
 /** The source YOLO's best-guess answers cite: made up for the application, logged for the user to review. */
 export const GUESS = "guess";
@@ -990,7 +991,11 @@ function skillsDecision(f: FieldDescriptor, profile: Profile): Decision | null {
  */
 function internshipsDecision(f: FieldDescriptor, experience: Profile["experience"]): Decision | null {
   if (!/\bhow many\b[^?]*\b(internships?|co-?ops?|work[- ]terms?)\b/i.test(f.label) || isMulti(f)) return null;
-  const n = experience.filter((e) => /\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`)).length;
+  const roles = experience.filter((e) => /\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`));
+  // A work term is four months: Manulife's ("Four (4) months … equals one work-term") got "1" for an 8-month co-op.
+  const n = /\bwork[- ]terms?\b/i.test(f.label)
+    ? roles.reduce((sum, e) => sum + Math.max(1, Math.round(experienceMonths([e]) / 4)), 0)
+    : roles.length;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["experience"] };
   if (!f.options) return f.kind === "text" || f.kind === "number" ? { ...base, text: String(n) } : null;
   const hits = f.options.flatMap((o, i) => {
@@ -1000,6 +1005,26 @@ function internshipsDecision(f: FieldDescriptor, experience: Profile["experience
     return ok || (n === 0 && /^(none|no|zero)\b/i.test(o)) ? [i] : [];
   });
   return hits.length === 1 ? { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] } : null;
+}
+
+const RE_ATTACH_DOC = /\b(transcript|cover letter|portfolio|writing sample)s?\b/i;
+const RE_ANY_DOC_BOX = /\b(additional|other|supporting)\b[^?]*\b(documents?|files?|attachments?)\b|^attachments?$/i;
+
+/**
+ * "Have you attached your unofficial transcript?" on a page whose only upload box is the résumé: nothing else went in.
+ * John Deere's got "Yes, my unofficial transcript has been attached". Pages with a box that could hold it are left to
+ * the AI; so are pages with no upload box at all (the file may have gone in on an earlier page).
+ */
+function attachedDecision(f: FieldDescriptor, uploads: string[] | undefined): Decision | null {
+  const doc = RE_ATTACH_DOC.exec(f.label)?.[1].toLowerCase();
+  if (!doc || !uploads?.length || !/\b(attach|upload|includ|submitt?)\w*\b/i.test(f.label)) return null;
+  if (!/^(have|did|are|is|has)\b/i.test(f.label.trim()) && !/\b(have|did) you\b/i.test(f.label)) return null;
+  if (uploads.some((u) => new RegExp(`\\b${doc}`, "i").test(u) || RE_ANY_DOC_BOX.test(u.trim()))) return null;
+  const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["documents"] };
+  if (f.kind === "text" || f.kind === "textarea")
+    return { ...base, text: `No: this application has no place to upload my ${doc}. I can send it on request.` };
+  const no = f.options?.flatMap((o, i) => (/^no\b/i.test(o.trim()) ? [i] : [])) ?? [];
+  return no.length === 1 && !isMulti(f) ? { ...base, optionIndexes: no, intendedAnswer: f.options![no[0]] } : null;
 }
 
 /**
@@ -1482,15 +1507,26 @@ function countryDecision(f: FieldDescriptor, home: string): Decision | null {
  * rejected it for NinjaOne's US "State" with a British Columbia address.
  */
 function regionDecision(f: FieldDescriptor, address: Profile["personal"]["address"]): Decision | null {
-  const home = canonicalCountry(address.country);
+  const bare = /^(state|province|state\s*(\/|or)\s*province)$/i.test(f.label.trim());
+  // The home address's region in a list that loads as you type: Kinaxis's iCIMS one (address-level1) and John Deere's
+  // bare "State / Province" got the job's.
   if (
-    !f.options ||
-    isMulti(f) ||
-    !home ||
-    !/^(state|province|state\s*(\/|or)\s*province)$/i.test(f.label.trim()) ||
-    RE_ENTRY_SECTION.test(f.section ?? "")
+    (f.kind === "dropdown" || f.kind === "typeahead") &&
+    !f.optionsKnown &&
+    (bare || /\baddress-level1$/i.test(f.autocomplete ?? "")) &&
+    address.region &&
+    !RE_ENTRY_SECTION.test(f.section ?? "")
   )
-    return null;
+    return {
+      fieldId: f.id,
+      action: "fill",
+      intendedAnswer: address.region,
+      searchQuery: address.region,
+      confidence: "high",
+      sources: ["personal.address.region"],
+    };
+  const home = canonicalCountry(address.country);
+  if (!f.options || isMulti(f) || !home || !bare || RE_ENTRY_SECTION.test(f.section ?? "")) return null;
   const regions = f.options.map(regionCountry).filter(Boolean);
   if (regions.length < 5 || regions.includes(home)) return null;
   const none = f.options.flatMap((o, i) =>
@@ -1937,12 +1973,13 @@ async function guessFlagged(
   base: ReturnType<typeof mappingPayloadBase>,
   sent: (f: FieldDescriptor) => object,
 ): Promise<Decision[]> {
-  // Only what blocks submitting: an optional field stays empty rather than guessed (an opt-in ticked "to be safe").
+  // What blocks submitting, and optional single-choice questions a recruiter may screen on ("Where did you first hear
+  // about this position?"). Optional boxes and text stay empty rather than guessed (an opt-in ticked "to be safe").
   // A choice whose options read blank can't be guessed, only gambled: "1" for "a citizen of Iran or Cuba?".
   const flagged = fields.filter(
     (f, i) =>
       decisions[i].action === "flag" &&
-      f.required &&
+      (f.required || (SINGLE_CHOICE.has(f.kind) && !needsNoSource(f))) &&
       f.kind !== "file" &&
       !(f.options?.length && f.options.every((o) => !o.trim())),
   );
@@ -1990,6 +2027,8 @@ export interface MapInput {
   pays?: Pay[];
   /** YOLO mode: nothing is left for the user, so unanswered fields get a best guess (guessFlagged). */
   yolo?: boolean;
+  /** Labels of the page's upload boxes, so no answer claims a document went in that had nowhere to go. */
+  uploads?: string[];
 }
 
 // The model miscounts positions in long lists (picked "Cape Verde +238", the option after "Canada +1"),
@@ -2076,6 +2115,7 @@ export async function mapFields(
       skillsDecision(f, input.profile) ??
       internshipsDecision(f, input.profile.experience) ??
       pronunciationDecision(f) ??
+      attachedDecision(f, input.uploads) ??
       cohortDecision(f, input.profile.preferences) ??
       termsDecision(f, input.profile) ??
       termLengthsDecision(f, input.profile.coop) ??

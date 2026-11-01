@@ -327,7 +327,7 @@ const handlers: Handlers = {
     return { ok: true };
   },
 
-  async MAP_FIELDS({ fields, groupId, yolo }, sender) {
+  async MAP_FIELDS({ fields, groupId, yolo, uploads }, sender) {
     const ctx = await serviceCtx(groupSignal(sender, groupId));
     if ("error" in ctx) return ctx;
     const s = await store.getMany(["profile", "documentsIndex"]);
@@ -345,7 +345,7 @@ const handlers: Handlers = {
             ...s.documentsIndex.filter((d) => d.kind !== "resume"),
             ...(mode === "tailor" ? [{ ...TAILORED_PLACEHOLDER_META }] : []),
           ];
-    return mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y });
+    return mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y, uploads });
   },
 
   async TAILOR_RESUME({ groupId }, sender) {

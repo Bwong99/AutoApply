@@ -1646,6 +1646,8 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       job("IT Technician", "Internship"),
       job("Cashier", ""),
     ];
+    // Eight months: two four-month work terms.
+    Object.assign(profile.experience[0], { startDate: "2026-01", endDate: "2026-08" });
     const r = await mapFields(
       { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
       {
@@ -1673,7 +1675,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(r.decisions.map((d) => d.intendedAnswer ?? d.text ?? d.action)).toEqual([
       "2",
       "2-3",
-      "2",
+      "3",
       "flag",
       "skip",
       "skip",
@@ -2087,6 +2089,35 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask(["South Asian", "Southeast Asian", "White"])).toBe("flag");
   });
 
+  it("says a document wasn't attached when the page had nowhere to upload it", async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const ask = async (f: FieldDescriptor, uploads?: string[]) => {
+      const r = await mapFields(
+        { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+        { fields: [f], profile: emptyProfile(), documents: [], job: null, uploads },
+      );
+      return r.decisions[0].text ?? r.decisions[0].intendedAnswer ?? r.decisions[0].action;
+    };
+    // John Deere: the résumé was the only upload box.
+    const deere = field("a", {
+      label:
+        "Your application is incomplete if you have NOT attached your unofficial transcript. Have you attached the required documents?",
+    });
+    expect(await ask(deere, ["Resume"])).toBe(
+      "No: this application has no place to upload my transcript. I can send it on request.",
+    );
+    const yn = field("b", { label: "Have you uploaded your transcript?", kind: "radio_group", options: ["Yes", "No"] });
+    expect(await ask(yn, ["Resume"])).toBe("No");
+    expect(await ask(yn, ["Resume", "Transcript"])).toBe("flag");
+    expect(await ask(yn, ["Resume", "Additional Documents"])).toBe("flag");
+    expect(await ask(yn)).toBe("flag");
+  });
+
   it("picks 'Not Applicable' from another country's state list", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
@@ -2109,6 +2140,24 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask(["Not Applicable", ...states])).toBe("Not Applicable");
     expect(await ask(states)).toBe("flag");
     expect(await ask(["Not Applicable", "British Columbia", "Ontario", "Alberta", "Quebec", "Manitoba"])).toBe("flag");
+    // A home-address region list that loads as you type gets the profile's, not a guess.
+    const home = field("h", {
+      label: "State/Province",
+      kind: "dropdown",
+      optionsKnown: false,
+      autocomplete: "address-level1",
+    });
+    const r = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      { fields: [home], profile, documents: [], job: null },
+    );
+    expect(r.decisions[0]).toMatchObject({ intendedAnswer: "British Columbia", searchQuery: "British Columbia" });
+    const bare = field("b", { label: "State / Province", kind: "typeahead", optionsKnown: false });
+    const r2 = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      { fields: [bare], profile, documents: [], job: null },
+    );
+    expect(r2.decisions[0]).toMatchObject({ intendedAnswer: "British Columbia" });
   });
 
   it("answers 'are you a <country> citizen?' from the profile's status there", async () => {
