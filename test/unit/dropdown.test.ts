@@ -790,10 +790,12 @@ describe("place typeaheads", () => {
 });
 
 describe("typeText", () => {
-  it("follows focus onward to a popup's box, never back to an earlier field", async () => {
+  it("follows focus onward to a popup's box, never to another field", async () => {
     const { typeText } = await import("../../src/content/fill/events");
-    setBody(`<input id="prev"><input id="cur"><input id="popup">`);
-    const [prev, cur, popup] = ["prev", "cur", "popup"].map((id) => document.getElementById(id) as HTMLInputElement);
+    setBody(`<input id="prev"><input id="cur"><input id="next"><input id="popup" style="display:none">`);
+    const [prev, cur, next, popup] = ["prev", "cur", "next", "popup"].map(
+      (id) => document.getElementById(id) as HTMLInputElement,
+    );
     cur.focus();
     // A page handing focus back to an earlier field mid-word (Eightfold's selects in the hidden frame).
     cur.addEventListener("input", () => prev.focus(), { once: true });
@@ -801,8 +803,21 @@ describe("typeText", () => {
     expect([prev.value, cur.value]).toEqual(["", "Asian"]);
     cur.value = "";
     cur.focus();
+    // Or on to the next field (Eightfold's John Deere form).
+    cur.addEventListener("input", () => next.focus(), { once: true });
+    await typeText(cur, "Not a veteran", 0);
+    expect([cur.value, next.value]).toEqual(["Not a veteran", ""]);
+    cur.value = "";
+    cur.focus();
     // select2 3.x moves focus, with the first key, to its list's search box.
-    cur.addEventListener("input", () => popup.focus(), { once: true });
+    cur.addEventListener(
+      "input",
+      () => {
+        popup.style.display = "";
+        popup.focus();
+      },
+      { once: true },
+    );
     await typeText(cur, "UBC", 0);
     expect([cur.value, popup.value]).toEqual(["U", "BC"]);
   });

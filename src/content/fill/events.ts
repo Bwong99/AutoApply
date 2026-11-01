@@ -238,12 +238,18 @@ function activeDeep(): Element | null {
  */
 export async function typeText(el: HTMLInputElement | HTMLTextAreaElement, text: string, delayMs = 15) {
   const follow = activeDeep() === el;
+  // Boxes already showing are other fields, never a popup's search box opened by these keys: Eightfold's John Deere
+  // form moved focus on to the next field mid-word ("Not a protected veteran" → "…Yes protected veteran" there).
+  const shown = follow
+    ? new Set([...document.querySelectorAll("input,textarea")].filter((i) => i !== el && i.getClientRects().length))
+    : null;
   let prefix = el.value;
   for (const ch of text) {
     const now = follow ? activeDeep() : el;
     if (
       now &&
       now !== el &&
+      !shown?.has(now) &&
       (now instanceof HTMLTextAreaElement ||
         (now instanceof HTMLInputElement && /^(text|search|email|tel|url)$/.test(now.type))) &&
       // Only onward, to a popup's search box: a page handing focus back to an earlier field late (Eightfold's selects,
