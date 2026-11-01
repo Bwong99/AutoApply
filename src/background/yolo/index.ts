@@ -1,7 +1,7 @@
 // YOLO coordinator: the check timer, the queue, the application log, and every message of a run. With YOLO off no
 // alarm exists, so none of this runs.
 import type { Message, Responses, YoloResult } from "../../shared/messages";
-import { RE_APPLIED } from "../../shared/constants";
+import { RE_APPLIED, SLEPT_MS } from "../../shared/constants";
 import { resumeProblem } from "../../shared/resumeMode";
 import { createStorage, session } from "../../shared/storage";
 import type { AiTask } from "../../shared/settings";
@@ -27,6 +27,7 @@ import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
 import { textPdf } from "./pdf";
 import {
+  credit,
   end,
   fromRun,
   getRun,
@@ -37,6 +38,7 @@ import {
   start,
   watchTab,
   WATCHDOG,
+  woke,
   type Run,
 } from "./runner";
 import { createAccount, deleteAccount, getAccount } from "./vault";
@@ -44,6 +46,9 @@ import { createAccount, deleteAccount, getAccount } from "./vault";
 const store = createStorage("background");
 const CHECK = "yolo";
 const RESUME = "yolo-resume";
+/** `yolo-online|<what>|<tries>`: a batch step held until the network is back after the computer woke. */
+const ONLINE = "yolo-online";
+const WAKING = "Resuming after sleep";
 
 type Handler<T extends Message["type"]> = (
   msg: Extract<Message, { type: T }>,
@@ -211,8 +216,59 @@ async function requeue(item: QueueItem) {
   await store.set({ yoloQueue: [{ ...item, postedAt: RETRY }, ...(await store.get("yoloQueue"))] });
 }
 
-/** A run's outcome: retried in a tab when the hidden frame was refused, re-queued on a quota stop, else logged. */
+/**
+ * After the computer wakes (or the browser starts): the next pump or check 30 s on, once the network is back (Wi-Fi
+ * reconnects after the computer does). Still offline after 5 minutes, it goes ahead anyway.
+ */
+async function whenOnline(what: "pump" | "check", tries = 0) {
+  const until = Date.now() + 30_000;
+  // Holds other pumps off meanwhile, short of a longer pause (an AI usage limit's).
+  if (what === "pump" && (await store.get("yoloState")).pausedUntil < until)
+    await setState({ pausedUntil: until, pauseReason: WAKING });
+  await chrome.alarms.create(`${ONLINE}|${what}|${tries}`, { delayInMinutes: 0.5 });
+}
+
+async function online(alarm: string) {
+  const [, what, tries] = alarm.split("|") as [string, "pump" | "check", string];
+  if (!navigator.onLine && +tries < 10) return whenOnline(what, +tries + 1);
+  if (what === "check") return cycle();
+  if ((await store.get("yoloState")).pauseReason === WAKING) await setState({ pauseReason: "" });
+  await pump();
+}
+
+/** A hidden application the computer's sleep likely broke: it failed moments after waking, before submitting. */
+async function sleptThrough(run: Run, r: YoloResult): Promise<boolean> {
+  if (run.mode !== "apply" || run.host === "visible" || run.confirming || (run.item.retries ?? 0) >= 2) return false;
+  if (r.status === "submitted" || r.status === "skipped" || ("retryAt" in r && r.retryAt)) return false;
+  const now = Date.now();
+  if (woke(run, now)) return true;
+  // Woken just now, before the watchdog's late tick.
+  const due = (await chrome.alarms.get(WATCHDOG))?.scheduledTime;
+  return !!due && now - due > SLEPT_MS;
+}
+
+/** A browser restart lost the run (session storage) mid-application: its job goes back to the front of the queue. */
+async function recoverLost() {
+  const item = await store.get("yoloInFlight");
+  if (!item || (await getRun())) return;
+  await store.set({ yoloInFlight: null });
+  if ((item.retries ?? 0) >= 2) return;
+  await requeue({ ...item, retries: (item.retries ?? 0) + 1 });
+  if (yolo.enabled) await whenOnline("pump");
+}
+
+/**
+ * A run's outcome: started again when the computer's sleep broke it, retried in a tab when the hidden frame was
+ * refused, re-queued on a quota stop, else logged.
+ */
 async function finish(run: Run, r: YoloResult) {
+  if (await sleptThrough(run, r)) {
+    if (!(await end(run.id))) return;
+    const limit = deps.logLimit();
+    if (limit) await logRun(run, r, limit);
+    await requeue({ ...run.item, retries: (run.item.retries ?? 0) + 1 });
+    return whenOnline("pump");
+  }
   if (!(await end(run.id))) return;
   if (run.mode === "scrape") return resolveScrape(run, r);
   const limit = deps.logLimit();
@@ -266,10 +322,16 @@ async function logRun(run: Run, r: YoloResult, limit: number) {
   await store.set({ yoloLogs: [...(await store.get("yoloLogs")), { at: Date.now(), text }].slice(-limit) });
 }
 
-async function watchdog() {
+async function watchdog(due: number) {
   const run = await getRun();
   if (!run) return void (await chrome.alarms.clear(WATCHDOG));
-  const late = overdue(run);
+  const now = Date.now();
+  // Fired late: the computer slept since `due`, which the run's time limits don't count.
+  if (now - due > SLEPT_MS) {
+    credit(run, due, now);
+    await saveRun(run);
+  }
+  const late = overdue(run, now);
   if (late) await finish(run, late);
   // After a worker restart the tab listener is gone: listen again.
   else if (run.host !== "frame") watchTab(run);
@@ -470,11 +532,14 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     run.linkSites = undefined;
     // Held after submitting (past a form step, not an account's verification): the page after the emailed link or
     // code confirms it, unless it says that failed.
+    const held = run.confirming;
     if (kind === "verify" && confirmFirst(facts)) run.confirming ||= run.steps.some((s) => s.startsWith("form|"));
     else if (run.confirming && kind !== "verify" && kind !== "success") {
       if (verifyFailed(facts)) stop ??= "The emailed confirmation didn't go through";
       else kind = "success";
     }
+    // Submitted: never applied to again after a browser restart.
+    if (run.confirming && !held) await store.set({ yoloInFlight: null });
     const sig = signature(kind, facts);
     run.guesses = mergeGuesses(run.guesses, guesses);
     // The page reloads to retry a submission flagged as spam: its steps repeat from the start, only the flags count.
@@ -629,7 +694,10 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
 
 export function initYolo(d: YoloDeps) {
   deps = d;
-  const ready = store.get("yolo").then((y) => (yolo = y));
+  const ready = store.get("yolo").then(async (y) => {
+    yolo = y;
+    await recoverLost();
+  });
   store.onChange(["yolo"], (c) => {
     const prev = yolo;
     yolo = c.yolo ?? yolo;
@@ -641,8 +709,11 @@ export function initYolo(d: YoloDeps) {
   chrome.alarms.onAlarm.addListener(
     (a) =>
       void ready.then(async () => {
-        if (a.name === CHECK) await cycle();
-        else if (a.name === WATCHDOG) await watchdog();
+        // Fired late, the computer just woke: the network may not be back yet.
+        if (a.name === CHECK)
+          await (Date.now() - a.scheduledTime > SLEPT_MS || !navigator.onLine ? whenOnline("check") : cycle());
+        else if (a.name === WATCHDOG) await watchdog(a.scheduledTime);
+        else if (a.name.startsWith(`${ONLINE}|`)) await online(a.name);
         else if (a.name === RESUME) {
           await setState({ pausedUntil: 0, pauseReason: "" });
           await pump();

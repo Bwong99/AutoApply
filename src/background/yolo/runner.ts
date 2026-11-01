@@ -3,7 +3,7 @@
 // a service-worker restart mid-application loses nothing but in-memory waiters.
 import { CAPTCHA_WAIT_MS, EMAIL_WAIT_MS } from "../../shared/constants";
 import type { YoloResult } from "../../shared/messages";
-import { session } from "../../shared/storage";
+import { createStorage, session } from "../../shared/storage";
 import type { Guess, QueueItem } from "../../shared/yolo";
 import { closeTab, openFrame, openTab } from "./host";
 import { applyUrl } from "./jobKey";
@@ -33,9 +33,12 @@ export interface Run {
   confirming?: boolean;
   /** An emailed link was just handed out: the sites its page must land on. */
   linkSites?: string[];
+  /** When the computer last woke from sleeping during the run. */
+  wokeAt?: number;
 }
 
 const KEY = "yoloRun";
+const store = createStorage("background");
 export const WATCHDOG = "yolo-watchdog";
 /** No driver within this long: the page didn't load, or refused to run hidden. */
 const HELLO_MS = 45_000;
@@ -69,6 +72,8 @@ export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"
   const url = mode === "apply" ? applyUrl(item.url) : item.url;
   // Saved before the page loads: its driver says hello as soon as it starts.
   await saveRun(run);
+  // Survives a browser restart, which loses the run: the job goes back in the queue (index.ts initYolo).
+  if (mode === "apply" && host !== "visible") await store.set({ yoloInFlight: item });
   if (host === "frame") await openFrame(url);
   else {
     run.tabId = await openTab(url, host === "visible");
@@ -96,6 +101,8 @@ export async function scrape(url: string, timeoutMs = 40_000): Promise<Link[]> {
 export async function end(id: string): Promise<Run | null> {
   const run = await getRun();
   if (run?.id !== id) return null;
+  // Before the run: a worker dying in between leaves no marker to requeue a finished job by.
+  await store.set({ yoloInFlight: null });
   await session.remove(KEY);
   unwatchTab();
   await chrome.alarms.clear(WATCHDOG);
@@ -123,6 +130,20 @@ export function overdue(run: Run, now = Date.now()): YoloResult | null {
   if (!visible && now - run.startedAt > RUN_MS) return { status: "failed", reason: "Took over 12 minutes" };
   return null;
 }
+
+/**
+ * Counts the time the computer slept (from `asleepSince` until `now`) as paused: the run's clocks that started before
+ * it move on by as much, so the limits above count awake time only. Progress made since waking stays as it is.
+ */
+export function credit(run: Run, asleepSince: number, now = Date.now()) {
+  const shift = (t: number) => (t <= asleepSince ? t + now - asleepSince : t);
+  run.startedAt = shift(run.startedAt);
+  run.stepAt = shift(run.stepAt);
+  run.wokeAt = now;
+}
+
+/** The computer woke during the run moments ago: a failure now is likely the sleep's (an expired session, no network). */
+export const woke = (run: Run, now = Date.now()) => !!run.wokeAt && now - run.wokeAt < STEP_MS;
 
 // ---------- tab hosts ----------
 // A tab's content script waits to be told it runs YOLO (a hidden frame knows from its ancestors). Listening only

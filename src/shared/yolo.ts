@@ -84,10 +84,17 @@ export const QueueItemSchema = z.object({
   source: z.string().catch(""),
   postedAt: z.number().catch(0),
   addedAt: z.number().catch(0),
+  /** Times the job was restarted after the computer slept or the browser restarted mid-application. */
+  retries: z.number().optional().catch(undefined),
 });
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 
-export const ApplicationSchema = QueueItemSchema.omit({ listing: true, postedAt: true, addedAt: true }).extend({
+export const ApplicationSchema = QueueItemSchema.omit({
+  listing: true,
+  postedAt: true,
+  addedAt: true,
+  retries: true,
+}).extend({
   /** The confirmation page a submission ended on. */
   doneUrl: z.string().catch(""),
   mode: z.enum(["yolo", "manual"]).catch("yolo"),

@@ -1,5 +1,5 @@
 // Sites' verification emails (links and one-time codes), read from the YOLO inbox with the Gmail API, read-only.
-import { EMAIL_WAIT_MS } from "../../shared/constants";
+import { EMAIL_WAIT_MS, SLEPT_MS } from "../../shared/constants";
 import { session } from "../../shared/storage";
 
 export class GmailAuthError extends Error {}
@@ -139,7 +139,7 @@ export function feedTexts(xml: string, to: string, since: number): string[] | nu
  * codes: the feed holds each message's subject and opening text, not its links.
  */
 export async function waitForFeedCode(to: string, since: number, timeoutMs = EMAIL_WAIT_MS): Promise<string | null> {
-  for (const end = Date.now() + timeoutMs; Date.now() < end; await sleep(10_000)) {
+  for (let end = Date.now() + timeoutMs; Date.now() < end; end += await nap()) {
     for (let u = 0; u < 5; u++) {
       const r = await fetch(`https://mail.google.com/mail/u/${u}/feed/atom`, { credentials: "include" }).catch(
         () => null,
@@ -157,6 +157,19 @@ export async function waitForFeedCode(to: string, since: number, timeoutMs = EMA
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The wait between inbox checks. Returns how long the computer slept meanwhile, which the wait doesn't count, and then
+ * gives the network up to 2 minutes to come back before the next check.
+ */
+async function nap(): Promise<number> {
+  const t = Date.now();
+  await sleep(10_000);
+  const slept = Date.now() - t - 10_000;
+  if (slept < SLEPT_MS) return 0;
+  for (let i = 0; i < 24 && !navigator.onLine; i++) await sleep(5000);
+  return Date.now() - t - 10_000;
+}
+
 /** Polls the inbox for a message to `to` received after `since` that holds what `want`s (a link for `sites`); null after 5 minutes. */
 export async function waitForEmail(
   token: () => Promise<string>,
@@ -173,7 +186,7 @@ export async function waitForEmail(
     return r.json() as Promise<T>;
   };
   const tried = new Set<string>();
-  for (const end = Date.now() + timeoutMs; Date.now() < end; await sleep(10_000)) {
+  for (let end = Date.now() + timeoutMs; Date.now() < end; end += await nap()) {
     const q = `to:${to} after:${Math.floor(since / 1000) - 120}`;
     const list = await api<{ messages?: { id: string }[] }>(`messages?maxResults=10&q=${encodeURIComponent(q)}`);
     for (const { id } of list.messages ?? []) {

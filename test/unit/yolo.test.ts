@@ -10,7 +10,7 @@ import { extract, feedTexts, siteOf } from "../../src/background/yolo/gmail";
 import { textPdf, wrap } from "../../src/background/yolo/pdf";
 import { decrypt, encrypt, newPassword } from "../../src/background/yolo/vault";
 import { applied, discover, inQueueOrder, RETRY } from "../../src/background/yolo/discover";
-import { overdue, type Run } from "../../src/background/yolo/runner";
+import { credit, overdue, woke, type Run } from "../../src/background/yolo/runner";
 import { mapFields } from "../../src/background/services/mapFields";
 import type { Gemini } from "../../src/background/gemini/client";
 import { defaultSettings } from "../../src/shared/settings";
@@ -669,6 +669,31 @@ describe("run watchdog", () => {
     expect(overdue(run("visible", "form"), 15 * min)).toMatchObject({ reason: "No progress for 3 minutes" });
     expect(overdue(run("frame", "captcha"), 15 * min)).toMatchObject({ reason: "No progress for 3 minutes" });
     expect(overdue(run("tab", "form"), 13 * min)).toMatchObject({ reason: "Took over 12 minutes" });
+  });
+
+  it("doesn't count the time the computer slept", () => {
+    const r = run("frame", "form");
+    // Asleep from 12 min (the watchdog's missed tick) for 2 hours.
+    credit(r, 12 * min, 132 * min);
+    expect(overdue(r, 132 * min)).toBeNull();
+    expect(r).toMatchObject({ startedAt: 120 * min, stepAt: 131 * min, wokeAt: 132 * min });
+    // Its limits still hold over awake time.
+    expect(overdue(r, 133 * min)).toMatchObject({ reason: "Took over 12 minutes" });
+  });
+
+  it("keeps progress made since waking", () => {
+    const r = run("frame", "form");
+    r.stepAt = 131 * min; // a step reported after waking, before the watchdog's late tick
+    credit(r, 12 * min, 132 * min);
+    expect(r.stepAt).toBe(131 * min);
+  });
+
+  it("blames the sleep for a failure only right after waking", () => {
+    const r = run("frame", "form");
+    expect(woke(r, 20 * min)).toBe(false);
+    credit(r, 12 * min, 20 * min);
+    expect(woke(r, 22 * min)).toBe(true);
+    expect(woke(r, 24 * min)).toBe(false);
   });
 
   it("gives a verification step the email's whole wait", () => {

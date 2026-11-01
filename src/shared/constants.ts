@@ -173,6 +173,8 @@ export const CAPTCHA_WAIT_MS = 10 * 60_000;
 export const CAPTCHA_SELF_CLEAR_MS = 20_000;
 /** How long a YOLO run blocked on a verification email waits for it to arrive. */
 export const EMAIL_WAIT_MS = 5 * 60_000;
+/** A timer firing at least this late means the computer slept meanwhile (YOLO's watchdog ticks every 30 s). */
+export const SLEPT_MS = 60_000;
 /** A page confirming an application went through (YOLO's success check, and the user's own submissions). */
 export const RE_APPLIED =
   /thanks?( you)?( so much)? for (applying|your application|submitting)|application (has been |was )?(successfully )?(submitted|received|sent|completed?)\b|we('ve| have) (successfully )?received your application|successfully (applied|submitted)|your application (is|has been) (complete|submitted|received|on its way)|you('ve| have) (successfully )?applied|application submitted/i;
