@@ -190,6 +190,8 @@ export async function drive(deps: DriverDeps) {
           if (rep.retryAt) return result({ status: "failed", reason: "AI usage limit reached", retryAt: rep.retryAt });
           if (rep.fatal) return needs(rep.fatal);
           if (rep.unfilled.length) return needs(`Couldn't fill: ${rep.unfilled.slice(0, 3).join(", ")}`);
+          // A button the page enables once its form validates can lag the last answer (iCIMS's email step "Next").
+          await waitFor(() => findNext() ?? findSubmit(), 5000);
           const next = findNext();
           const b = next ?? findSubmit();
           if (!b) return result({ status: "failed", reason: "No Next or Submit button", guesses: deps.guesses() });
