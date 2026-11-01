@@ -184,6 +184,14 @@ describe("grouping (§11.5)", () => {
     expect(fields().map((h) => [h.desc.kind, h.desc.options])).toEqual([["radio_group", ["YES", "NO"]]]);
   });
 
+  it("reads a file box whose page shows the file it already holds as prefilled (iCIMS)", () => {
+    setBody(`<div><label for="r">Please upload your resume *</label><input type="file" id="r" required>
+      <span>Andy Wu Resume.pdf</span><a href="#">Replace Resume</a></div>`);
+    expect(fields().map((h) => [h.prefilled, h.desc.currentValue])).toEqual([[true, "Resume.pdf"]]);
+    setBody(`<div><label for="r">Résumé</label><input type="file" id="r"><span>Accepted: .pdf, .docx</span></div>`);
+    expect(fields()[0].prefilled).toBe(false);
+  });
+
   it("names a file box in an attachment menu by the document it offers, not its opener (Jobvite)", () => {
     const menu = (i: number, doc: string) =>
       `<div role="dialog" aria-label="Attachment Options"><span role="button">Dropbox</span><label for="file-input-${i}">File</label><input id="file-input-${i}" type="file"><span role="button">Type or Paste ${doc}</span></div>`;

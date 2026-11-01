@@ -964,7 +964,8 @@ function unfilledRequired(): FieldHandle[] {
     const s = states.get(h.id)?.status;
     // An uploader empties its file input once it has taken the file (SmartRecruiters): its status says it's done.
     if (s === "needs" || s === "failed") return true;
-    return s !== "skipped" && !(h.desc.kind === "file" && s === "filled") && !readValue(h);
+    // So does one that held its file when scanned (iCIMS, after parsing the résumé).
+    return s !== "skipped" && !(h.desc.kind === "file" && (s === "filled" || h.prefilled)) && !readValue(h);
   });
 }
 

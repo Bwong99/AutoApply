@@ -331,7 +331,19 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     h.sensitive = /^cc-/.test((d.autocomplete ?? "").split(/\s+/).pop() ?? "") || RE_SENSITIVE_LABEL.test(label);
     h.consent = isConsent(d);
 
-    const current = readValue(h);
+    // A file the page already holds shows by name beside its emptied box: iCIMS reloads its profile after parsing the
+    // résumé ("Andy Wu Resume.pdf · Replace Resume"), and uploading it again reloaded it again until the run gave up.
+    let current = readValue(h);
+    if (kind === "file" && !current && container.querySelectorAll("input[type=file]").length === 1) {
+      const swap = [...container.querySelectorAll<HTMLElement>("button,a,[role=button],input[type=button]")].some((b) =>
+        /^(replace|remove|delete|change)\b/i.test(
+          collapse(b instanceof HTMLInputElement ? b.value : b.innerText || b.getAttribute("aria-label") || ""),
+        ),
+      );
+      // Inline text runs together ("Andy Wu Resume.pdfReplace Resume"): the extension ends where lowercase does.
+      if (swap)
+        current = /[^\s/\\]*[\w)-]\.(pdf|PDF|docx?|DOCX?|rtf|odt|txt)(?![a-z])/.exec(container.innerText)?.[0] ?? "";
+    }
     if (current) d.currentValue = clip(current, 300);
     h.prefilled = isPrefilled(h, current);
 
