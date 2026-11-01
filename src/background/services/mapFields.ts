@@ -1228,8 +1228,9 @@ function gpaDecision(f: FieldDescriptor, education: Profile["education"]): Decis
   if (isMulti(f) || !/\bGPA\b|grade point/i.test(f.label) || !gpa || !scale) return null;
   if (/\b(graduate|doctorate|master'?s?|ph\.?d|high school)\b/i.test(f.label)) return null;
   if (!f.options) {
-    // Asked on a stated scale in a box: Airwallex's "on a 5.0 scale … please convert" got 4.33 (of 4.33).
-    const m = /\b(\d+(?:\.\d+)?)[- ]?(?:point )?scale\b|\bout of (\d+(?:\.\d+)?)\b/i.exec(f.label);
+    // Asked on a stated scale in a box: Airwallex's "on a 5.0 scale … please convert" got 4.33 (of 4.33). xAI states
+    // it in the hint ("Please convert your GPA to a 4.0 scale"): the audit rejected the model's 4.00, the guess wrote 3.98.
+    const m = /\b(\d+(?:\.\d+)?)[- ]?(?:point )?scale\b|\bout of (\d+(?:\.\d+)?)\b/i.exec(`${f.label} ${f.hint ?? ""}`);
     const to = Number(m?.[1] ?? m?.[2]);
     if (!to || (f.kind !== "text" && f.kind !== "number")) return null;
     const text = String(to === scale ? gpa : Math.round((gpa / scale) * to * 100) / 100);
