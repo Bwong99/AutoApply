@@ -1,4 +1,4 @@
-You triage a YOLO-mode sweep of the AutoApply extension. Do not edit code, run browsers or commit.
+You triage a {{MODE_NAME}} sweep of the AutoApply extension. Do not edit code, run browsers or commit.
 
 Read first: {{SKILL}} (report format, expected stops), {{NOTES}} if it exists (site quirks found earlier), and the applicant's profile {{PROFILE}}.
 
@@ -7,9 +7,9 @@ Reports from this round (one per job posting): {{REPORTS}}
 Bugs already on file. Do not report an open, unfixable or not-a-bug one again. If a fixed one shows up again, report it as new with "regressed <id>" in its evidence:
 {{KNOWN}}
 
-YOLO must apply with no user input at all except CAPTCHAs, with every field filled accurately. For each report find:
+{{GOAL}} For each report find:
 
-1. open/navigate/submit failures: RESULT other than DRY-OK/SUBMITTED, unless it is an expected stop listed in the skill.
+1. {{FAILURES}}
 2. fields left blank or on a default value that the profile, the résumé or a sensible best guess should fill (`! BLANK*` rows, and `? empty` rows that should have been filled; leave genuinely optional fields that the profile cannot answer).
 3. inaccurate values: `! SUS` rows, AI ANSWERS or field values that contradict the profile, wrong dropdown options, spilled or mixed-up entries, wrong dates.
 

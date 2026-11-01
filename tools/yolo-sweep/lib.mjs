@@ -57,6 +57,9 @@ const KINDS = [
   ["jibe", /jibeapply\.com/],
   ["gem", /jobs\.gem\.com/],
 ];
+/** Sweep modes: YOLO (run.mjs) or manual autofill with YOLO off (fill.mjs). Each keeps its own tested list. */
+export const MODE = process.env.MODE === "manual" ? "manual" : "yolo";
+export const testedFile = (mode = MODE) => path.join(STATE, mode === "manual" ? "tested-manual.json" : "tested.json");
 export const ACCOUNT_KINDS = new Set(["workday", "oracle", "successfactors", "icims", "taleo", "avature"]);
 export const kindOfUrl = (url) => KINDS.find(([, re]) => re.test(url))?.[0] ?? "other";
 /** Tenant: Workday/Oracle/etc. accounts are per subdomain. */
@@ -92,7 +95,8 @@ export function profileChecks(p) {
       pe.phone?.number,
       (v, e) => digits(v).endsWith(digits(e).slice(-10)),
     ],
-    [/^city\b|city of residence/i, a.city],
+    // Location typeaheads hold "City, Region, Country".
+    [/^city\b|city of residence/i, a.city, (v, e) => v.toLowerCase().startsWith(e.toLowerCase())],
     [/postal|zip/i, a.postalCode, (v, e) => v.replace(/\s/g, "").toLowerCase() === e.replace(/\s/g, "").toLowerCase()],
     [
       /linkedin/i,

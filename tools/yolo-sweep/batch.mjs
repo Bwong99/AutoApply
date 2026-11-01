@@ -1,10 +1,11 @@
-// Runs run.mjs over a list of postings, a few at a time, and records them in .yolo-sweep/tested.json.
+// Runs run.mjs (or fill.mjs with MODE=manual) over a list of postings, a few at a time, and records them in
+// .yolo-sweep/tested.json (tested-manual.json).
 // usage: node tools/yolo-sweep/batch.mjs <list> <outDir>   list lines: "name url [{json meta: company, title}]"
-// env: P (parallel browsers, default 3: more makes typeaheads time out under load), REAL=1, MAXMIN
+// env: P (parallel browsers, default 3: more makes typeaheads time out under load), REAL=1, MAXMIN, MODE=manual
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { STATE, TOOLS, mkdirp, readJson, writeJson } from "./lib.mjs";
+import { MODE, TOOLS, mkdirp, readJson, testedFile as testedPath, writeJson } from "./lib.mjs";
 
 const [list, outDir] = process.argv.slice(2);
 if (!list || !outDir) throw new Error("usage: node tools/yolo-sweep/batch.mjs <list> <outDir>");
@@ -16,7 +17,7 @@ const jobs = fs
   .filter(Boolean)
   .map(([, name, url, meta]) => ({ name, url, meta: meta ? JSON.parse(meta) : {} }));
 const P = Math.max(1, Number(process.env.P ?? 3));
-const testedFile = path.join(STATE, "tested.json");
+const testedFile = testedPath();
 let port = 9400 + Math.floor(Math.random() * 50) * 10;
 
 function one({ name, url, meta }) {
@@ -24,10 +25,14 @@ function one({ name, url, meta }) {
   if (!meta.company) delete env.COMPANY;
   if (!meta.title) delete env.TITLE;
   return new Promise((res) => {
-    const c = spawn(process.execPath, [path.join(TOOLS, "run.mjs"), url, path.join(outDir, name)], {
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const c = spawn(
+      process.execPath,
+      [path.join(TOOLS, MODE === "manual" ? "fill.mjs" : "run.mjs"), url, path.join(outDir, name)],
+      {
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let err = "";
     c.stderr.on("data", (d) => (err += d));
     c.on("close", () => {

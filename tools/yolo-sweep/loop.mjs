@@ -1,6 +1,7 @@
 // The whole YOLO bug-fix flow, unattended: sweep varied live postings → triage the reports (cheap model)
 // → one fresh fix session per bug (strong model) → next round, until a round finds no bugs.
 // usage: node tools/yolo-sweep/loop.mjs [options]   (see README.md)
+//   --mode yolo|manual (default yolo; manual = autofill with YOLO off, via fill.mjs)
 //   --rounds N (default 5)  --per N (postings per ATS weight, default 1)  --max-fixes N per round (default 15)
 //   --submit       after the dry rounds, really submit the postings that passed dry (applies to jobs for you)
 //   --triage-model sonnet --triage-effort medium --fix-model opus --fix-effort high
@@ -10,7 +11,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, STATE, TOOLS, kindOfUrl, loadExport, mkdirp, readJson, writeJson } from "./lib.mjs";
+import { ROOT, STATE, TOOLS, kindOfUrl, loadExport, mkdirp, readJson, testedFile, writeJson } from "./lib.mjs";
 
 const argv = process.argv.slice(2);
 const opt = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -19,6 +20,26 @@ const ROUNDS = Number(opt("--rounds", 5));
 const PER = opt("--per", "1");
 const MAX_FIXES = Number(opt("--max-fixes", 15));
 const PERM = opt("--perm", "acceptEdits");
+const MANUAL = opt("--mode", "yolo") === "manual";
+const ENV = { MODE: MANUAL ? "manual" : "yolo" };
+/** What each mode's prompts say: its runner, its passing status, and what counts as a failure. */
+const M = MANUAL
+  ? {
+      MODE_NAME: "manual-autofill (YOLO off)",
+      RUNNER: "fill.mjs",
+      OK: "FILLED",
+      GOAL: "Manual autofill (YOLO off): the user opens the application form and presses Fill, and every field must be shown and filled with accurate information. The harness clicks Apply and Next itself.",
+      FAILURES:
+        "fill failures: RESULT TIMEOUT or ERROR, `BADGES not filled` rows, and NO-FORM when the page plainly has an application form (not when it needs a sign-in or the posting is closed).",
+    }
+  : {
+      MODE_NAME: "YOLO-mode",
+      RUNNER: "run.mjs",
+      OK: "DRY-OK",
+      GOAL: "YOLO must apply with no user input at all except CAPTCHAs, with every field filled with accurate information.",
+      FAILURES:
+        "open/navigate/submit failures: RESULT other than DRY-OK/SUBMITTED, unless it is an expected stop listed in the skill.",
+    };
 const SKILL = path.join(ROOT, ".claude", "skills", "yolo-sweep", "SKILL.md");
 const NOTES = path.join(STATE, "notes.md");
 const PROFILE = path.join(STATE, "profile.txt");
@@ -153,6 +174,7 @@ const reportsOf = (dir) =>
 async function triage(dir) {
   const known = bugs.map((b) => `- ${b.id} [${b.status}] ${b.kind}: ${b.title}`).join("\n") || "(none)";
   const t = fill(fs.readFileSync(path.join(TOOLS, "prompts", "triage.md"), "utf8"), {
+    ...M,
     SKILL,
     NOTES,
     PROFILE,
@@ -178,14 +200,15 @@ async function triage(dir) {
 }
 
 async function fix(b, round, real) {
-  const tested = readJson(path.join(STATE, "tested.json"), {});
+  const tested = readJson(testedFile(ENV.MODE), {});
   const regress = Object.entries(tested)
-    .filter(([u, t]) => t.status === "DRY-OK" && kindOfUrl(u) === b.kind && !b.urls.includes(u))
+    .filter(([u, t]) => t.status === M.OK && kindOfUrl(u) === b.kind && !b.urls.includes(u))
     .slice(-2)
     .map(([u]) => u);
   const out = mkdirp(path.join(STATE, "rounds", String(round), "fix-" + b.id));
   const t =
     fill(fs.readFileSync(path.join(TOOLS, "prompts", "fix.md"), "utf8"), {
+      ...M,
       SKILL,
       NOTES,
       TOOLS,
@@ -200,7 +223,7 @@ async function fix(b, round, real) {
       REGRESS: regress.join(" ") || "(none yet)",
     }) +
     (real
-      ? "\nThis bug came from a real submission: you may re-run with REAL=1 (build with --real) to verify the submit."
+      ? `\nThis bug came from a real submission: you may re-run with REAL=1${MANUAL ? "" : " (build with --real)"} to verify the submit.`
       : "");
   const text = await claude(
     t,
@@ -225,16 +248,17 @@ async function round(r, real, list) {
   const dir = mkdirp(path.join(STATE, "rounds", String(r)));
   const urls = path.join(dir, "urls.txt");
   if (list) fs.writeFileSync(urls, list.join("\n") + "\n");
-  else node([path.join(TOOLS, "pick.mjs"), "--per", PER, "--out", urls]);
+  else node([path.join(TOOLS, "pick.mjs"), "--per", PER, "--out", urls], ENV);
   if (!fs.readFileSync(urls, "utf8").trim()) return (say("no untested postings left"), 0);
-  node([path.join(TOOLS, "build.mjs"), ...(real ? ["--real"] : [])]);
+  node([path.join(TOOLS, "build.mjs"), ...(real && !MANUAL ? ["--real"] : [])]);
   say(
     `round ${r}${real ? " (REAL submits)" : ""}: running ${fs.readFileSync(urls, "utf8").trim().split("\n").length} postings`,
   );
-  node([path.join(TOOLS, "batch.mjs"), urls, dir], real ? { REAL: "1" } : {});
+  node([path.join(TOOLS, "batch.mjs"), urls, dir], { ...ENV, ...(real ? { REAL: "1" } : {}) });
   const found = await triage(dir);
   say(`round ${r}: ${found.length} new bug(s)`);
-  for (const [i, f] of found.entries()) bugs.push({ id: `r${r}b${i + 1}`, round: r, status: "open", ...f });
+  for (const [i, f] of found.entries())
+    bugs.push({ id: `r${r}b${i + 1}`, round: r, mode: ENV.MODE, status: "open", ...f });
   save();
   // Widest bugs first; leftovers stay open for the next run.
   const open = bugs.filter((b) => b.status === "open").sort((a, b) => b.urls.length - a.urls.length);
@@ -253,9 +277,9 @@ for (let i = 0; i < ROUNDS && !clean; i++) {
   clean = (await round(state.round, false)) === 0 && !bugs.some((b) => b.status === "open");
 }
 if (flag("--submit")) {
-  const tested = readJson(path.join(STATE, "tested.json"), {});
+  const tested = readJson(testedFile(ENV.MODE), {});
   const ok = Object.entries(tested)
-    .filter(([, t]) => t.status === "DRY-OK")
+    .filter(([, t]) => t.status === M.OK)
     .map(([u]) => `${path.basename(tested[u].run)} ${u}`);
   state.round++;
   writeJson(path.join(STATE, "state.json"), state);

@@ -1,9 +1,21 @@
 // Picks a varied set of live, untested SWE-adjacent intern/co-op postings: a few per applicant-tracking system.
 // usage: node tools/yolo-sweep/pick.mjs [--per N] [--out file]   prints "name url" lines (batch.mjs input)
-// env: PREFER=<regex> location preference (default: the export's YOLO locations)
+// env: PREFER=<regex> location preference (default: the export's YOLO locations),
+//      MODE=manual (skip sign-in ATSs, whose forms the manual harness can't reach; own tested list)
 import fs from "node:fs";
 import path from "node:path";
-import { STATE, companyOf, kindOfUrl, loadExport, mkdirp, nameFor, readJson } from "./lib.mjs";
+import {
+  ACCOUNT_KINDS,
+  MODE,
+  STATE,
+  companyOf,
+  kindOfUrl,
+  loadExport,
+  mkdirp,
+  nameFor,
+  readJson,
+  testedFile,
+} from "./lib.mjs";
 
 const FEEDS = [
   "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
@@ -21,7 +33,7 @@ const per = Number(arg("--per", 1));
 const outFile = arg("--out");
 const exp = loadExport();
 const prefer = new RegExp(process.env.PREFER ?? ((exp.yolo?.locations ?? []).join("|") || "$^"), "i");
-const tested = readJson(path.join(STATE, "tested.json"), {});
+const tested = readJson(testedFile(), {});
 
 async function feed(u, i) {
   const f = path.join(mkdirp(path.join(STATE, "feeds")), `feed${i}-${new Date().toISOString().slice(0, 10)}.json`);
@@ -55,6 +67,7 @@ const fresh = (l, isIntern) =>
     }));
 for (const x of [...fresh(intern, true), ...fresh(newGrad, false)]) {
   const k = kindOfUrl(x.url);
+  if (MODE === "manual" && ACCOUNT_KINDS.has(k)) continue;
   if (!groups.has(k)) groups.set(k, []);
   groups.get(k).push(x);
 }
