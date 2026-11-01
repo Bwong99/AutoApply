@@ -100,6 +100,8 @@ export const RE_SENSITIVE_LABEL =
 export const RE_CONSENT =
   /i (agree|acknowledge|certify|confirm|understand|accept)|\b(agreement|understanding)\b|consent|terms|privacy (policy|notice)|attest|\b(true|accurate|correct),? and (complete|correct|accurate|your own)\b/i;
 /** Consent that is not needed to apply: future/other roles, talent pools, marketing. */
+/** A job board as where someone heard of a job (the profile's "How did you hear" source). */
+export const RE_JOB_BOARD = /\b(linkedin|indeed|glassdoor|handshake|simplify|ziprecruiter|wellfound|angel ?list)\b/i;
 export const RE_OPTIONAL_CONSENT =
   /\b(future|other|additional|similar|relevant)\b(\s+\w+){0,2}\s+(opportunit\w*|openings|vacancies)|considered for (other|future)|talent (community|pool|network)|job alerts?|newsletter|marketing (e-?mails?|communications?|messages|materials)|unsubscribe|keep me (informed|updated|posted)|text messag\w*|\btext (you|me)\b|\bsms\b|alerts? for (similar|new|other|relevant|future) (jobs?|roles?|positions?|openings)|stay (up to date|in touch|informed|connected)\b|\b(retain|retention)\b[^.]*\b(additional|further|extra|extended|longer)\b/i;
 /** Opt-in to AI notetakers or recorded interviews: answered from the profile, not as a consent. Not "transcript". */

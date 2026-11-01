@@ -1,4 +1,5 @@
 // §14 fill dispatcher: picks the right strategy per kind; dropdowns/typeaheads run strictly one at a time.
+import { RE_JOB_BOARD } from "../../shared/constants";
 import { normalize } from "../../shared/normalize";
 import type { DocumentMeta } from "../../shared/types";
 import { localMatch, localMatchAll } from "../match/localMatch";
@@ -169,6 +170,11 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
       if (!texts && op.type === "intended" && h.searchInput && RE_HEARD_Q.test(h.desc.label)) {
         const found = await fillDropdown(h, [answerOf(op)]);
         if (found.outcome === "ok") return found;
+      }
+      // A flat list naming only the category (Sun Life's "Job Board" for LinkedIn): the AI chooser won't make the leap.
+      if (!texts && !h.searchInput && RE_HEARD_Q.test(h.desc.label) && RE_JOB_BOARD.test(answerOf(op))) {
+        const boards = options.filter((o) => /\bjob ?(boards?|sites?)\b/i.test(o));
+        if (boards.length === 1) texts = boards;
       }
       if (!texts) {
         const idx = await deps.choose(h, answerOf(op), options);

@@ -189,6 +189,24 @@ describe("remote dropdowns (Select2 AJAX)", () => {
     expect(chosen).toEqual([]);
   });
 
+  it("picks the job-board category of a flat how-they-heard list for a job board (Sun Life's Workday)", async () => {
+    setBody(`<div><label>How Did You Hear About Us?</label>
+      <div role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="menu">Select One</div></div>
+      <ul id="menu" role="listbox" hidden><li role="option">Direct Contact</li><li role="option">Job Board</li>
+      <li role="option">Sunlife Career Site</li></ul>`);
+    const h = scan(newScanState()).handles[0];
+    const ul = document.getElementById("menu")!;
+    h.el.addEventListener("mousedown", () => (ul.hidden = false));
+    ul.addEventListener("click", (e) => {
+      h.el.textContent = (e.target as HTMLElement).textContent;
+      ul.hidden = true;
+    });
+    const d = deps();
+    d.harvested.set(h.id, ["Direct Contact", "Job Board", "Sunlife Career Site"]);
+    expect(await fill(h, { type: "intended", answer: "LinkedIn" }, d)).toMatchObject({ outcome: "ok" });
+    expect(h.el.textContent).toBe("Job Board");
+  });
+
   it("closes a modal menu that hears Escape only from inside it (MUI)", async () => {
     setBody(`<div><label>Where would you like to work from?</label>
       <div role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="menu">Select</div></div>

@@ -18,6 +18,7 @@ import {
   RE_CONSENT,
   RE_ENTRY_SECTION,
   RE_INTERVIEW_RECORDING,
+  RE_JOB_BOARD,
   regionCode,
   regionCountry,
 } from "../../shared/constants";
@@ -172,7 +173,7 @@ function heardDecision(f: FieldDescriptor, heard: string, company = ""): Decisio
   }
   // A job board under a category of a custom list (Workday's "Job Board" › "LinkedIn"): searched for itself, else
   // chosen among the options as they read. The model picked categories, which open their own list instead.
-  const board = /\b(linkedin|indeed|glassdoor|handshake|simplify|ziprecruiter|wellfound|angel ?list)\b/i.test(heard);
+  const board = RE_JOB_BOARD.test(heard);
   if (
     !hits.length &&
     board &&
