@@ -1760,7 +1760,13 @@ function citedDateCheck(f: FieldDescriptor, d: Decision, profile: Profile): Deci
   const monthOf = (o: string) => MONTHS.findIndex((m) => new RegExp(`^${m}[a-z]*\\.?$`, "i").test(o.trim())) + 1;
   if (isYear ? Number(picked) === year : !monthOf(picked) || monthOf(picked) === month) return d;
   const want = isYear ? String(year) : MONTHS[month - 1].replace(/^./, (c) => c.toUpperCase());
-  const right = f.options.findIndex((o) => (isYear ? o.trim() === want : monthOf(o) === month));
+  let right = f.options.findIndex((o) => (isYear ? o.trim() === want : monthOf(o) === month));
+  // Available from a start date on: the first month offered after it (xAI's April–June for a January start).
+  if (right < 0 && !isYear && d.sources?.some((s) => /earliestStartDate$/.test(s)))
+    right = f.options.reduce((best, o, j) => {
+      const m = monthOf(o);
+      return m > month && (best < 0 || m < monthOf(f.options![best])) ? j : best;
+    }, -1);
   if (right < 0) return flag(f.id, `No option for ${want}`, want);
   return { ...d, optionIndexes: [right], intendedAnswer: f.options[right] };
 }

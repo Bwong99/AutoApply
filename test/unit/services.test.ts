@@ -1806,6 +1806,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       y2: [0, "profile.education[0].startDate"],
       y3: [1, "education.0.endDate"],
       m1: [0, "education.0.endDate"],
+      m2: [1, "preferences.earliestStartDate"],
     };
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
@@ -1821,6 +1822,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     } as unknown as Gemini;
     const profile = emptyProfile();
     profile.education = [{ ...profile.education[0], school: "UBC", startDate: "2024-09", endDate: "2028-05" }];
+    profile.preferences.earliestStartDate = "2027-01-01";
     const sel = (id: string, options: string[]) => field(id, { label: "", kind: "select", options });
     const r = await mapFields(
       { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
@@ -1830,6 +1832,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           sel("y2", ["2025", "2024", "2023"]),
           sel("y3", ["2029", "2028", "2027"]),
           sel("m1", ["January", "May"]),
+          sel("m2", ["June", "April", "May"]),
         ],
         profile,
         documents: [],
@@ -1841,6 +1844,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "2024",
       undefined,
       "May",
+      "April",
     ]);
   });
 
