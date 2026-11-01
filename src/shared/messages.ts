@@ -190,7 +190,8 @@ export interface Responses {
     posting?: string;
   } | null;
   /** `refused`: the site turned down our sign-in or sign-up (an account we hold no password for). */
-  YOLO_STEP: { kind: StepKind; stop?: string; refused?: boolean };
+  /** `needs`: a `stop` the user can finish (flagged as automated, or the application was already sent). */
+  YOLO_STEP: { kind: StepKind; stop?: string; refused?: boolean; needs?: boolean };
   YOLO_RESULT: Ok;
   YOLO_ANSWERS: Ok;
   YOLO_CREDENTIAL: { email: string; password: string; created: boolean } | null;

@@ -293,6 +293,18 @@ export function Yolo() {
         />
         <Gmail y={y} set={set} />
         <Toggle
+          label="Use emailed access codes"
+          help="When a site won't go on until you type a code it emailed to the YOLO email, YOLO reads it from Gmail and types it. Off: those applications are left for you."
+          checked={y.emailCodes}
+          onChange={(emailCodes) => set({ emailCodes })}
+        />
+        <Toggle
+          label="Open job verification links"
+          help="When an account or a submitted application won't go through until you open a link a site emailed, YOLO opens it. Only links to the job's own sites (or a mail service's click-tracking link that lands there), and only when the application is blocked on it. Needs the Gmail client ID above. Off: those applications are left for you."
+          checked={y.verifyLinks}
+          onChange={(verifyLinks) => set({ verifyLinks })}
+        />
+        <Toggle
           label="Retry in a background tab"
           help="Sites that refuse to work hidden or show a CAPTCHA there are retried in an inactive tab (in a collapsed “AutoApply” group), closed when done. Their later jobs start in one."
           checked={y.tabFallback}

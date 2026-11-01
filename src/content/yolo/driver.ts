@@ -110,8 +110,7 @@ export async function drive(deps: DriverDeps) {
       let kind: StepKind = step.kind;
       if (step.stop)
         return result({
-          // Turned down as a bot each time: a visible tab (the user's browser) usually passes.
-          status: /already/i.test(step.stop) ? "skipped" : kind === "flagged" ? "needs" : "failed",
+          status: /already/i.test(step.stop) ? "skipped" : step.needs ? "needs" : "failed",
           // What the page says about it ("Verify your email first") is the likely why.
           reason: [step.stop, alertText().slice(0, 200)].filter(Boolean).join(": "),
           guesses: deps.guesses(),

@@ -44,6 +44,10 @@ const base = z.object({
   sourceOrder: z.array(z.enum(SOURCE_GROUPS)).catch([...SOURCE_GROUPS]),
   email: z.string().catch(""),
   gmailClientId: z.string().catch(""),
+  /** Types one-time codes sites email to the YOLO address. */
+  emailCodes: b(true),
+  /** Opens a verification link a site emails, only when the application can't go on without it. */
+  verifyLinks: b(true),
   reapplyManual: b(false),
   warnOnYoloApplied: b(true),
   tabFallback: b(true),

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { setBody, stubLayout } from "./dom";
 import { captchaShown, embeddedForm, pageFacts } from "../../src/content/yolo/classify";
-import { confirmation, kindOf } from "../../src/background/yolo/classify";
+import { confirmation, confirmFirst, kindOf, verifyFailed } from "../../src/background/yolo/classify";
 
 const classify = (fields: number, hidden = false, requiredFields = 0) =>
   kindOf(pageFacts({ fields, requiredFields }), hidden);
@@ -70,6 +70,28 @@ describe("YOLO page kinds", () => {
     setBody(`<h2>Sign In</h2><div role="alert">Verify your account before you sign in or request a verification email.</div>
       <input type="email" value="a@b.c"><input type="password"><button>Sign In</button>`);
     expect(classify(1)).toBe("verify");
+    // A form that only mentions an email is filled, not waited on.
+    setBody(`<p>We'll send a confirmation email once you submit.</p><input><input><input>`);
+    expect(classify(3)).toBe("form");
+  });
+
+  it("holds a submission for its emailed link only when the page says it's required", () => {
+    const facts = (html: string) => (setBody(html), pageFacts({ fields: 0, requiredFields: 0 }));
+    const held = facts(`<h1>Almost done!</h1><p>Please verify your email address to complete your application.</p>`);
+    expect(confirmFirst(held)).toBe(true);
+    expect(kindOf(held, false)).toBe("verify");
+    const thanks = facts(
+      `<h1>Thanks for applying!</h1><p>To finish your application, click the link we emailed you.</p>`,
+    );
+    expect(kindOf(thanks, false)).toBe("verify");
+    // A notice about an email is not a hold.
+    const notice = facts(`<h1>Thank you for applying!</h1><p>Check your email for a confirmation.</p>`);
+    expect(confirmFirst(notice)).toBe(false);
+    expect(kindOf(notice, false)).toBe("success");
+    expect(confirmFirst(facts(`<p>Verify your email to get job alerts.</p>`))).toBe(false);
+    expect(verifyFailed(facts(`<h1>Your email has been verified</h1>`))).toBe(false);
+    expect(verifyFailed(facts(`<h1>This link has expired</h1>`))).toBe(true);
+    expect(verifyFailed(facts(`<p>Your email could not be verified.</p>`))).toBe(true);
   });
 
   it("finds a visible CAPTCHA challenge, never the invisible score badge", () => {

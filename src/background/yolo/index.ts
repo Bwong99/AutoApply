@@ -20,9 +20,9 @@ import { RELEVANCE_SCHEMA, RelevanceZ } from "../gemini/schemas";
 import { draftEssays } from "../services/draftEssays";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
-import { confirmation, kindOf, refused, signature } from "./classify";
+import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, inQueueOrder, RETRY } from "./discover";
-import { checkGmail, GmailAuthError, gmailToken, waitForEmail, waitForFeedCode } from "./gmail";
+import { checkGmail, GmailAuthError, gmailToken, siteOfUrl, waitForEmail, waitForFeedCode } from "./gmail";
 import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
 import { textPdf } from "./pdf";
@@ -461,7 +461,20 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     const run = await getRun();
     if (!fromRun(run, sender)) return { kind: "unknown", stop: "Not running" };
     // Without the tab retry, a bot check in the frame is the user's, like anywhere else.
-    const kind = kindOf(facts, run.host === "frame" && yolo.tabFallback);
+    let kind = kindOf(facts, run.host === "frame" && yolo.tabFallback);
+    let stop: string | undefined;
+    // An emailed link must land back on the run's sites (a click tracker's destination is only known now). The browser
+    // says where the page is, not the page.
+    const landed = siteOfUrl(sender.url ?? url);
+    if (run.linkSites && !run.linkSites.includes(landed)) stop = `The emailed link led to another site (${landed})`;
+    run.linkSites = undefined;
+    // Held after submitting (past a form step, not an account's verification): the page after the emailed link or
+    // code confirms it, unless it says that failed.
+    if (kind === "verify" && confirmFirst(facts)) run.confirming ||= run.steps.some((s) => s.startsWith("form|"));
+    else if (run.confirming && kind !== "verify" && kind !== "success") {
+      if (verifyFailed(facts)) stop ??= "The emailed confirmation didn't go through";
+      else kind = "success";
+    }
     const sig = signature(kind, facts);
     run.guesses = mergeGuesses(run.guesses, guesses);
     // The page reloads to retry a submission flagged as spam: its steps repeat from the start, only the flags count.
@@ -469,12 +482,11 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     run.steps.push(sig);
     run.stepAt = Date.now();
     if (kind === "success") run.confirmation = confirmation(facts);
-    // Reached the employer's own posting from a board link: it may be one applied to through another source.
-    let stop: string | undefined;
     if (kind === "blocked" && run.host === "frame") {
       const hosts = (await store.get("yoloTabHosts")).filter((h) => h !== hostOf(url));
       await store.set({ yoloTabHosts: [...hosts, hostOf(url)].slice(-200) });
     }
+    // Reached the employer's own posting from a board link: it may be one applied to through another source.
     if (!run.atsUrl && /^(form|signin|signup)$/.test(kind) && hostOf(url) !== hostOf(run.item.url)) {
       run.atsUrl = url;
       if (applied(await store.get("applications"), jobKey(url), run.item.alt, yolo.reapplyManual))
@@ -484,7 +496,13 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       stop = kind === "flagged" ? "The site kept flagging it as automated" : `Stuck at the same ${kind} step`;
     if (run.steps.length > 40) stop = "Too many steps";
     await saveRun(run);
-    return { kind, refused: /^(signin|signup|reset)$/.test(kind) && refused(facts), ...(stop ? { stop } : {}) };
+    return {
+      kind,
+      refused: /^(signin|signup|reset)$/.test(kind) && refused(facts),
+      // Turned down as a bot each time (a visible tab, the user's browser, usually passes), or already sent: the
+      // user's to finish, never a failure.
+      ...(stop ? { stop, needs: kind === "flagged" || !!run.confirming } : {}),
+    };
   },
 
   async YOLO_RESULT({ result }, sender) {
@@ -511,16 +529,30 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   },
 
   async YOLO_WAIT_EMAIL({ since, want }, sender) {
-    if (!fromRun(await getRun(), sender)) return { error: { kind: "other", message: "Not running" } };
+    const run = await getRun();
+    if (!fromRun(run, sender)) return { error: { kind: "other", message: "Not running" } };
+    const off = (message: string) => ({ error: { kind: "other" as const, message } });
+    if (want === "code" && !yolo.emailCodes) return off("Emailed codes are off in YOLO settings");
+    if (want === "link" && !yolo.verifyLinks) return off("Verification links are off in YOLO settings");
+    // Only a link back to the run's sites: the page asking (the browser's record of it, not the page's word), the
+    // employer's application site and the posting's.
+    const asking = siteOfUrl(sender.url ?? "");
+    if (want === "link" && !asking) return off("Unknown site");
+    const sites = [asking, siteOfUrl(run.atsUrl ?? ""), siteOfUrl(run.item.url)].filter(Boolean);
     const email = await accountEmail();
     try {
       // No API client: codes can still come from the Gmail inbox signed in to this browser, links can't.
-      if (!yolo.gmailClientId && want === "link") return { error: { kind: "other", message: "Gmail isn't connected" } };
+      if (!yolo.gmailClientId && want === "link") return off("Gmail isn't connected");
       const found = yolo.gmailClientId
-        ? await waitForEmail(() => gmailToken(yolo.gmailClientId, email, false), email, since, want)
+        ? await waitForEmail(() => gmailToken(yolo.gmailClientId, email, false), email, since, want, sites)
         : await waitForFeedCode(email, since);
       if (!found) return { error: { kind: "other", message: "No verification email arrived" } };
-      return want === "link" ? { link: found } : { code: found };
+      if (want === "code") return { code: found };
+      // Read minutes later: the run as it is now.
+      const now = await getRun();
+      if (now?.id !== run.id) return off("Not running");
+      await saveRun({ ...now, linkSites: sites });
+      return { link: found };
     } catch (e) {
       if (e instanceof GmailAuthError) {
         await setState({ gmailNeedsAuth: true, gmailConnected: false });

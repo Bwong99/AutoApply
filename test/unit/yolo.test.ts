@@ -6,7 +6,7 @@ import { parseFeed, parseGlassdoor, parseIndeed, parseLinkedIn } from "../../src
 import { boardOf, findOnEmployerBoard, jobLinks, sameTitle, workdayPosted } from "../../src/background/yolo/careers";
 import { locationMatches, rejectReason, titleMatches } from "../../src/background/yolo/filter";
 import { loadPlaces, PLACES_FILE } from "../../src/background/yolo/places";
-import { extract, feedTexts } from "../../src/background/yolo/gmail";
+import { extract, feedTexts, siteOf } from "../../src/background/yolo/gmail";
 import { textPdf, wrap } from "../../src/background/yolo/pdf";
 import { decrypt, encrypt, newPassword } from "../../src/background/yolo/vault";
 import { applied, discover, inQueueOrder, RETRY } from "../../src/background/yolo/discover";
@@ -379,6 +379,27 @@ describe("verification emails", () => {
     expect(extract(html, "link")).toBe("https://wd5.myworkday.com/acme/verify?token=abc&t=1");
   });
 
+  it("only takes a link back to the run's sites, or a tracked Verify button", () => {
+    const html = `<a href="https://evil.example/verify?t=1">Verify</a>
+      <a href="https://acme.wd5.myworkdayjobs.com/en-US/careers/activate/abc">Activate</a>`;
+    expect(extract(html, "link", [siteOf("acme.wd5.myworkdayjobs.com")])).toBe(
+      "https://acme.wd5.myworkdayjobs.com/en-US/careers/activate/abc",
+    );
+    expect(extract(html, "link", [siteOf("jobs.other.com")])).toBeNull();
+    // A click tracker hides where it leads: only its Verify button, never its other links or an unknown host's.
+    const tracked = `<a href="https://u1.ct.sendgrid.net/ls/click?upn=aaa">Unsubscribe</a>
+      <a href="https://evil.example/c/xyz"><b>Confirm email</b></a>
+      <a href="https://u1.ct.sendgrid.net/ls/click?upn=bbb"><span>Verify my email</span></a>`;
+    expect(extract(tracked, "link", ["acme.com"])).toBe("https://u1.ct.sendgrid.net/ls/click?upn=bbb");
+    // The site's own link wins over a tracked one.
+    expect(extract(`${tracked}<a href="https://jobs.acme.com/confirm?t=1">here</a>`, "link", ["acme.com"])).toBe(
+      "https://jobs.acme.com/confirm?t=1",
+    );
+    expect(siteOf("careers.acme.co.uk")).toBe("acme.co.uk");
+    expect(siteOf("wd5.myworkday.com")).toBe(siteOf("acme.wd1.myworkdaysite.com"));
+    expect(siteOf("myworkday.com.evil.io")).toBe("evil.io");
+  });
+
   it("reads codes from Gmail's unread-mail feed for the right account", () => {
     const xml = `<feed><title>Gmail - Inbox for andywu9509@gmail.com</title>
       <entry><title>Security code for your application to HeyGen</title><summary>Copy and paste this code into the security code field on your application: x7Kq9mPa This code expires</summary><issued>2026-10-26T06:00:00Z</issued></entry>
@@ -648,5 +669,12 @@ describe("run watchdog", () => {
     expect(overdue(run("visible", "form"), 15 * min)).toMatchObject({ reason: "No progress for 3 minutes" });
     expect(overdue(run("frame", "captcha"), 15 * min)).toMatchObject({ reason: "No progress for 3 minutes" });
     expect(overdue(run("tab", "form"), 13 * min)).toMatchObject({ reason: "Took over 12 minutes" });
+  });
+
+  it("gives a verification step the email's whole wait", () => {
+    expect(overdue(run("visible", "verify"), 11 * min + 7 * min)).toBeNull();
+    expect(overdue(run("visible", "verify"), 11 * min + 9 * min)).toMatchObject({
+      reason: "No progress for 3 minutes",
+    });
   });
 });

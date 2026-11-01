@@ -1,4 +1,5 @@
 // Sites' verification emails (links and one-time codes), read from the YOLO inbox with the Gmail API, read-only.
+import { EMAIL_WAIT_MS } from "../../shared/constants";
 import { session } from "../../shared/storage";
 
 export class GmailAuthError extends Error {}
@@ -58,13 +59,50 @@ const RE_LINK = /verif|activat|confirm|validat|token|registr|reset|password|sign
 const RE_NOT_LINK =
   /unsubscribe|privacy|terms|preferences|support|help|facebook|twitter|linkedin|instagram|youtube|\.(png|jpe?g|gif)\b/i;
 
-/** The verification link or one-time code in an email body. */
-export function extract(body: string, want: "link" | "code"): string | null {
+/** The site a host belongs to: its registrable domain (approximately: no public suffix list). Workday's are one. */
+export function siteOf(host: string): string {
+  const h = host.toLowerCase().replace(/\.$/, "");
+  if (/(^|\.)myworkday(jobs|site)?\.com$/.test(h)) return "myworkday.com";
+  const p = h.split(".");
+  // "co.uk", "com.au": a short label under a country code
+  const n = p.length > 2 && p.at(-1)!.length === 2 && p.at(-2)!.length <= 3 ? 3 : 2;
+  return p.slice(-n).join(".");
+}
+
+export const siteOfUrl = (u: string) => {
+  try {
+    return siteOf(new URL(u).hostname);
+  } catch {
+    return "";
+  }
+};
+
+/** Email services' click tracking: its links hide where they lead, so the run checks where it landed (YOLO_STEP). */
+const TRACKERS = new Set([
+  "sendgrid.net",
+  "mailgun.org",
+  "mandrillapp.com",
+  "awstrack.me",
+  "sparkpostmail.com",
+  "list-manage.com",
+]);
+const RE_LINK_TEXT = /verif|activat|confirm|validat/i;
+
+/**
+ * The verification link or one-time code in an email body. A link only on one of `sites` (the run's), else wrapped in
+ * a known click tracker behind a "Verify"/"Confirm" button: an email can't send the run anywhere else.
+ */
+export function extract(body: string, want: "link" | "code", sites?: string[]): string | null {
   if (want === "link") {
-    const urls = [...body.matchAll(/href=["']([^"']+)["']|(https?:\/\/[^\s"'<>]+)/g)].map((m) =>
-      (m[1] ?? m[2]).replace(/&amp;/g, "&"),
-    );
-    return urls.find((u) => /^https?:/.test(u) && RE_LINK.test(u) && !RE_NOT_LINK.test(u)) ?? null;
+    const links = [
+      ...[...body.matchAll(/<a\b[^>]*?\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].map((m) => [m[1], m[2]]),
+      ...[...body.matchAll(/https?:\/\/[^\s"'<>]+/g)].map((m) => [m[0], ""]),
+    ]
+      .map(([u, text]) => ({ url: u.replace(/&amp;/g, "&"), text: text.replace(/<[^>]+>/g, " "), site: siteOfUrl(u) }))
+      .filter((l) => /^https?:/.test(l.url) && !RE_NOT_LINK.test(l.url));
+    const own = links.find((l) => RE_LINK.test(l.url) && (!sites || sites.includes(l.site)));
+    const tracked = links.find((l) => TRACKERS.has(l.site) && RE_LINK_TEXT.test(l.text) && !RE_NOT_LINK.test(l.text));
+    return (own ?? tracked)?.url ?? null;
   }
   const t = body
     .replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ")
@@ -100,7 +138,7 @@ export function feedTexts(xml: string, to: string, since: number): string[] | nu
  * Without a Gmail API client: a code from the unread-mail feed of the Gmail account signed in to this browser. Only
  * codes: the feed holds each message's subject and opening text, not its links.
  */
-export async function waitForFeedCode(to: string, since: number, timeoutMs = 300_000): Promise<string | null> {
+export async function waitForFeedCode(to: string, since: number, timeoutMs = EMAIL_WAIT_MS): Promise<string | null> {
   for (const end = Date.now() + timeoutMs; Date.now() < end; await sleep(10_000)) {
     for (let u = 0; u < 5; u++) {
       const r = await fetch(`https://mail.google.com/mail/u/${u}/feed/atom`, { credentials: "include" }).catch(
@@ -119,13 +157,14 @@ export async function waitForFeedCode(to: string, since: number, timeoutMs = 300
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Polls the inbox for a message to `to` received after `since` that holds what `want`s; null after 5 minutes. */
+/** Polls the inbox for a message to `to` received after `since` that holds what `want`s (a link for `sites`); null after 5 minutes. */
 export async function waitForEmail(
   token: () => Promise<string>,
   to: string,
   since: number,
   want: "link" | "code",
-  timeoutMs = 300_000,
+  sites: string[],
+  timeoutMs = EMAIL_WAIT_MS,
 ): Promise<string | null> {
   const api = async <T>(path: string): Promise<T> => {
     const r = await fetch(`${API}/${path}`, { headers: { authorization: `Bearer ${await token()}` } });
@@ -142,7 +181,7 @@ export async function waitForEmail(
       tried.add(id);
       const m = await api<{ internalDate: string; payload: Part }>(`messages/${id}?format=full`);
       if (Number(m.internalDate) < since - 60_000) continue;
-      const found = extract(bodyOf(m.payload), want);
+      const found = extract(bodyOf(m.payload), want, sites);
       if (found) return found;
     }
   }

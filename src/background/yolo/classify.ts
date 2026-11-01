@@ -11,6 +11,12 @@ const RE_CLOSED =
 const RE_VERIFY =
   /verify your (email|account|identity)|(verification|confirmation|security) (code|email|link)|check your (email|inbox)|we('ve| have)? (just )?sent (you )?(an? )?(email|code|link)|enter the (\d+[- ]digit )?code|one[- ]time (pass)?code/i;
 const RE_FORGOT = /forgot (your )?password|reset (your )?password/i;
+/** A submission held until the emailed link opens ("Verify your email to complete your application"), not a mere notice. */
+const RE_CONFIRM_FIRST =
+  /\b(verify|confirm|activate) your (e-?mail|account|application|submission)( address)?\b[^.!\n]{0,40}\b(to|before|in order to) (complete|finish|submit|send|process)|\bto (complete|finish|submit) your (application|submission)\b[^.!\n]{0,40}\b(verify|confirm|click|follow|open)\b|\b(application|submission) (is|will) not (be )?(complete|submitted|sent|considered|processed|reviewed) until|\bwon'?t be (submitted|sent|considered|processed|reviewed) until/i;
+/** The emailed link or code didn't take. */
+const RE_VERIFY_FAILED =
+  /\b(not|n't|unable to|failed to) (be |been )?(verified|confirmed|activated)|expired|invalid|no longer valid|already (been )?used|went wrong/i;
 const RE_RESET = /(reset|new|change|create) (your )?password/i;
 const RE_SIGNUP = /create (an |your )?account|sign ?up|register|new (user|candidate)/i;
 const RE_FLAGGED = /flagged as (possible )?spam|suspicious activity|recaptcha (verification )?failed/i;
@@ -25,6 +31,7 @@ const RE_REFUSED =
  */
 export function kindOf(f: PageFacts, hidden: boolean): StepKind {
   if (f.captcha) return hidden ? "blocked" : "captcha";
+  if (confirmFirst(f)) return "verify";
   if (
     f.fields < 3 &&
     (RE_APPLIED.test(f.text) || /\/(thanks|thank-you|confirmation|success|submitted)\b/i.test(f.path))
@@ -33,8 +40,10 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
   if (f.text.length < 2000 && (RE_BLOCKED.test(f.text) || RE_BLOCKED.test(f.title))) return "blocked";
   if (f.fields < 2 && RE_CLOSED.test(f.text)) return "closed";
   if (!f.fields && !f.onward && RE_FLAGGED.test(f.text)) return hidden ? "blocked" : "flagged";
-  // Workday's sign-in turns an unverified account away with an alert over its form.
-  if ((RE_VERIFY.test(f.text) && (f.codeInput || !f.passwords)) || RE_VERIFY.test(f.alerts)) return "verify";
+  // Only a page the run can't get past otherwise: a code box, a "check your inbox" page with little else, or Workday's
+  // sign-in turning an unverified account away with an alert over its form. A form merely mentioning email is a form.
+  if ((RE_VERIFY.test(f.text) && (f.codeInput || (!f.passwords && f.fields < 3))) || RE_VERIFY.test(f.alerts))
+    return "verify";
   if (!f.passwords && RE_FORGOT.test(f.headings)) return "verify";
   if (f.passwords >= 2) return RE_RESET.test(f.headings) ? "reset" : "signup";
   if (f.passwords === 1)
@@ -65,6 +74,12 @@ export function kindOf(f: PageFacts, hidden: boolean): StepKind {
 }
 
 export const refused = (f: PageFacts) => RE_REFUSED.test(f.alerts);
+
+/** A confirmation page that holds the application until its emailed link opens. */
+export const confirmFirst = (f: PageFacts) => f.fields < 3 && !f.onward && RE_CONFIRM_FIRST.test(f.text);
+
+/** The page after an emailed link or code says it didn't work (expired, already used). */
+export const verifyFailed = (f: PageFacts) => RE_VERIFY_FAILED.test(f.text);
 
 /** What tells one step from the next, for loop detection. */
 export const signature = (kind: StepKind, f: PageFacts) => `${kind}|${f.path}|${f.headings}|${f.fields}`;

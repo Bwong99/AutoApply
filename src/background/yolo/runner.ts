@@ -1,7 +1,7 @@
 // One YOLO run at a time: a queued job (or a page read for discovery) loaded in a host and driven by the content
 // script inside it (src/content/yolo), which reports each step and the outcome. The run lives in session storage, so
 // a service-worker restart mid-application loses nothing but in-memory waiters.
-import { CAPTCHA_WAIT_MS } from "../../shared/constants";
+import { CAPTCHA_WAIT_MS, EMAIL_WAIT_MS } from "../../shared/constants";
 import type { YoloResult } from "../../shared/messages";
 import { session } from "../../shared/storage";
 import type { Guess, QueueItem } from "../../shared/yolo";
@@ -29,6 +29,10 @@ export interface Run {
   confirmation?: string;
   /** For the application's record (Application.notes). */
   notes?: string[];
+  /** Submitted, but held until the emailed link or code: the page after it confirms it, unless it says it failed. */
+  confirming?: boolean;
+  /** An emailed link was just handed out: the sites its page must land on. */
+  linkSites?: string[];
 }
 
 const KEY = "yoloRun";
@@ -112,7 +116,9 @@ export function overdue(run: Run, now = Date.now()): YoloResult | null {
   // A visible tab waits on the user: a CAPTCHA step gets the driver's whole wait, and the run no time limit.
   const visible = run.host === "visible";
   const captcha = visible && run.steps.at(-1)?.startsWith("captcha|");
-  if (now - run.stepAt > (captcha ? CAPTCHA_WAIT_MS + STEP_MS : STEP_MS))
+  // A verification step waits on the inbox without stepping.
+  const wait = captcha ? CAPTCHA_WAIT_MS : run.steps.at(-1)?.startsWith("verify|") ? EMAIL_WAIT_MS : 0;
+  if (now - run.stepAt > wait + STEP_MS)
     return { status: "failed", reason: captcha ? "The CAPTCHA wasn't solved" : "No progress for 3 minutes" };
   if (!visible && now - run.startedAt > RUN_MS) return { status: "failed", reason: "Took over 12 minutes" };
   return null;
