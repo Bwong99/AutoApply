@@ -8,7 +8,7 @@ import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
-import { emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
+import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
 import { alertText, findApply, findNext, findSubmit, labelOf, press, validationErrors } from "./nav";
 
@@ -202,6 +202,7 @@ export async function drive(deps: DriverDeps) {
           if (rep.retryAt) return result({ status: "failed", reason: "AI usage limit reached", retryAt: rep.retryAt });
           if (rep.fatal) return needs(rep.fatal);
           if (rep.unfilled.length) return needs(`Couldn't fill: ${rep.unfilled.slice(0, 3).join(", ")}`);
+          await acceptNotices();
           // A button the page enables once its form validates can lag the last answer (iCIMS's email step "Next").
           // Its own "Create Account" moves a sign-up form on (SuccessFactors' asks for name, phone and country too).
           const onward = () => findNext() ?? (signupForm ? findSignup() : null);

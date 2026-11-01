@@ -2,7 +2,7 @@
 // them, then pass email verification with a link or code from the YOLO inbox.
 import { RE_CONSENT, RE_OPTIONAL_CONSENT } from "../../shared/constants";
 import { isErr, send } from "../../shared/messages";
-import { setNativeValue, sleep, typeText } from "../fill/events";
+import { setNativeValue, sleep, typeText, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { codeInput, visiblePasswords } from "./classify";
@@ -53,6 +53,27 @@ function tickConsents() {
   }
 }
 
+const RE_NOTICE = /\b(acknowledge|privacy (notice|policy|statement)|data privacy|terms (of use|and conditions))\b/i;
+const RE_ACCEPT_BTN = /^(i )?(accept|agree)( (and|&) continue)?$/i;
+const accepted = new WeakSet<Element>();
+
+/**
+ * A required notice the page opens in a dialog to accept, with no box to tick: SuccessFactors' sign-up refused to go
+ * on until "Acknowledge that you have read the Applicant Privacy Notice" was opened and accepted.
+ */
+export async function acceptNotices() {
+  for (const opener of deepQueryAll('[aria-haspopup="dialog"]') as HTMLElement[]) {
+    const label = `${opener.getAttribute("aria-label") ?? ""} ${opener.innerText}`;
+    if (accepted.has(opener) || !isVisible(opener) || !RE_NOTICE.test(label) || RE_OPTIONAL_CONSENT.test(label))
+      continue;
+    accepted.add(opener);
+    press(opener);
+    const accept = await waitFor(() => findButton(RE_ACCEPT_BTN), 3000);
+    if (accept) press(accept);
+    await sleep(300);
+  }
+}
+
 export type AuthOutcome = { ok: true } | { fail: string };
 
 /** One sign-in, sign-up or password-reset page. The next page tells the driver how it went. */
@@ -99,6 +120,7 @@ export async function handleAuth(
   await fillCredentials(creds.email, creds.password);
   await fillRest(); // name, country and the like on longer sign-up forms
   tickConsents();
+  await acceptNotices();
   await sleep(300);
   const b = findSignup();
   if (!b) return { fail: "No create-account button" };
