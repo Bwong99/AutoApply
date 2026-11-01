@@ -10,7 +10,17 @@ import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
-import { alertText, findApply, findNext, findSubmit, labelOf, press, RE_APPLY, validationErrors } from "./nav";
+import {
+  alertText,
+  findApply,
+  findButton,
+  findNext,
+  findSubmit,
+  labelOf,
+  press,
+  RE_APPLY,
+  validationErrors,
+} from "./nav";
 
 export interface FillReport {
   /** Required fields still empty after filling, by label. */
@@ -44,6 +54,7 @@ export interface DriverDeps {
 /** A test build (VITE_YOLO_DRY=1) stops before the final submit and reports what it filled; others compile it out. */
 const DRY = import.meta.env.VITE_YOLO_DRY === "1";
 
+const RE_UPLOAD_WAY = /^(from (device|(my )?computer)|upload (a |your )?(cv|resume|résumé)( file)?)$/i;
 const RE_EASY_APPLY = /easily apply|easy apply|indeed apply|apply with (indeed|linkedin|glassdoor)/i;
 /** The page's own timers run unthrottled while this is set (pageTimers.ts): a run waits on them between steps. */
 const busy = (on: boolean) => document.dispatchEvent(new Event(on ? "autoapply-fill-start" : "autoapply-fill-end"));
@@ -104,6 +115,7 @@ export async function drive(deps: DriverDeps) {
     }
     if (hello.posting) await deps.readPosting(hello.posting);
     let refills = 0;
+    let pickedWay = false;
     for (let i = 0; i < 30; i++) {
       // A navigation that never commits (a download, a 204) leaves the page as it was.
       if (leaving) {
@@ -222,6 +234,14 @@ export async function drive(deps: DriverDeps) {
           await waitFor(() => onward() ?? findSubmit(), 5000);
           const next = onward();
           const b = next ?? findSubmit();
+          // A page of ways to give the résumé (Avature's "From Device · Copy & Paste · Without Resume") shows its
+          // Continue once one is picked; the file is already in its box.
+          const way = b ? null : findButton(RE_UPLOAD_WAY);
+          if (way && !pickedWay) {
+            pickedWay = true;
+            press(way);
+            continue;
+          }
           if (!b) return result({ status: "failed", reason: "No Next or Submit button", guesses: deps.guesses() });
           if (DRY && (!next || /submit/i.test(labelOf(b))))
             return needs(
