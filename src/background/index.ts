@@ -245,8 +245,13 @@ function entryCounts(p: Profile): EntryCounts {
     certifications: p.skills.certifications.filter((c) => c.name).length,
     languages: p.skills.languages.filter((l) => l.language).length,
     projects: p.projects.filter((x) => x.name).length,
-    // LinkedIn has its own field on the forms that have a Websites section
-    websites: [links.github, links.portfolio, links.website, ...links.other.map((o) => o.url)].filter(Boolean).length,
+    // LinkedIn has its own field on the forms that have a Websites section. Each address once: a website that is the
+    // GitHub link made Workday add a second entry, filled with the same URL ("You can't add duplicate website URLs").
+    websites: new Set(
+      [links.github, links.portfolio, links.website, ...links.other.map((o) => o.url)]
+        .map((u) => u.trim().toLowerCase().replace(/\/+$/, ""))
+        .filter(Boolean),
+    ).size,
   };
 }
 
