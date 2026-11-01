@@ -60,8 +60,20 @@ export function memberText(m: HTMLElement): string {
     return next || m.value;
   }
   // Web components keep the text in a `label` attribute their shadow root renders (SmartRecruiters' <spl-radio>).
+  // SuccessFactors' empty <span role=radio> names its sibling <label> by aria-labelledby.
+  const root = m.getRootNode() as Document | ShadowRoot;
+  const labelledBy = () =>
+    (m.getAttribute("aria-labelledby") ?? "")
+      .split(/\s+/)
+      .map((id) => (id && root.getElementById?.(id)?.textContent?.trim()) || "")
+      .filter(Boolean)
+      .join(" ");
   return (
-    m.getAttribute("aria-label") || textOf(m, "input,select,textarea,script,style") || m.getAttribute("label") || ""
+    m.getAttribute("aria-label") ||
+    textOf(m, "input,select,textarea,script,style") ||
+    labelledBy() ||
+    m.getAttribute("label") ||
+    ""
   );
 }
 

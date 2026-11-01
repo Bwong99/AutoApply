@@ -228,6 +228,17 @@ describe("grouping (§11.5)", () => {
     ]);
   });
 
+  it("reads an empty ARIA radio's option from the label it names (SuccessFactors)", () => {
+    const opt = (id: string, v: string) =>
+      `<div><span role="radio" aria-checked="false" aria-labelledby="${id}"><span class="dot"></span></span><label id="${id}">${v}</label></div>`;
+    setBody(
+      `<label id="q">Are you 18 years of age or older?</label><div role="radiogroup" aria-labelledby="q">${opt("y", "Yes")}${opt("n", "No")}</div>`,
+    );
+    expect(fields().map((h) => [h.desc.label, h.desc.options])).toEqual([
+      ["Are you 18 years of age or older?", ["Yes", "No"]],
+    ]);
+  });
+
   it("reads web-component radios' text from their label attribute (SmartRecruiters)", () => {
     const opt = (v: string, n: string) =>
       `<spl-radio role="radio" aria-checked="false" label="${v}" value="${n}"></spl-radio>`;
