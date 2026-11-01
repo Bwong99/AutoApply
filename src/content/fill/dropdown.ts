@@ -363,7 +363,7 @@ const showsPart = (h: FieldHandle, text: string) => {
   return !!normalize(shown) && sameValue(shown, text, "contains");
 };
 
-async function pickOne(h: FieldHandle, text: string): Promise<boolean> {
+async function pickOne(h: FieldHandle, text: string, within?: string): Promise<boolean> {
   if (shows(h, text)) return true;
   let c = await openDropdown(h);
   if (!c) return false;
@@ -395,14 +395,29 @@ async function pickOne(h: FieldHandle, text: string): Promise<boolean> {
   };
   const took = async () => shows(h, text) || (showsPart(h, text) && (dropdownText(h) !== before || (await selected())));
   const listed = optionElements(c);
+  const pre = snapshot();
   realClick(el);
   await sleep(40);
   if (await took()) return true;
   if (index < 0) return false;
   // A category that opened its own list (Workday's "How Did You Hear About Us?") is no pick, and keys pressed now
   // land in that list: a UBC student got "WaterlooWorks".
-  const now = c.isConnected && isVisible(c) ? optionElements(c) : null;
-  if (now && (now.length !== listed.length || now.some((o, i) => o !== listed[i]))) return false;
+  // Workday replaces its popup to show the category's own list.
+  const box = c.isConnected ? c : within ? await waitFor(() => findOptionsContainer(h, pre), 1500) : null;
+  const now = box && isVisible(box) ? optionElements(box) : null;
+  if (now && (now.length !== listed.length || now.some((o, i) => o !== listed[i]))) {
+    // Unless it was picked for an answer it lists, else its one or "Other" choice: GM's "Internet Job Board / Job
+    // Search" › "Other", for LinkedIn.
+    if (!within) return false;
+    const sub =
+      now.find((o) => normalize(optText(o)) === normalize(within)) ??
+      (now.length === 1 ? now[0] : now.find((o) => /^other\b/i.test(optText(o))));
+    if (!sub) return false;
+    const pick = optText(sub);
+    realClick(sub);
+    await sleep(40);
+    return shows(h, pick) || showsPart(h, pick) || shows(h, text);
+  }
   // Keyboard-driven widgets: ArrowDown to the option, then Enter.
   const t = h.searchInput ?? triggerOf(h);
   focus(t);
@@ -412,7 +427,8 @@ async function pickOne(h: FieldHandle, text: string): Promise<boolean> {
   return took();
 }
 
-export async function fillDropdown(h: FieldHandle, texts: string[]): Promise<FillResult> {
+/** `within`: the answer to pick in the list a picked category opens (Workday's hierarchical prompts). */
+export async function fillDropdown(h: FieldHandle, texts: string[], within?: string): Promise<FillResult> {
   if (h.listbox) {
     for (const text of texts) {
       const o = optionElements(h.listbox).find((x) => normalize(optText(x)) === normalize(text));
@@ -425,7 +441,7 @@ export async function fillDropdown(h: FieldHandle, texts: string[]): Promise<Fil
       : { outcome: "mismatch", note: `Expected ${texts.join(", ")}` };
   }
   for (const text of texts) {
-    if (!(await pickOne(h, text))) {
+    if (!(await pickOne(h, text, within))) {
       const c = findOptionsContainer(h, { boxes: new Set(), options: new Set() });
       await closeDropdown(h, c);
       return { outcome: "failed", note: `Could not select "${text}"` };

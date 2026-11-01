@@ -203,7 +203,7 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
         if (elsewhere.length === 1) texts = elsewhere;
       }
       if (!texts) return flag(`Suggested: ${answerOf(op)}`);
-      return fillDropdown(h, h.desc.multiple ? texts : texts.slice(0, 1));
+      return fillDropdown(h, h.desc.multiple ? texts : texts.slice(0, 1), answerOf(op));
     }
     case "typeahead": {
       const answer = answerOf(op);
