@@ -61,7 +61,7 @@ const base = z.object({
   maxConcurrentRequests: n(4, 1, 16),
   debugLogging: b(false),
   /** How many YOLO applications' debug logs are kept. */
-  debugLogLimit: n(25, 1, MAX_BATCH_APPLICATIONS),
+  debugLogLimit: n(100, 1, MAX_BATCH_APPLICATIONS),
 });
 
 export const SettingsSchema = base.catch(() => base.parse({}));
