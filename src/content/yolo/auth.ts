@@ -69,8 +69,14 @@ export async function acceptNotices() {
       continue;
     accepted.add(opener);
     press(opener);
-    const accept = await waitFor(() => findButton(RE_ACCEPT_BTN), 3000);
-    if (accept) press(accept);
+    // A press while the dialog still opens can miss (Westinghouse's stayed open): again until it goes.
+    for (let k = 0; k < 3; k++) {
+      const accept = await waitFor(() => findButton(RE_ACCEPT_BTN), 3000);
+      if (!accept) break;
+      await sleep(300);
+      press(accept);
+      if (await waitFor(() => !accept.isConnected || !isVisible(accept), 1500)) break;
+    }
     await sleep(300);
   }
 }
