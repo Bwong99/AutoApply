@@ -592,6 +592,12 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(h.prefilled).toBe(false);
   });
 
+  it('treats a checked "No Selection" radio as unanswered (SuccessFactors)', () => {
+    setBody(`<fieldset><legend>Gender</legend><label><input type="radio" name="g" checked> No Selection</label>
+      <label><input type="radio" name="g"> Male</label></fieldset>`);
+    expect(fields()[0].prefilled).toBe(false);
+  });
+
   it("treats a dashes option as a prompt even with a value (IXL)", () => {
     setBody(`<label>Gender <select><option value="--">--</option><option value="1">Male</option></select></label>`);
     const [h] = fields();

@@ -421,6 +421,8 @@ function isPrefilled(h: FieldHandle, current: string): boolean {
   if (!current) return false;
   const k = h.desc.kind;
   if (k === "dropdown") return !RE_PLACEHOLDER_OPTION.test(current) && !/^(select|choose)/i.test(current);
+  // SuccessFactors' Gender radios start on a checked "No Selection".
+  if (k === "radio_group" && RE_PLACEHOLDER_OPTION.test(current)) return false;
   if (k === "checkbox") return current === "true";
   if (h.desc.placeholder && current === h.desc.placeholder) return false;
   // A phone box seeded with just a dial code ("+31", Recruitee) is still empty.
