@@ -10,7 +10,7 @@ import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
-import { alertText, findApply, findNext, findSubmit, labelOf, press, validationErrors } from "./nav";
+import { alertText, findApply, findNext, findSubmit, labelOf, press, RE_APPLY, validationErrors } from "./nav";
 
 export interface FillReport {
   /** Required fields still empty after filling, by label. */
@@ -189,6 +189,19 @@ export async function drive(deps: DriverDeps) {
             return result({ status: "skipped", reason: "Easy Apply only (not supported yet)" });
           await deps.posting();
           press(b);
+          // An Apply that opens a menu of ways in (Paccar's SuccessFactors: "Apply Now" beside LinkedIn and the like):
+          // its own Apply item, the social ones avoided.
+          if (b.matches("[aria-haspopup=true],[aria-haspopup=menu],[data-toggle=dropdown],[data-bs-toggle=dropdown]")) {
+            // In its own menu: one opening upward sits above the toggle, which the lowest-Apply search would pick again.
+            const item = await waitFor(
+              () =>
+                [...(b.parentElement?.querySelectorAll<HTMLElement>("a,button,[role=menuitem]") ?? [])].find(
+                  (a) => a !== b && isVisible(a) && RE_APPLY.test(labelOf(a)),
+                ),
+              2000,
+            );
+            if (item) press(item);
+          }
           break;
         }
         case "form": {
