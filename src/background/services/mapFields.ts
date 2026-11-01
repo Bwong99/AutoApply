@@ -870,7 +870,14 @@ function timezoneDecision(f: FieldDescriptor, address: Profile["personal"]["addr
  */
 function obtainedEducationDecision(f: FieldDescriptor, profile: Profile): Decision | null {
   const done = /\b(obtained|completed|attained|earned|achieved|received|finished)\b/i;
-  if (!f.options || isMulti(f) || !/\bhighest\b/i.test(f.label) || !/\b(education|degree)\b/i.test(f.label))
+  // A list not read yet (SuccessFactors' typeahead got "Bachelor's Degree" from the model): its search finds it.
+  const unread = !f.options && (f.kind === "typeahead" || f.kind === "dropdown");
+  if (
+    (!f.options && !unread) ||
+    isMulti(f) ||
+    !/\bhighest\b/i.test(f.label) ||
+    !/\b(education|degree)\b/i.test(f.label)
+  )
     return null;
   if (!done.test(f.label) || /\b(pursu\w*|enrolled|in progress|working (toward|on))\b/i.test(f.label)) return null;
   if (!profile.highSchool.graduationYear) return null;
@@ -882,6 +889,15 @@ function obtainedEducationDecision(f: FieldDescriptor, profile: Profile): Decisi
       (e.endDate || e.expectedGraduation) <= today,
   );
   if (finished || !profile.education.length) return null;
+  if (!f.options)
+    return {
+      fieldId: f.id,
+      action: "fill",
+      intendedAnswer: "High School",
+      searchQuery: "High School",
+      confidence: "high",
+      sources: ["highSchool", "education"],
+    };
   const hits = f.options.flatMap((o, i) => (/\bhigh school\b|\bsecondary\b|\bGED\b/i.test(o) ? [i] : []));
   if (hits.length !== 1) return null;
   return {
