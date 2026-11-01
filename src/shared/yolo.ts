@@ -19,14 +19,15 @@ export type SourceGroup = (typeof SOURCE_GROUPS)[number];
 export const QUEUE_SORTS = ["newest", "oldest", "foundFirst", "foundLast", "random"] as const;
 export type QueueSort = (typeof QUEUE_SORTS)[number];
 
-/** The most YOLO applies to in a day, and so the most applications' debug logs worth keeping. */
-export const MAX_DAILY_APPLICATIONS = 500;
+/** The most YOLO applies to in one batch, and so the most applications' debug logs worth keeping. */
+export const MAX_BATCH_APPLICATIONS = 500;
 
 const base = z.object({
   enabled: b(false),
+  /** Minutes between batches: each finds new jobs, then applies to up to `batchSize` of the queue. */
   intervalMin: n(30, 5, 1440),
-  /** 0 finds jobs without applying (a dry run). */
-  dailyCap: n(25, 0, MAX_DAILY_APPLICATIONS),
+  /** Submissions per batch. 0 finds jobs without applying (a dry run). */
+  batchSize: n(3, 0, MAX_BATCH_APPLICATIONS),
   queries: strs(),
   locations: strs(),
   remoteOk: b(true),
@@ -106,6 +107,8 @@ export const VaultEntrySchema = z.object({
 
 export const YoloStateSchema = z.object({
   lastCheckAt: z.number().catch(0),
+  /** When the current batch started: its submissions are the ones since. */
+  batchAt: z.number().catch(0),
   pausedUntil: z.number().catch(0),
   pauseReason: z.string().catch(""),
   gmailNeedsAuth: b(false),
@@ -118,8 +121,8 @@ export interface YoloStatus {
   enabled: boolean;
   /** Search queries set: YOLO has something to look for. */
   searches: number;
-  appliedToday: number;
-  cap: number;
+  appliedBatch: number;
+  batchSize: number;
   queued: number;
   needsYou: number;
   nextCheckAt: number | null;

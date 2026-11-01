@@ -206,13 +206,13 @@ test("hands a DataDome CAPTCHA to the user instead of failing the hidden run", a
   expect(a.reason).toBe("CAPTCHA");
 });
 
-test("stops at the daily cap", async ({ sw, page }) => {
+test("stops at the batch size", async ({ sw, page }) => {
   await seed(sw, { caps: true });
   void page;
-  await queue(sw, `${BASE}yolo-job.html`, { dailyCap: 0 });
+  await queue(sw, `${BASE}yolo-job.html`, { batchSize: 0 });
   await expect
     .poll(async () => (await storage<{ pauseReason: string }>(sw, "yoloState"))?.pauseReason)
-    .toBe("Daily cap reached");
+    .toBe("Batch done");
   expect(await storage(sw, "yoloQueue")).toHaveLength(1);
 });
 

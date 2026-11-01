@@ -1,7 +1,7 @@
 import { NumberInput, SelectInput, TagInput, Toggle } from "../components/controls";
 import { save, useStored } from "../store";
 import type { Settings } from "../../shared/types";
-import { MAX_DAILY_APPLICATIONS } from "../../shared/yolo";
+import { MAX_BATCH_APPLICATIONS } from "../../shared/yolo";
 
 type Bool = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 type Num = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
@@ -43,7 +43,7 @@ const NUMBERS: [Num, string, string, number, number][] = [
     "Debug logs kept",
     "How many recent YOLO applications' debug logs are kept.",
     1,
-    MAX_DAILY_APPLICATIONS,
+    MAX_BATCH_APPLICATIONS,
   ],
   ["essayDefaultWords", "Essay length (words)", "Target length when a question gives no limit.", 10, 2000],
   ["coverLetterDefaultWords", "Cover letter length (words)", "Target length for cover-letter text boxes.", 10, 2000],

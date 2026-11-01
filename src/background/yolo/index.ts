@@ -60,9 +60,8 @@ let yolo: Yolo = defaultYolo();
 let deps: YoloDeps;
 
 const hostOf = (u: string) => new URL(u).hostname.replace(/^www\./, "");
-const startOfToday = () => new Date().setHours(0, 0, 0, 0);
-const submittedToday = (apps: Application[]) =>
-  apps.filter((a) => a.mode === "yolo" && a.status === "submitted" && a.at >= startOfToday()).length;
+const submittedSince = (apps: Application[], since: number) =>
+  apps.filter((a) => a.mode === "yolo" && a.status === "submitted" && a.at >= since).length;
 
 async function setState(patch: Partial<YoloState>) {
   await store.set({ yoloState: { ...(await store.get("yoloState")), ...patch } });
@@ -88,7 +87,7 @@ async function record(a: Application) {
 }
 
 // ---------- timer ----------
-/** Matches the alarm to the settings: one check every interval while on and searching for something. */
+/** Matches the alarm to the settings: one batch every interval while on and searching for something. */
 async function schedule() {
   const on = yolo.enabled && yolo.queries.length > 0;
   const a = await chrome.alarms.get(CHECK);
@@ -107,11 +106,15 @@ async function schedule() {
 }
 
 let cycling: Promise<void> | null = null;
-/** Discovery, then applying. A run in the host keeps it busy, so rendered sources wait for the next cycle. */
+/**
+ * One batch: discovery, then applying to up to `batchSize` jobs. A run in the host keeps it busy, so rendered sources
+ * wait for the next batch; a run still going from the last batch counts toward this one.
+ */
 function cycle(): Promise<void> {
   return (cycling ??= (async () => {
     try {
       if (!yolo.enabled || !yolo.queries.length) return;
+      await setState({ batchAt: Date.now(), pauseReason: "" });
       const busy = !!(await getRun());
       await discover({
         yolo,
@@ -171,7 +174,7 @@ async function resumeBlocker(): Promise<string> {
 
 // ---------- queue ----------
 let pumping = false;
-/** Starts the next queued job when nothing runs, the day's cap allows it, and the AI is usable. */
+/** Starts the next queued job when nothing runs, the batch has room, and the AI is usable. */
 async function pump() {
   if (pumping) return;
   pumping = true;
@@ -179,9 +182,10 @@ async function pump() {
     if (!yolo.enabled || (await getRun())) return;
     const queue = await store.get("yoloQueue");
     if (!queue.length) return void (await closeFrame().catch(() => undefined));
-    if ((await store.get("yoloState")).pausedUntil > Date.now()) return;
-    if (submittedToday(await store.get("applications")) >= yolo.dailyCap) {
-      await pause(new Date(startOfToday()).setDate(new Date().getDate() + 1), "Daily cap reached");
+    const state = await store.get("yoloState");
+    if (state.pausedUntil > Date.now()) return;
+    if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) {
+      await setState({ pauseReason: "Batch done" });
       return void (await closeFrame().catch(() => undefined));
     }
     const ctx = await deps.serviceCtx();
@@ -362,8 +366,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     return {
       enabled: yolo.enabled,
       searches: yolo.queries.length,
-      appliedToday: submittedToday(apps),
-      cap: yolo.dailyCap,
+      appliedBatch: submittedSince(apps, state.batchAt),
+      batchSize: yolo.batchSize,
       queued: queue.length,
       needsYou: apps.filter((a) => a.status === "needs").length,
       nextCheckAt: alarm?.scheduledTime ?? null,
@@ -377,8 +381,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     if (blocked) return { error: { kind: "other", message: blocked } };
     yolo = { ...yolo, enabled };
     await store.set({ yolo });
+    // The new alarm's first firing, 30 s on, starts the first batch.
     await schedule();
-    if (enabled) void cycle();
     return { ok: true };
   },
 

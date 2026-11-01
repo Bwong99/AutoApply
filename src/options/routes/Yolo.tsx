@@ -5,7 +5,7 @@ import { isErr, send, type Responses } from "../../shared/messages";
 import { formatDateTime } from "../../shared/time";
 import {
   BOARDS,
-  MAX_DAILY_APPLICATIONS,
+  MAX_BATCH_APPLICATIONS,
   type Board,
   type QueueSort,
   type SourceGroup,
@@ -194,7 +194,7 @@ export function Yolo() {
     <section class="yolo">
       <h1>YOLO Mode</h1>
       <p class="intro">
-        While on, AutoApply checks your searches on a timer and applies to new matching jobs by itself: it creates site
+        While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself: it creates site
         accounts when needed, fills every field (with its best guess where your profile has no answer), and submits. It
         works in a hidden page, so nothing opens on screen. Everything it does is listed under Applications, with the
         answers it guessed. Turn it on or off from the toolbar popup.
@@ -202,19 +202,19 @@ export function Yolo() {
       <h2>Schedule</h2>
       <div class="form">
         <NumberInput
-          label="Check every (minutes)"
+          label="Apply batch every (minutes)"
           value={y.intervalMin}
           min={5}
           max={1440}
           onChange={(intervalMin) => set({ intervalMin })}
         />
         <NumberInput
-          label="Applications per day"
-          help={`Capped at ${MAX_DAILY_APPLICATIONS} (~1 AI call every 3 mins). Higher numbers mean more AI usage, a bigger chance a job site flags or bans your account, and more bad submissions before you notice a mistake. 0 pauses YOLO.`}
-          value={y.dailyCap}
+          label="Applications per batch"
+          help={`Each batch submits up to this many, in your queue order. With this schedule, at most ${Math.floor(1440 / y.intervalMin) * y.batchSize} a day. Higher numbers mean more AI usage, a bigger chance a job site flags or bans your account, and more bad submissions before you notice a mistake. 0 finds jobs without applying.`}
+          value={y.batchSize}
           min={0}
-          max={MAX_DAILY_APPLICATIONS}
-          onChange={(dailyCap) => set({ dailyCap })}
+          max={MAX_BATCH_APPLICATIONS}
+          onChange={(batchSize) => set({ batchSize })}
         />
       </div>
       <h2>Search</h2>
