@@ -54,7 +54,8 @@ function tickConsents() {
 }
 
 const RE_NOTICE = /\b(acknowledge|privacy (notice|policy|statement)|data privacy|terms (of use|and conditions))\b/i;
-const RE_ACCEPT_BTN = /^(i )?(accept|agree)( (and|&) continue)?$/i;
+// Westinghouse's SuccessFactors notice: "Acknowledge · Decline · Print".
+const RE_ACCEPT_BTN = /^(i )?(accept|agree|acknowledge)( (and|&) continue)?$/i;
 const accepted = new WeakSet<Element>();
 
 /**
