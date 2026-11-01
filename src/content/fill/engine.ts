@@ -192,6 +192,16 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
         const idx = await deps.choose(h, answerOf(op), options);
         texts = idx?.length ? idx.map((i) => options[i]) : null;
       }
+      // Where they live, on a list without the place: its one catch-all (Signifyd's UK regions: "Other"; Found
+      // Energy's US states: "Not a current US resident"). The chooser found nothing for "Langley, British Columbia".
+      if (!texts && /\b(locat\w*|resid\w*|live|based)\b/i.test(h.desc.label)) {
+        const elsewhere = options.filter((o) =>
+          /^(other\b|outside\b|international\b|none of the above|not (a )?(current )?[\w. ]{0,20}resident)/i.test(
+            o.trim(),
+          ),
+        );
+        if (elsewhere.length === 1) texts = elsewhere;
+      }
       if (!texts) return flag(`Suggested: ${answerOf(op)}`);
       return fillDropdown(h, h.desc.multiple ? texts : texts.slice(0, 1));
     }

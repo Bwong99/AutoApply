@@ -299,6 +299,19 @@ const deps = () => ({
 });
 
 describe("fill engine", () => {
+  it("takes a location list's catch-all when the place isn't on it (Signifyd)", async () => {
+    setBody(`<label id="ql">Where are you currently located within the United Kingdom?</label>
+      <div role="combobox" aria-labelledby="ql" aria-controls="lb" aria-expanded="false" tabindex="0">Select...</div>
+      <div role="listbox" id="lb">${["England", "Scotland", "Wales", "Other"].map((o) => `<div role="option">${o}</div>`).join("")}</div>`);
+    const box = document.querySelector("[role=combobox]")!;
+    for (const o of document.querySelectorAll("[role=option]"))
+      o.addEventListener("click", () => (box.textContent = o.textContent));
+    const h = scan(newScanState()).handles[0];
+    const op = { type: "intended", answer: "Langley, British Columbia, Canada", query: "Langley" } as const;
+    expect(await fill(h, op, deps())).toMatchObject({ outcome: "ok" });
+    expect(box.textContent).toBe("Other");
+  });
+
   it("clicks Yes/No toggle pills even though they default to type=submit (Ashby)", async () => {
     setBody(`<div><label>Willing to relocate?</label><div>
       <button aria-pressed="false">Yes</button><button aria-pressed="false">No</button></div></div>`);
