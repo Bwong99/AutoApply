@@ -192,6 +192,11 @@ if (inHost) {
   });
 }
 
+// Anti-clickjacking (OWASP's, on SuccessFactors career sites) hides the body unless the page is the top window, which
+// it never is in the host: the run saw a blank page. Its style goes once the page is parsed.
+if (inHost)
+  document.addEventListener("DOMContentLoaded", () => document.querySelector("style#antiClickjack")?.remove());
+
 // In the hidden host, a page's popup (an "Apply" that opens the ATS in a new window) would be a visible tab: it
 // loads in the same frame instead. The frame's name (src/offscreen/host.ts) tells it from other extensions' frames.
 if (inHost && ao.length === 1 && window.name === "autoapply-yolo")

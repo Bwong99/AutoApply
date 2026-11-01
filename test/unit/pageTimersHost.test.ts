@@ -13,3 +13,9 @@ test("Greenhouse's embed script reads the host frame's own address, not the exte
   };
   expect(w.Grnhse.UriHelper.currentLocation()).toBe(location);
 });
+
+test("anti-clickjacking's hidden body shows in the host frame", () => {
+  document.head.insertAdjacentHTML("beforeend", `<style id="antiClickjack">body{display:none !important;}</style>`);
+  document.dispatchEvent(new Event("DOMContentLoaded"));
+  expect(document.getElementById("antiClickjack")).toBeNull();
+});
