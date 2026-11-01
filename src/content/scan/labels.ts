@@ -104,6 +104,10 @@ export function groupLabel(groupEl: Element | null): string {
 /** The fieldset's <legend>, or the first <label> Ashby titles it with ("Race", followed by long descriptions). */
 export function legendOf(groupEl: Element | null): Element | null {
   const fs = groupEl?.tagName === "FIELDSET" ? groupEl : groupEl?.closest("fieldset");
+  // Not a fieldset around a whole section: Eightfold's sr-only "Application questions" named every question in it.
+  const others = (f: Element) =>
+    [...f.querySelectorAll("input:not([type=hidden]),select,textarea")].some((i) => !groupEl!.contains(i));
+  if (fs && fs !== groupEl && others(fs)) return null;
   return (
     fs?.querySelector(":scope > legend") ??
     (fs?.firstElementChild?.tagName === "LABEL" && !fs.firstElementChild.querySelector("input,select,textarea")

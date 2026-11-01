@@ -217,6 +217,20 @@ describe("grouping (§11.5)", () => {
     ]);
   });
 
+  it("doesn't name a radiogroup by the legend of the section fieldset around it (Eightfold)", () => {
+    const q = (i: number, t: string) =>
+      `<div><label id="q${i}_label" for="q${i}">${t}</label><div role="radiogroup" id="q${i}" aria-labelledby="q${i}_legend">` +
+      `<input type="radio" id="q${i}y" name="q${i}"><label for="q${i}y">Yes</label>` +
+      `<input type="radio" id="q${i}n" name="q${i}"><label for="q${i}n">No</label></div></div>`;
+    setBody(
+      `<fieldset><legend class="sr-only">Application questions</legend>${q(1, "Are you currently in F-1 Visa status?")}${q(2, "Are you related to anyone at John Deere?")}</fieldset>`,
+    );
+    expect(fields().map((h) => h.desc.label)).toEqual([
+      "Are you currently in F-1 Visa status?",
+      "Are you related to anyone at John Deere?",
+    ]);
+  });
+
   it("readonly radios named apart in one radiogroup make one question (Eightfold)", () => {
     const opt = (i: number, v: string) =>
       `<div><input type="radio" id="c${i}" name="consent-choice-${i}" readonly value="${v}"><label for="c${i}">${v}</label></div>`;
