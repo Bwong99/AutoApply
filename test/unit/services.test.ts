@@ -1567,6 +1567,23 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     profile.education[0].currentlyEnrolled = "no";
     expect((await run()).decisions.map((d) => d.intendedAnswer ?? d.checked)).toEqual([false, false, "No"]);
     expect(asked).toEqual([]);
+    // Asked about graduate programs only: a bachelor's student is not in one (Profluent).
+    profile.education[0] = { ...profile.education[0], currentlyEnrolled: "yes", degree: "Bachelor of Science" };
+    fields.splice(0, 3, {
+      ...field("grad", {
+        label:
+          "Are you currently enrolled in a PhD or master's program, or have you graduated from a PhD or master's program within the past 12 months?",
+        kind: "dropdown",
+      }),
+      options: [
+        "No, I have not attended graduate school",
+        "Yes, I have graduated with an MS or PhD",
+        "Yes, I'm currently enrolled in an MS or PhD program",
+      ],
+    });
+    expect((await run()).decisions.map((d) => d.intendedAnswer)).toEqual(["No, I have not attended graduate school"]);
+    profile.education[0].degree = "Master of Science";
+    expect((await run()).decisions.map((d) => d.action)).toEqual(["flag"]);
   });
 
   it("answers remote-work basics and English fluency", async () => {

@@ -1250,7 +1250,17 @@ function currentStudentDecision(f: FieldDescriptor, education: Profile["educatio
   if (!RE_CURRENT_STUDENT.test(f.label) || RE_NEGATED_CURRENT_STUDENT.test(f.label)) return null;
   const section = RE_ENTRY_SECTION.exec(f.section ?? "");
   const scoped = section && /education/i.test(section[1]) ? education[(Number(section[2]) || 1) - 1] : undefined;
-  const enrolled = scoped?.currentlyEnrolled ?? (education.some((e) => e.currentlyEnrolled === "yes") ? "yes" : "");
+  // Asked only about graduate programs (Profluent: "enrolled in a PhD or master's program, or have you graduated from
+  // one …?"), a bachelor's student is not: they got "Yes, I have graduated with an MS or PhD".
+  const graduate =
+    /\b(ph\.?d|doctora\w*|master'?s|mba|graduate (school|program|degree|studies))\b/i.test(f.label) &&
+    !/\b(bachelor'?s?|undergrad\w*|college)\b/i.test(f.label);
+  const inGraduate = (e: Profile["education"][number]) =>
+    /\b(master|ph\.?d|doctor\w*|m\.?sc|mba|m\.?eng|m\.?a\.?s?c?)\b/i.test(e.degree);
+  if (graduate && education.some(inGraduate)) return null;
+  const enrolled = graduate
+    ? "no"
+    : (scoped?.currentlyEnrolled ?? (education.some((e) => e.currentlyEnrolled === "yes") ? "yes" : ""));
   const answer = enrolled || (education.length && education.every((e) => e.currentlyEnrolled === "no") ? "no" : "");
   if (!answer) return null;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["education"] };
