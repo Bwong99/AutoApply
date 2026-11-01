@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { setBody, stubLayout } from "./dom";
 import { captchaShown, embeddedForm, pageFacts } from "../../src/content/yolo/classify";
 import { confirmation, kindOf } from "../../src/background/yolo/classify";
@@ -6,7 +6,7 @@ import { confirmation, kindOf } from "../../src/background/yolo/classify";
 const classify = (fields: number, hidden = false, requiredFields = 0) =>
   kindOf(pageFacts({ fields, requiredFields }), hidden);
 import { findApply, findNext, findSubmit, validationErrors } from "../../src/content/yolo/nav";
-import { siteKey } from "../../src/content/yolo/auth";
+import { handleAuth, siteKey } from "../../src/content/yolo/auth";
 
 beforeAll(stubLayout);
 
@@ -235,6 +235,21 @@ describe("YOLO buttons", () => {
     expect(findApply()?.dataset.automationId).toBe("applyManually");
     setBody(`<button data-automation-id="pageFooterNextButton">Save and Continue</button><button>Back</button>`);
     expect(findNext()?.textContent).toBe("Save and Continue");
+  });
+
+  it("starts as a first-time applicant beside a login it has no account for", async () => {
+    vi.stubGlobal("chrome", { runtime: { sendMessage: async () => null } });
+    // EA's Avature: a login, and a résumé upload for first-time applicants.
+    setBody(`<form><input name="username"><input type="password"><button>Log in</button></form>
+      <form><input type="file" name="resumeFile"><button type="button">Continue</button></form>`);
+    let filled = 0;
+    let pressed = false;
+    document.querySelectorAll("button")[1].addEventListener("click", () => (pressed = true));
+    expect(await handleAuth("signin", async () => void filled++)).toEqual({ ok: true });
+    expect([filled, pressed]).toEqual([1, true]);
+    setBody(`<form><input name="username"><input type="password"><button>Log in</button></form>`);
+    expect(await handleAuth("signin", async () => undefined)).toEqual({ fail: "Needs an account it can't create" });
+    vi.unstubAllGlobals();
   });
 
   it("skips third-party sign-ins and back buttons, and takes the form's own submit", () => {

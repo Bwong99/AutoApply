@@ -65,8 +65,19 @@ export async function handleAuth(
   if (kind === "signin") {
     if (!stored) {
       const toSignup = findButton(RE_TO_SIGNUP, ['[data-automation-id="createAccountLink"]']);
-      if (!toSignup) return { fail: "Needs an account it can't create" };
-      press(toSignup);
+      if (toSignup) {
+        press(toSignup);
+        return { ok: true };
+      }
+      // A first-time applicant's résumé upload beside the login (EA's Avature): no account needed.
+      const guest = (deepQueryAll("input[type=file]") as HTMLInputElement[]).some(
+        (f) => !f.closest("form")?.querySelector("input[type=password]"),
+      );
+      if (!guest) return { fail: "Needs an account it can't create" };
+      await fillRest();
+      const go = findButton(/^(continue|next)$/i);
+      if (!go) return { fail: "Couldn't upload a résumé as a first-time applicant" };
+      press(go);
       return { ok: true };
     }
     await fillCredentials(stored.email, stored.password);
