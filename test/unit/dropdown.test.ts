@@ -576,6 +576,20 @@ describe("typeahead verification", () => {
     ]).toEqual([false, false, false]);
   });
 
+  it("searches a City field for the city only, never the country", async () => {
+    setBody(`<div><label for="c">City</label><input id="c" role="combobox"><div id="res"></div></div>`);
+    const input = document.querySelector("input")!;
+    input.addEventListener("input", () => {
+      document.getElementById("res")!.innerHTML = /^canada/i.test(input.value)
+        ? `<div role="option">Canada Creek, NS</div>`
+        : "";
+    });
+    const h = scan(newScanState()).handles[0];
+    const r = await fillTypeahead(h, "Langley", "Langley, British Columbia, Canada", async () => 0);
+    expect(input.value).not.toMatch(/canada/i);
+    expect(r.shown ?? "").not.toMatch(/canada/i);
+  });
+
   it("fails instead of marking a cleared selection for review", async () => {
     setBody(`<div><label for="c">City</label><input id="c" role="combobox"><div id="res"></div></div>`);
     const input = document.querySelector("input")!;

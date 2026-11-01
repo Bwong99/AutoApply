@@ -101,7 +101,8 @@ export async function fillTypeahead(
   // A country-only picker finds nothing for the city (Airwallex's Ashby "Location" lists "Canada", not "Langley").
   const places = intended.split(",").map((p) => p.trim());
   const country = places.length > 1 ? places[places.length - 1] : "";
-  if (country && normalize(country) !== normalize(typed) && !lists(c)) {
+  // Not a field asking the city: Oracle's City, slow to list "Langley" in the hidden frame, listed "Canada Creek, NS".
+  if (country && !/\bcity\b/i.test(h.desc.label) && normalize(country) !== normalize(typed) && !lists(c)) {
     await closeDropdown(h, c);
     typed = country;
     c = await suggest();
