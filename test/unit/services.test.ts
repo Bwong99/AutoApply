@@ -1724,6 +1724,11 @@ describe("mapFields chunking and splitting (§10.7)", () => {
                 options: ["New York, NY", "Seattle, WA", "Denver, CO"],
               }),
               field("d", { label: "Insert other preferred location(s) and/or further context on preference." }),
+              field("e", {
+                label: "Which of the following locations are you open to living and working in Summer 2027?",
+                kind: "checkbox_group",
+                options: ["New York, NY", "Austin, TX", "San Francisco, CA"],
+              }),
             ],
             profile,
             documents: [],
@@ -1736,10 +1741,11 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "New York, NY, San Francisco, CA",
       "New York, NY, Seattle, WA",
       "Open to any location; willing to relocate.",
+      "New York, NY, Austin, TX, San Francisco, CA",
     ]);
     profile.preferences.relocationNotes = "Only New York";
     profile.preferences.earliestStartDate = "2027-09-01";
-    expect(await ask()).toEqual(["flag", "flag", "flag", "flag"]);
+    expect(await ask()).toEqual(["flag", "flag", "flag", "flag", "flag"]);
   });
 
   it("picks the undergraduate GPA option on a 4.0 scale", async () => {

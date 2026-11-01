@@ -1161,7 +1161,8 @@ function termLengthsDecision(f: FieldDescriptor, coop: Profile["coop"]): Decisio
  * Select 1-3" takes the first that many (Palantir's was left blank).
  */
 function relocateAllDecision(f: FieldDescriptor, prefs: Profile["preferences"]): Decision | null {
-  const all = /\ball\b[^?]*\blocations?\b|\blocations?\b[^?]*\ball that apply\b/i.test(f.label);
+  // MongoDB: "Which of the following locations are you open to living and working in Summer 2027?" (a multi-select).
+  const all = /\ball\b[^?]*\blocations?\b|\blocations?\b[^?]*\b(all that apply|open to|willing to)\b/i.test(f.label);
   const preferred = /\bpreferred (office )?locations?\b/i.test(f.label);
   const anywhere = /^(any(where)?)?$/i.test(prefs.relocationNotes.trim()) && prefs.preferredLocations.includes("Any");
   if (prefs.willingToRelocate !== "yes" || !anywhere || !(all || preferred)) return null;
