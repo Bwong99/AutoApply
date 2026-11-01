@@ -551,6 +551,13 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(h.desc.options).toEqual(["Aalborg University", "None"]);
   });
 
+  it("treats a dashes option as a prompt even with a value (IXL)", () => {
+    setBody(`<label>Gender <select><option value="--">--</option><option value="1">Male</option></select></label>`);
+    const [h] = fields();
+    expect(h.prefilled).toBe(false);
+    expect(h.desc.options).toEqual(["Male"]);
+  });
+
   it("reads a popup button a label names as a dropdown, though its list renders elsewhere (BambooHR)", () => {
     setBody(`<form><div class="fab-FormField"><label id="cLabel" for="c">Country</label><div class="fab-Select">
       <button type="button" class="fab-SelectToggle" id="c" aria-haspopup="true" aria-expanded="false"
