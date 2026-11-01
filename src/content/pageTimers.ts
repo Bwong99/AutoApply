@@ -192,6 +192,21 @@ if (inHost) {
   });
 }
 
+// The host frame is a third-party context: Chrome drops a cookie its page sets unless it is SameSite=None; Secure, and
+// pages that test for cookies first refuse to go on (SuccessFactors' Apply did nothing). Mark the page's own so they keep.
+if (inHost && location.protocol === "https:") {
+  const jar = Object.getOwnPropertyDescriptor(Document.prototype, "cookie")!;
+  Object.defineProperty(document, "cookie", {
+    configurable: true,
+    get() {
+      return jar.get!.call(this);
+    },
+    set(v: string) {
+      jar.set!.call(this, `${String(v).replace(/;\s*samesite\s*=[^;]*/gi, "")}; SameSite=None; Secure`);
+    },
+  });
+}
+
 // Anti-clickjacking (OWASP's, on SuccessFactors career sites) hides the body unless the page is the top window, which
 // it never is in the host: the run saw a blank page. Its style goes once the page is parsed.
 if (inHost)
@@ -199,10 +214,23 @@ if (inHost)
 
 // In the hidden host, a page's popup (an "Apply" that opens the ATS in a new window) would be a visible tab: it
 // loads in the same frame instead. The frame's name (src/offscreen/host.ts) tells it from other extensions' frames.
-if (inHost && ao.length === 1 && window.name === "autoapply-yolo")
+if (inHost && ao.length === 1 && window.name === "autoapply-yolo") {
   window.open = ((url?: string | URL) => {
     if (url) location.href = String(url);
     return window;
   }) as typeof window.open;
+  // So does a form or link aimed at the top window, which the host is (SuccessFactors' Apply posts to its career site
+  // with target="_top", and nothing happened).
+  const here = (el: HTMLFormElement | HTMLAnchorElement | null) => {
+    if (el && /^_(top|parent)$/i.test(el.target)) el.target = "_self";
+  };
+  const submit = HTMLFormElement.prototype.submit;
+  HTMLFormElement.prototype.submit = function (this: HTMLFormElement) {
+    here(this);
+    return submit.call(this);
+  };
+  document.addEventListener("submit", (e) => here(e.target as HTMLFormElement), true);
+  document.addEventListener("click", (e) => here((e.target as Element).closest?.("a[target]") ?? null), true);
+}
 
 export {};

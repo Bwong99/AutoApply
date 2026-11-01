@@ -80,6 +80,12 @@ function scrapeLinks() {
 }
 
 let driving = false;
+/**
+ * Set once the page starts to unload: a press whose page posts on before leaving (SuccessFactors' Apply) changes the
+ * page first, and pressing again meanwhile read as a stuck step. The next page's run goes on.
+ */
+let leaving = false;
+addEventListener("beforeunload", () => (leaving = true));
 
 export async function drive(deps: DriverDeps) {
   if (driving) return;
@@ -99,6 +105,11 @@ export async function drive(deps: DriverDeps) {
     if (hello.posting) await deps.readPosting(hello.posting);
     let refills = 0;
     for (let i = 0; i < 30; i++) {
+      // A navigation that never commits (a download, a 204) leaves the page as it was.
+      if (leaving) {
+        await sleep(15_000);
+        leaving = false;
+      }
       await settle();
       const facts = pageFacts(deps.fieldStats());
       const step = await send({
