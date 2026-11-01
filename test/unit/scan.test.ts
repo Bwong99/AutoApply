@@ -583,6 +583,15 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(h.desc.options).toEqual(["Aalborg University", "None"]);
   });
 
+  it('treats "No Selection" as a prompt (SuccessFactors)', () => {
+    setBody(
+      `<span id="gl">Gender</span><div role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="gl" tabindex="0">No Selection</div>`,
+    );
+    const [h] = fields();
+    expect(h.desc.kind).toBe("dropdown");
+    expect(h.prefilled).toBe(false);
+  });
+
   it("treats a dashes option as a prompt even with a value (IXL)", () => {
     setBody(`<label>Gender <select><option value="--">--</option><option value="1">Male</option></select></label>`);
     const [h] = fields();
