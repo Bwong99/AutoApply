@@ -169,11 +169,15 @@ export function buildUnits(c: Collected): Unit[] {
   const radios = cands.filter((e): e is HTMLInputElement => e instanceof HTMLInputElement && e.type === "radio");
   const freeRadios = radios.filter((r) => !taken.has(r));
   const nameless = freeRadios.filter((r) => !r.name);
+  const byName = groupBy(
+    freeRadios.filter((r) => r.name),
+    scopeOf,
+  ).flatMap((g) => groupBy(g, (r) => r.name));
+  // Eightfold names each radio of one radiogroup apart ("…choice-0", "…choice-1"): still one question.
+  const lone = byName.filter((g) => g.length === 1 && g[0].closest("[role=radiogroup]"));
   const radioGroups = [
-    ...groupBy(
-      freeRadios.filter((r) => r.name),
-      scopeOf,
-    ).flatMap((g) => groupBy(g, (r) => r.name)),
+    ...byName.filter((g) => !lone.includes(g)),
+    ...groupBy(lone.flat(), (r) => r.closest("[role=radiogroup]")),
     ...groupBy(nameless, (r) => r.closest("[role=radiogroup],fieldset") ?? sharedParent(r, nameless)),
   ];
   for (const members of radioGroups) {

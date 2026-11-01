@@ -175,7 +175,13 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     const members = u.members;
     if (members ? members.every(isDisabled) : isDisabled(el)) continue;
     if (u.groupEl && isDisabled(u.groupEl)) continue;
-    if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && el.readOnly && u.kind !== "dropdown")
+    // Browsers ignore readonly on radios (Eightfold marks its controlled ones readonly): only text boxes are locked.
+    if (
+      (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
+      el.readOnly &&
+      u.kind !== "dropdown" &&
+      u.kind !== "radio_group"
+    )
       continue;
 
     const container = containerFor(u, owner);

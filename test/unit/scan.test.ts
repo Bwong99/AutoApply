@@ -184,6 +184,17 @@ describe("grouping (§11.5)", () => {
     expect(fields().map((h) => [h.desc.kind, h.desc.options])).toEqual([["radio_group", ["YES", "NO"]]]);
   });
 
+  it("readonly radios named apart in one radiogroup make one question (Eightfold)", () => {
+    const opt = (i: number, v: string) =>
+      `<div><input type="radio" id="c${i}" name="consent-choice-${i}" readonly value="${v}"><label for="c${i}">${v}</label></div>`;
+    setBody(
+      `<p>How should we use your profile data?</p><div role="radiogroup" aria-label="">${opt(0, "Any roles")}${opt(1, "Only this role")}</div>`,
+    );
+    expect(fields().map((h) => [h.desc.kind, h.desc.options])).toEqual([
+      ["radio_group", ["Any roles", "Only this role"]],
+    ]);
+  });
+
   it("reads web-component radios' text from their label attribute (SmartRecruiters)", () => {
     const opt = (v: string, n: string) =>
       `<spl-radio role="radio" aria-checked="false" label="${v}" value="${n}"></spl-radio>`;
