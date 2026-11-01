@@ -8,7 +8,7 @@ import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
-import { emailSignIn, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
+import { emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
 import { alertText, findApply, findNext, findSubmit, labelOf, press, validationErrors } from "./nav";
 
@@ -137,7 +137,8 @@ export async function drive(deps: DriverDeps) {
       }
       // A login inside the application form (iCIMS' Candidate Profile: résumé, contact details and a password): set
       // it, then fill and submit the page as a form step, with its checks and refills.
-      if (kind === "signup" && facts.requiredFields > 3) {
+      const signupForm = kind === "signup" && facts.requiredFields > 3;
+      if (signupForm) {
         const r = await setLogin();
         if ("fail" in r) return needs(r.fail);
         kind = "form";
@@ -202,8 +203,10 @@ export async function drive(deps: DriverDeps) {
           if (rep.fatal) return needs(rep.fatal);
           if (rep.unfilled.length) return needs(`Couldn't fill: ${rep.unfilled.slice(0, 3).join(", ")}`);
           // A button the page enables once its form validates can lag the last answer (iCIMS's email step "Next").
-          await waitFor(() => findNext() ?? findSubmit(), 5000);
-          const next = findNext();
+          // Its own "Create Account" moves a sign-up form on (SuccessFactors' asks for name, phone and country too).
+          const onward = () => findNext() ?? (signupForm ? findSignup() : null);
+          await waitFor(() => onward() ?? findSubmit(), 5000);
+          const next = onward();
           const b = next ?? findSubmit();
           if (!b) return result({ status: "failed", reason: "No Next or Submit button", guesses: deps.guesses() });
           if (DRY && (!next || /submit/i.test(labelOf(b))))

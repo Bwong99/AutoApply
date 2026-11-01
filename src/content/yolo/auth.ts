@@ -100,7 +100,7 @@ export async function handleAuth(
   await fillRest(); // name, country and the like on longer sign-up forms
   tickConsents();
   await sleep(300);
-  const b = findButton(RE_SIGNUP_BTN, ['[data-automation-id="createAccountSubmitButton"]']);
+  const b = findSignup();
   if (!b) return { fail: "No create-account button" };
   press(b);
   return { ok: true };
@@ -113,6 +113,9 @@ export const emailSignIn = () =>
   ]);
 
 /** A login asked for inside the application form itself (iCIMS' Candidate Profile): set it; the rest is a form. */
+/** A sign-up form's create-account button. */
+export const findSignup = () => findButton(RE_SIGNUP_BTN, ['[data-automation-id="createAccountSubmitButton"]']);
+
 export async function setLogin(): Promise<AuthOutcome> {
   const creds = await send({ type: "YOLO_CREDENTIAL", site: siteKey(), create: true });
   if (!creds) return { fail: "Couldn't store a password" };
