@@ -12,6 +12,13 @@ const STATUS: Record<Application["status"], string> = {
   skipped: "Skipped",
 };
 
+/** Saves a debug log's tailored .tex or cover letter text. */
+function download(f: { name: string; text: string }) {
+  const url = URL.createObjectURL(new Blob([f.text], { type: "text/plain" }));
+  Object.assign(document.createElement("a"), { href: url, download: f.name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function Applications() {
   const apps = useStored("applications");
   const queue = useStored("yoloQueue");
@@ -72,9 +79,29 @@ export function Applications() {
         (logs.length ? (
           <div class="logs">
             {[...logs].reverse().map((l) => (
-              <pre class="mono">
-                {formatDateTime(l.at)} {l.text}
-              </pre>
+              <>
+                <pre class="mono">
+                  {formatDateTime(l.at)} {l.text}
+                </pre>
+                {l.files?.map((f) => (
+                  <details class="log-file">
+                    <summary>
+                      {f.name}{" "}
+                      <button
+                        type="button"
+                        class="btn small"
+                        onClick={(e) => {
+                          e.preventDefault(); // not the details' toggle
+                          download(f);
+                        }}
+                      >
+                        Download
+                      </button>
+                    </summary>
+                    <pre class="mono">{f.text}</pre>
+                  </details>
+                ))}
+              </>
             ))}
           </div>
         ) : (

@@ -118,7 +118,14 @@ export const LOCAL_SCHEMAS = {
   /** The job a hidden YOLO run is applying to, until it ends: put back in the queue if a browser restart lost the run. */
   yoloInFlight: QueueItemSchema.nullable().catch(null),
   /** Debug logging: the latest YOLO applications' steps, answers and confirmations, oldest first. */
-  yoloLogs: list(z.object({ at: z.number(), text: z.string() })),
+  yoloLogs: list(
+    z.object({
+      at: z.number(),
+      text: z.string(),
+      /** The tailored résumé's .tex and the generated cover letter's text the run uploaded. */
+      files: z.array(z.object({ name: z.string(), text: z.string() })).optional(),
+    }),
+  ),
   /** Job keys already looked at → when first seen. */
   yoloSeen: rec(z.number()),
   /** Hosts whose bot checks stopped YOLO's hidden frame, latest last: their jobs start in a background tab. */

@@ -38,6 +38,7 @@ import {
   yoloJob,
   yoloNote,
   yoloOverrides,
+  yoloUpload,
 } from "./yolo";
 
 const store = createStorage("background");
@@ -297,7 +298,8 @@ const handlers: Handlers = {
     };
   },
 
-  async GET_DOCUMENT({ id }) {
+  async GET_DOCUMENT({ id }, sender) {
+    await yoloUpload(sender, id);
     if (isYoloDoc(id)) return yoloDoc(id);
     if (isTailoredDoc(id)) return tailoredDoc(store, id);
     const meta = (await store.get("documentsIndex")).find((d) => d.id === id);

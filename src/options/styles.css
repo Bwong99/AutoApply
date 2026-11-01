@@ -494,6 +494,12 @@ label.inline {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+.log-file {
+  margin: -4px 0 8px 12px;
+}
+.log-file summary {
+  cursor: pointer;
+}
 .search {
   max-width: 360px;
   margin-bottom: 12px;

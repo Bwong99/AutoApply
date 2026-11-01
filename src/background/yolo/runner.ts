@@ -25,6 +25,8 @@ export interface Run {
   atsUrl?: string;
   /** Debug logging: every field the run filled and its answer, by document and field. */
   answers?: Record<string, Guess>;
+  /** Debug logging: the documents fetched for upload, in order. */
+  uploads?: string[];
   /** What the confirmation page said. */
   confirmation?: string;
   /** For the application's record (Application.notes). */

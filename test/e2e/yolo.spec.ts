@@ -96,7 +96,7 @@ test("waits out a rate limit on a drafted cover letter instead of handing the jo
   mock,
 }) => {
   test.setTimeout(120_000);
-  await seed(sw, { caps: true });
+  await seed(sw, { caps: true, settings: { debugLogging: true } });
   void page;
   // Drafts turned down on every key for the next 6 s, as a per-minute quota does.
   let until = 0;
@@ -116,6 +116,12 @@ test("waits out a rate limit on a drafted cover letter instead of handing the jo
       : null;
   await queue(sw, `${BASE}yolo-cover-letter.html`);
   await outcome(sw).toBe("submitted");
+  // The debug log names what was uploaded and keeps the letter's text.
+  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  expect(log.text).toContain("Résumé: None");
+  expect(log.text).toMatch(/Cover letter: Generated \(\w+_Cover_Letter\.txt\)/);
+  expect(log.files).toEqual([{ name: expect.stringMatching(/_Cover_Letter\.txt$/), text: expect.any(String) }]);
+  expect(log.files![0].text.length).toBeGreaterThan(0);
 });
 
 test("asks for pay from the posting's range after Apply leads to another page", async ({ sw, page }) => {
@@ -175,6 +181,8 @@ test("opens a posting whose application is collapsed in the page", async ({ sw, 
   await outcome(sw).toBe("submitted");
   const logs = await storage<{ text: string }[]>(sw, "yoloLogs");
   expect(logs.at(-1)?.text).toContain("Steps: job → form → success");
+  // A résumé uploaded untailored is named by its document's label.
+  expect(logs.at(-1)?.text).toContain("Résumé: Résumé\nCover letter: None");
 });
 
 test("fills again a field the page rejected, though it holds what we typed", async ({ sw, page }) => {
@@ -335,7 +343,7 @@ test("AI tailor: uploads the résumé tailored for the job, notes it on the appl
   mock,
 }) => {
   test.setTimeout(120_000);
-  await seed(sw, { caps: true });
+  await seed(sw, { caps: true, settings: { debugLogging: true } });
   const id = new URL(sw.url()).host;
   await page.goto(`chrome-extension://${id}/src/options/index.html#/documents`);
   await page.getByLabel("Résumé for AI tailoring (.tex)").setInputFiles("test/fixtures/latex/jake.tex");
@@ -345,6 +353,12 @@ test("AI tailor: uploads the résumé tailored for the job, notes it on the appl
   const [a] = await storage<Application[]>(sw, "applications");
   expect(a.notes).toEqual([expect.stringMatching(/^Résumé tailored: \d+ changes? for this job$/)]);
   expect(mock.calls_("tailor")).toHaveLength(1);
+  // The debug log keeps the tailored .tex, not the PDF.
+  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  expect(log.text).toMatch(/Résumé: Tailored \(\w+_Resume\.tex\)/);
+  expect(log.text).toContain("Cover letter: None");
+  expect(log.files).toHaveLength(1);
+  expect(log.files![0].text).toContain("\\documentclass");
   await expect.poll(() => sw.evaluate(() => chrome.offscreen.hasDocument())).toBe(false);
 });
 

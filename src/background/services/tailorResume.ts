@@ -17,6 +17,8 @@ export type Compile = (tex: string, timeoutMs: number) => Promise<{ pdf: string;
 export interface TailorOutcome {
   /** Base64 of the tailored PDF; absent when the fallback is to be used. */
   pdf?: string;
+  /** The tailored source the PDF was compiled from, with `pdf`. */
+  tex?: string;
   /** Why the fallback was used, or what was changed. */
   note: string;
   /** The failure may not repeat (an AI error, a stop): not remembered for the job. */
@@ -76,7 +78,7 @@ export async function tailor(
     if (!c.pdf) return { note: "The tailored résumé didn't compile" };
   }
   if (c.pages > input.pages) return { note: `The tailored résumé ran to ${c.pages} pages instead of ${input.pages}` };
-  return { pdf: c.pdf, note: `${a.applied} change${a.applied === 1 ? "" : "s"} for this job` };
+  return { pdf: c.pdf, tex: a.tex, note: `${a.applied} change${a.applied === 1 ? "" : "s"} for this job` };
 }
 
 /** Compiles in the offscreen document, which stays open from the first compile to the `done` call. */
@@ -182,7 +184,11 @@ export async function tailoredResume(
         if (!r.pdf) return fallback(r.note, r.transient);
         const id = `tailor-${crypto.randomUUID()}`;
         const meta = pdfMeta(id, fileName, r.pdf);
-        await session.set(`tailordoc:${id}`, { meta, base64: r.pdf });
+        await Promise.all([
+          session.set(`tailordoc:${id}`, { meta, base64: r.pdf }),
+          // For YOLO's debug log: the .tex is ~10x smaller than the PDF.
+          session.set(`tailortex:${id}`, { name: fileName.replace(/\.pdf$/i, ".tex"), text: r.tex }),
+        ]);
         return { meta, tailored: true, note: r.note };
       } catch (e) {
         return fallback(`Tailoring failed: ${(e as Error)?.message ?? e}`, true);

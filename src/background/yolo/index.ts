@@ -2,7 +2,7 @@
 // alarm exists, so none of this runs.
 import type { Message, Responses, YoloResult } from "../../shared/messages";
 import { RE_APPLIED, SLEPT_MS } from "../../shared/constants";
-import { resumeProblem } from "../../shared/resumeMode";
+import { isTailoredDoc, resumeProblem } from "../../shared/resumeMode";
 import { createStorage, session } from "../../shared/storage";
 import type { AiTask } from "../../shared/settings";
 import type { ApiError, DocumentMeta, Settings } from "../../shared/types";
@@ -308,18 +308,44 @@ async function finish(run: Run, r: YoloResult) {
 /** Debug logging: one entry per application with its steps, every field's answer, and what the page said at the end. */
 async function logRun(run: Run, r: YoloResult, limit: number) {
   const answers = Object.values(run.answers ?? {});
+  const up = await uploaded(run);
   const text = [
     `${r.status}: ${run.item.company} – ${run.item.title} (${run.host})`,
     run.atsUrl ?? run.item.url,
     `Steps: ${run.steps.map((s) => s.split("|")[0]).join(" → ") || "none"}`,
     "reason" in r && r.reason && `Reason: ${r.reason}`,
     run.confirmation && `Confirmation: ${run.confirmation}`,
+    `Résumé: ${up.resume.join(", ") || "None"}`,
+    `Cover letter: ${up.letter.join(", ") || "None"}`,
     `Answers (${answers.length}):`,
     ...answers.map((g) => `  ${g.q} = ${g.a}`),
   ]
     .filter(Boolean)
     .join("\n");
-  await store.set({ yoloLogs: [...(await store.get("yoloLogs")), { at: Date.now(), text }].slice(-limit) });
+  const entry = { at: Date.now(), text, ...(up.files.length ? { files: up.files } : {}) };
+  await store.set({ yoloLogs: [...(await store.get("yoloLogs")), entry].slice(-limit) });
+}
+
+type LogFile = { name: string; text: string };
+
+/** The résumés and cover letters the run uploaded, by name, and the text of those YOLO wrote for the job. */
+async function uploaded(run: Run) {
+  const docs = await store.get("documentsIndex");
+  const up = { resume: [] as string[], letter: [] as string[], files: [] as LogFile[] };
+  for (const id of run.uploads ?? []) {
+    if (isTailoredDoc(id) || isYoloDoc(id)) {
+      const f = await session.get<LogFile>(`${isYoloDoc(id) ? "yololetter" : "tailortex"}:${id}`);
+      if (f) up.files.push(f);
+      if (isYoloDoc(id)) up.letter.push(`Generated (${f?.name ?? "text no longer kept"})`);
+      // No .tex: the untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
+      else up.resume.push(f ? `Tailored (${f.name})` : "Untailored LaTeX résumé");
+      continue;
+    }
+    const d = docs.find((x) => x.id === id);
+    if (d?.kind === "resume") up.resume.push(d.label);
+    else if (d?.kind === "cover_letter") up.letter.push(d.label);
+  }
+  return up;
 }
 
 async function watchdog(due: number) {
@@ -410,6 +436,14 @@ export async function yoloNote(sender: chrome.runtime.MessageSender, note: strin
   const run = await getRun();
   if (!fromRun(run, sender) || run.mode !== "apply" || run.notes?.includes(note)) return;
   await saveRun({ ...run, notes: [...(run.notes ?? []), note] });
+}
+
+/** Debug logging: a document the run's page fetched to upload, for the run's log. */
+export async function yoloUpload(sender: chrome.runtime.MessageSender, id: string) {
+  if (!deps.logLimit()) return;
+  const run = await getRun();
+  if (!fromRun(run, sender) || run.mode !== "apply" || run.uploads?.includes(id)) return;
+  await saveRun({ ...run, uploads: [...(run.uploads ?? []), id] });
 }
 
 export const isYoloDoc = (id: string) => id.startsWith("yolo-");
@@ -652,7 +686,11 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       isPrimaryResume: false,
       uploadedAt: Date.now(),
     };
-    await session.set(`yolodoc:${id}`, { meta, base64 });
+    await Promise.all([
+      session.set(`yolodoc:${id}`, { meta, base64 }),
+      // For the debug log: its text, not the PDF.
+      session.set(`yololetter:${id}`, { name: meta.fileName.replace(/\.pdf$/i, ".txt"), text: e.text }),
+    ]);
     return { meta };
   },
 
