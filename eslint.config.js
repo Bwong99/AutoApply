@@ -8,6 +8,7 @@ export default tseslint.config(
       "dist",
       "node_modules",
       "test-results",
+      ".yolo-sweep",
       "playwright-report",
       "test/fixtures/vendor",
       "public/latex/swiftlatexpdftex.js",

@@ -5,7 +5,9 @@ playwright-report/
 test/fixtures/vendor/
 .e2e-profile*/
 *.log
-.claude/
+.claude/*
+!.claude/skills/
+.yolo-sweep/
 PROMPT.md
 TODO.md
 AutoApply.zip

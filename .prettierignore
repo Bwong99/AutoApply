@@ -6,3 +6,4 @@ test/fixtures/vendor
 package-lock.json
 PROMPT.md
 public
+.yolo-sweep
