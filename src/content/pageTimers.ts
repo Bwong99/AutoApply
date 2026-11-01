@@ -163,6 +163,35 @@ if (inHost) {
   ) as unknown as typeof IntersectionObserver;
 }
 
+// Greenhouse's embed script reads the page's address from window.top, the extension's page in the host: reading it
+// throws, so a company page embedding a Greenhouse form (MongoDB's) never shows it. Give it the frame's own address,
+// the top it would be in a tab.
+if (inHost) {
+  const own = (h: unknown) => {
+    if (h && typeof h === "object") (h as { currentLocation: () => Location }).currentLocation = () => location;
+  };
+  let gh: unknown;
+  Object.defineProperty(window, "Grnhse", {
+    configurable: true,
+    get: () => gh,
+    set(v: unknown) {
+      gh = v;
+      if (!v || typeof v !== "object" || Object.getOwnPropertyDescriptor(v, "UriHelper")?.get) return;
+      let helper = (v as { UriHelper?: unknown }).UriHelper;
+      own(helper);
+      Object.defineProperty(v, "UriHelper", {
+        configurable: true,
+        enumerable: true,
+        get: () => helper,
+        set(h: unknown) {
+          helper = h;
+          own(h);
+        },
+      });
+    },
+  });
+}
+
 // In the hidden host, a page's popup (an "Apply" that opens the ATS in a new window) would be a visible tab: it
 // loads in the same frame instead. The frame's name (src/offscreen/host.ts) tells it from other extensions' frames.
 if (inHost && ao.length === 1 && window.name === "autoapply-yolo")
