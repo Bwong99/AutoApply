@@ -95,6 +95,12 @@ describe("deterministic matching (§13.2)", () => {
     expect(tel({ placeholder: "+47 40 61 23 45" })).toBe("+1 6045551234"); // Teamtailor
     expect(tel({ currentValue: "+31" })).toBe("+1 6045551234"); // Recruitee seeds the dial code
   });
+  it("signs a signature box with the full name, not the surname it mentions (Westinghouse)", () => {
+    const sig = "Electronic Signature : Please sign with your full name (first name and last name or surname)";
+    expect(deterministicValue(f(sig), p)?.value).toBe("Ada Lovelace");
+    expect(deterministicValue(f("Surname"), p)?.value).toBe("Lovelace");
+    expect(deterministicValue(f("Signature Date"), p)).toBeNull();
+  });
   it("leaves a phone extension empty, not the phone number", () => {
     for (const label of ["Phone Extension", "Phone ext.", "Extension"])
       expect(deterministicValue(f(label), p)?.value).toBe("");

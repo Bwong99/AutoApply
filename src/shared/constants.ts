@@ -285,8 +285,11 @@ export const RE_ENTRY_SECTION = /^(employment|work experience|experience|educati
 
 /** Word boundaries were added to state/region/unit/apt so "personal statement" etc. don't match. */
 export const LABEL_RULES: [RegExp, DetKey][] = [
+  // Westinghouse's "Electronic Signature : Please sign with your full name (first name and last name or surname)" got
+  // the last name. Not "Signature Date".
+  [/^(?!.*\bdate\b).*(\bsignature\b|\bsign (here )?with your (full |legal )?name\b)/i, "fullName"],
   [/^first\s*name|given name|legal first/i, "firstName"],
-  [/^last\s*name|surname|family name/i, "lastName"],
+  [/^last\s*name|^(?!.*\b(signature|full name)\b).*(surname|family name)/i, "lastName"],
   // Sentry's "First and Last Name" went to the AI, which added the middle name.
   [/^(full\s*)?name$|^first (and|&) last name$/i, "fullName"],
   [/\blegal name\b/i, "legalName"],
