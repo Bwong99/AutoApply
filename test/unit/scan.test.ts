@@ -598,6 +598,11 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(fields()[0].prefilled).toBe(false);
   });
 
+  it("doesn't keep a value the page marks invalid as prefilled (Avature)", () => {
+    setBody(`<label for="s">Salary Requirements</label><input id="s" value="$20 CAD per hour" aria-invalid="true">`);
+    expect(fields()[0].prefilled).toBe(false);
+  });
+
   it("treats a dashes option as a prompt even with a value (IXL)", () => {
     setBody(`<label>Gender <select><option value="--">--</option><option value="1">Male</option></select></label>`);
     const [h] = fields();

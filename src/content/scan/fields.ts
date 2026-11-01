@@ -345,7 +345,9 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
         current = /[^\s/\\]*[\w)-]\.(pdf|PDF|docx?|DOCX?|rtf|odt|txt)(?![a-z])/.exec(container.innerText)?.[0] ?? "";
     }
     if (current) d.currentValue = clip(current, 300);
-    h.prefilled = isPrefilled(h, current);
+    // Not a value the page itself refuses: Avature re-renders a refused page with what was sent ("$20 CAD per hour"
+    // in its numeric Salary Requirements), marked aria-invalid, and keeping it as prefilled stuck the run.
+    h.prefilled = isPrefilled(h, current) && input.getAttribute?.("aria-invalid") !== "true";
 
     let id = state.ids.get(el);
     if (!id) state.ids.set(el, (id = `f${state.next++}`));
