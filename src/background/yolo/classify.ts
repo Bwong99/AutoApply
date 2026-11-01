@@ -7,7 +7,7 @@ import { collapse } from "../../shared/normalize";
 const RE_BLOCKED =
   /just a moment|verify(ing)? (that )?you are (a )?human|access denied|attention required|unusual traffic|are you a robot|request unsuccessful|you have been blocked/i;
 const RE_CLOSED =
-  /no longer (accepting|available|open|active)|(job|position|posting|role|requisition|opening) (has been |is )?(closed|filled|expired|removed|unavailable)|(page|job) (you('re| are) looking for )?(can'?t|cannot|could not) be found|\b(page|job) not found\b|this job has expired/i;
+  /no longer (accepting|available|open|active)|(job|position|posting|role|requisition|opening) (has been |is )?(closed|filled|expired|removed|unavailable)|(page|job) (you('re| are) looking for )?(can'?t|cannot|could not) be found|(page|job) you('re| are) looking for (doesn'?t|does not|no longer) exists?|\b(page|job) not found\b|this job has expired/i;
 const RE_VERIFY =
   /verify your (email|account|identity)|(verification|confirmation|security) (code|email|link)|check your (email|inbox)|we('ve| have)? (just )?sent (you )?(an? )?(email|code|link)|enter the (\d+[- ]digit )?code|one[- ]time (pass)?code/i;
 const RE_FORGOT = /forgot (your )?password|reset (your )?password/i;

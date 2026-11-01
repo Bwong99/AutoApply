@@ -40,6 +40,9 @@ describe("YOLO page kinds", () => {
     expect(classify(3)).toBe("form");
     setBody(`<h1>This job is no longer accepting applications</h1>`);
     expect(classify(0)).toBe("closed");
+    // Workday's, for a posting taken down.
+    setBody(`<p>Introduce Yourself</p><p>The page you are looking for doesn't exist.</p>`);
+    expect(classify(0)).toBe("closed");
     setBody(`<h1>Just a moment...</h1>`);
     expect(classify(0)).toBe("blocked");
     // Ashby's bot score turned it down and left no form: load the page again.
