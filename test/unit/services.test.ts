@@ -389,14 +389,14 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     ];
     const label =
       "If you answered “Yes” above to requiring visa sponsorship now or in the future for work authorization, please respond to the following questions. What is your current immigration status/basis of your current work authorization?";
-    const ask = async (options?: string[]) =>
+    const ask = async (options?: string[], asked = label) =>
       (
         await mapFields(
           { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
           {
             fields: [
               field("s", {
-                label,
+                label: asked,
                 hint: `Follow-up to the previous question: "Will you require visa sponsorship to work in the United States?"`,
                 kind: "dropdown",
                 options,
@@ -413,6 +413,15 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       await ask(["N/A (I do not require work authorization)", "F-1 OPT", "TN", "No Current Work Authorization"]),
     ).toBe("No Current Work Authorization");
     expect(await ask()).toBe("No current work authorization");
+    // Cirrus Logic's: the model picked "F1 or OPT/CPT" for a Canadian with no US visa.
+    const visas = [
+      "H1B visa",
+      "F1 or OPT/CPT",
+      "TN visa",
+      "Other",
+      "N/A - I am a US citizen, legal permanent resident",
+    ];
+    expect(await ask(visas, "If you answered no to the above question, what type of visa are you on")).toBe("Other");
   });
 
   it("answers which country the role is in from the job's location", async () => {

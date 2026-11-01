@@ -393,18 +393,27 @@ function currentStatusDecision(
 ): Decision | null {
   const q = lastSentence(f.label);
   const country = where ?? countryIn(f.hint ?? "");
+  // Cirrus Logic's "If you answered no …, what type of visa are you on": the model picked "F1 or OPT/CPT" for a
+  // Canadian with no US visa.
+  const visa = /\b(type of|which|what) visa\b[^?]*\b(are you (currently )?on|do you (currently )?(hold|have))\b/i.test(
+    q,
+  );
   if (
     !country ||
     isMulti(f) ||
-    !/\bcurrent (immigration|visa|work authori[sz]ation) status\b|\bbasis of your current work authori[sz]ation\b/i.test(
-      q,
+    !(
+      visa ||
+      /\bcurrent (immigration|visa|work authori[sz]ation) status\b|\bbasis of your current work authori[sz]ation\b/i.test(
+        q,
+      )
     )
   )
     return null;
   if (entryFor(country, entries)?.authorized === "yes" || !(f.options || f.kind === "dropdown")) return null;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["workAuthorization"] };
   if (!f.options?.length) return { ...base, intendedAnswer: "No current work authorization" };
-  const i = f.options.findIndex((o) => /\bno (current )?(work )?(authori[sz]ation|status|visa)\b/i.test(o));
+  let i = f.options.findIndex((o) => /\bno (current )?(work )?(authori[sz]ation|status|visa)\b/i.test(o));
+  if (i < 0 && visa) i = f.options.findIndex((o) => /^(none|other)\b/i.test(o.trim()) && !/\bcitizen\b/i.test(o));
   return i < 0 ? null : { ...base, optionIndexes: [i], intendedAnswer: f.options[i] };
 }
 
