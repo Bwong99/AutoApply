@@ -386,6 +386,12 @@ export function yesNoPair(options: string[]): [number, number] | null {
   return yes >= 0 && no >= 0 ? [yes, no] : null;
 }
 
+/** [broad, narrow] of a two-way data-use choice (Eightfold: "…for ANY ROLES…" / "…for ONLY THE ROLE I AM APPLYING FOR"). */
+export function onlyPair(options: string[]): [number, number] | null {
+  const only = options.map((o) => /\bonly\b/i.test(o));
+  return options.length === 2 && only[0] !== only[1] ? (only[0] ? [1, 0] : [0, 1]) : null;
+}
+
 function isPrefilled(h: FieldHandle, current: string): boolean {
   if (!current) return false;
   const k = h.desc.kind;

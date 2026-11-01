@@ -38,6 +38,7 @@ import {
   isConsent,
   lowestCommonAncestor,
   newScanState,
+  onlyPair,
   scan,
   yesNoPair,
   type FieldHandle,
@@ -502,7 +503,8 @@ function handleConsent(h: FieldHandle, d: Decision | undefined, ctrl: AbortContr
   const pair =
     d?.optionIndexes?.length === 2
       ? d.optionIndexes
-      : ((options && (consentPair(options) ?? yesNoPair(options))) ?? (options?.length === 1 ? [0] : d?.optionIndexes));
+      : ((options && (consentPair(options) ?? yesNoPair(options) ?? onlyPair(options))) ??
+        (options?.length === 1 ? [0] : d?.optionIndexes));
   const pick = options?.[pair?.[accept ? 0 : 1] ?? -1];
   // A box per consent (Gemini: privacy statement + background check): tick each one that isn't an optional extra.
   const boxes =
