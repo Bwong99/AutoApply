@@ -35,6 +35,16 @@ function shownBeside(input: HTMLElement): string {
   return "";
 }
 
+/** "BC" for British Columbia, "QC" for Quebec: a 2–3 letter code whose letters run in order from the name's first. */
+export function abbreviates(code: string, name: string): boolean {
+  const n = normalize(name);
+  if (!/^[A-Z]{2,3}$/.test(code.trim()) || n.length <= 3) return false;
+  const c = code.trim().toLowerCase();
+  let j = 0;
+  for (const ch of n) if (ch === c[j]) j++;
+  return n[0] === c[0] && j === c.length;
+}
+
 const plainLists = (h: FieldHandle) => [...h.container.querySelectorAll<HTMLElement>("ul,ol")];
 
 export async function fillTypeahead(
@@ -46,6 +56,9 @@ export async function fillTypeahead(
   const input = (h.searchInput ?? h.el) as HTMLInputElement;
   if (normalize(input.value) && normalize(input.value) === normalize(intended))
     return { outcome: "ok", shown: input.value };
+  // The site's own code for the name, set by another pick: Oracle's city sets Province "BC", which lists no "British
+  // Columbia" to type.
+  if (abbreviates(input.value, intended)) return { outcome: "ok", shown: input.value };
   let typed = query || intended;
   const suggest = async () => {
     const before = snapshot();
@@ -138,11 +151,25 @@ export async function fillTypeahead(
       return { outcome: "failed", note: `Could not select "${want}"` };
     }
   }
+  const open = input.getAttribute("aria-expanded") === "true";
   realClick(el);
   await sleep(40);
+  // Our click closed the list while the box keeps only the pick's leading part: Oracle's city shows "Langley" for
+  // "Langley, BC", its postal code "V2Y 3C7" for "V2Y 3C7, Langley, BC".
+  const leading = () =>
+    open &&
+    input.getAttribute("aria-expanded") === "false" &&
+    !!input.value &&
+    normalize(want).startsWith(normalize(input.value));
   // A place pick may look up its details before the box shows it (Teamtailor's address, ~1.5 s).
-  if (h.desc.kind !== "dropdown" && normalize(input.value) === normalize(typed) && normalize(want) !== normalize(typed))
+  if (
+    h.desc.kind !== "dropdown" &&
+    normalize(input.value) === normalize(typed) &&
+    normalize(want) !== normalize(typed) &&
+    !leading()
+  )
     await waitFor(() => normalize(input.value) !== normalize(typed), 3000);
+  const kept = leading();
   blur(input);
   // A dropdown's search box empties once an option is picked; the widget shows the pick.
   if (h.desc.kind === "dropdown")
@@ -151,7 +178,7 @@ export async function fillTypeahead(
       : { outcome: "mismatch", note: `Expected "${want}", shows "${dropdownText(h)}"` };
   const v = normalize(input.value || h.el.textContent || shownBeside(input));
   // Our own query left in the box ("Langley" of "Langley, BC") means the pick did not register.
-  const picked = v.includes(normalize(want)) || (normalize(want).includes(v) && v !== normalize(typed));
+  const picked = kept || v.includes(normalize(want)) || (normalize(want).includes(v) && v !== normalize(typed));
   if (!v) return { outcome: "failed", note: `Expected "${want}", but the selection was cleared` };
   return picked
     ? { outcome: "ok", shown: want }

@@ -45,6 +45,8 @@ export function optionElements(c: Element): HTMLElement[] {
   let els = [...c.querySelectorAll<HTMLElement>(OPTION_SELECTORS)].filter((o) => !o.querySelector(OPTION_SELECTORS));
   if (!els.length) els = slotted(c);
   if (!els.length && c.getAttribute("role") === "listbox") els = [...c.querySelectorAll<HTMLElement>(":scope > *")];
+  // A suggestion grid (Oracle's city and postal code lookups): one gridcell per suggestion.
+  if (!els.length && c.getAttribute("role") === "grid") els = [...c.querySelectorAll<HTMLElement>("[role=gridcell]")];
   // Plain list rows in a popup its button controls (Jane Street's li.dropdown-row).
   if (!els.length) els = [...c.querySelectorAll<HTMLElement>("li")].filter((o) => !o.querySelector("li"));
   return els.filter((o) => isVisible(o) && isRealOption(o));

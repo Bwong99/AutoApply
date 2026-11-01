@@ -9,7 +9,7 @@ import {
   optionElements,
   searchOptions,
 } from "../../src/content/fill/dropdown";
-import { fillTypeahead } from "../../src/content/fill/typeahead";
+import { abbreviates, fillTypeahead } from "../../src/content/fill/typeahead";
 import { fill } from "../../src/content/fill/engine";
 import { realClick } from "../../src/content/fill/events";
 import { fillFile, findDropzones } from "../../src/content/fill/file";
@@ -539,6 +539,41 @@ describe("typeahead verification", () => {
     const h = scan(newScanState()).handles[0];
     const r = await fillTypeahead(h, "Langley", "Langley, BC, Canada", async () => 0);
     expect(r.outcome).toBe("mismatch");
+  });
+
+  it("picks from a suggestion grid that keeps only the pick's leading part (Oracle)", async () => {
+    setBody(`<div><label for="c">City</label><input id="c" role="combobox" aria-controls="g" aria-expanded="false">
+      <div role="grid" id="g"></div></div><div><label for="r">Province</label><input id="r" value="BC"></div>`);
+    const input = document.querySelector<HTMLInputElement>("#c")!;
+    const grid = document.getElementById("g")!;
+    input.addEventListener("input", () => {
+      input.setAttribute("aria-expanded", "true");
+      grid.innerHTML = `<div role="row"><div role="gridcell">Langley Twp, BC</div></div>
+        <div role="row"><div role="gridcell">Langley, BC</div></div>`;
+    });
+    grid.addEventListener("click", () => {
+      input.value = "Langley";
+      input.setAttribute("aria-expanded", "false");
+      grid.replaceChildren();
+    });
+    const [h, region] = scan(newScanState()).handles;
+    const r = await fillTypeahead(h, "Langley", "Langley, BC", async () => null);
+    expect(r).toMatchObject({ outcome: "ok", shown: "Langley, BC" });
+    // The province the city set, as a code: kept, not typed over.
+    expect(await fillTypeahead(region, "British Columbia", "British Columbia", async () => null)).toMatchObject({
+      outcome: "ok",
+      shown: "BC",
+    });
+    expect(
+      ["QC", "ON", "NL", "CA"].map((c, i) =>
+        abbreviates(c, ["Quebec", "Ontario", "Newfoundland and Labrador", "California"][i]),
+      ),
+    ).toEqual([true, true, true, true]);
+    expect([
+      abbreviates("BC", "Alberta"),
+      abbreviates("bc", "British Columbia"),
+      abbreviates("Langley", "Langley"),
+    ]).toEqual([false, false, false]);
   });
 
   it("fails instead of marking a cleared selection for review", async () => {
