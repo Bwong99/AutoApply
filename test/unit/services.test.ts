@@ -1213,6 +1213,37 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     ]);
   });
 
+  it("leaves internships out of years of experience when the question excludes them", async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const profile = emptyProfile();
+    const job = (title: string, startDate: string, endDate: string) => ({
+      ...emptyProfile().experience[0],
+      title,
+      startDate,
+      endDate,
+    });
+    profile.experience = [job("Software Engineer Intern", "2025-01", "2026-08")];
+    const options = ["Less than 1 Year", "Between 1 and 2 Years", "Between 3 and 5 Years"];
+    const r = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      {
+        fields: [
+          field("x", { label: "Years of experience (excluding internships)", kind: "select", options }),
+          field("t", { label: "How many years of experience do you have?", kind: "select", options }),
+        ],
+        profile,
+        documents: [],
+        job: null,
+      },
+    );
+    expect(r.decisions.map((d) => d.intendedAnswer ?? d.action)).toEqual(["Less than 1 Year", "flag"]);
+  });
+
   it("answers yes/no graduation-timing questions from the graduation month", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {

@@ -2041,8 +2041,13 @@ export async function mapFields(
   const base = mappingPayloadBase(input, pay);
   const countries = new Map(input.fields.map((f) => [f.id, workCountry(f.label, home, job)]));
   const months = experienceMonths(input.profile.experience);
+  // "Years of experience (excluding internships)": EA's got "Between 1 and 2 Years" for internships alone.
+  const fullTime = experienceMonths(
+    input.profile.experience.filter((e) => !/\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`)),
+  );
   const local = new Map<string, Decision>();
   for (const f of input.fields) {
+    const excluding = /\b(excluding|not including|other than|besides)\b[^?]*\b(internships?|co-?ops?)\b/i.test(f.label);
     const d =
       aiUseDecision(f) ??
       aiReviewDecision(f, input.profile.background.consentToAiReview) ??
@@ -2054,8 +2059,8 @@ export async function mapFields(
       workAuthDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
       needsSponsorshipDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
       nationalityDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
-      experienceDecision(f, months) ??
-      minYearsDecision(f, months) ??
+      experienceDecision(f, excluding ? fullTime : months) ??
+      minYearsDecision(f, excluding ? fullTime : months) ??
       graduationDecision(f, input.profile) ??
       currentStudentDecision(f, input.profile.education) ??
       entryDateDecision(f, input.profile) ??
