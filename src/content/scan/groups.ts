@@ -181,8 +181,14 @@ export function buildUnits(c: Collected): Unit[] {
     ...groupBy(nameless, (r) => r.closest("[role=radiogroup],fieldset") ?? sharedParent(r, nameless)),
   ];
   for (const members of radioGroups) {
-    if (members.some(choiceVisible))
-      take({ kind: "radio_group", el: members[0], members, groupEl: members[0].closest("[role=radiogroup],fieldset") });
+    // Not a fieldset around a whole section of questions: Pinpoint's legend "3.Questions" named each of its Yes/Nos.
+    const g = members[0].closest("[role=radiogroup],fieldset");
+    const own =
+      g &&
+      [...g.querySelectorAll("input:not([type=hidden]),select,textarea")].every((i) =>
+        members.includes(i as HTMLInputElement),
+      );
+    if (members.some(choiceVisible)) take({ kind: "radio_group", el: members[0], members, groupEl: own ? g : null });
   }
 
   // 3. Native checkboxes: shared name, or a fieldset/[role=group] whose boxes share (or lack) a name.

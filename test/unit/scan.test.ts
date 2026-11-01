@@ -196,6 +196,19 @@ describe("grouping (§11.5)", () => {
     ]);
   });
 
+  it("doesn't name radios by the legend of a fieldset around a whole section (Pinpoint)", () => {
+    const q = (i: number, t: string) =>
+      `<div><label for="q${i}">${t}</label><div><input type="radio" id="q${i}t" name="a${i}"><label for="q${i}t">Yes</label>` +
+      `<input type="radio" id="q${i}f" name="a${i}"><label for="q${i}f">No</label></div></div>`;
+    setBody(
+      `<fieldset><legend>3.Questions</legend>${q(0, "Are you willing to relocate?")}${q(1, "Are you authorized to work in the US?")}</fieldset>`,
+    );
+    expect(fields().map((h) => h.desc.label)).toEqual([
+      "Are you willing to relocate?",
+      "Are you authorized to work in the US?",
+    ]);
+  });
+
   it("readonly radios named apart in one radiogroup make one question (Eightfold)", () => {
     const opt = (i: number, v: string) =>
       `<div><input type="radio" id="c${i}" name="consent-choice-${i}" readonly value="${v}"><label for="c${i}">${v}</label></div>`;
