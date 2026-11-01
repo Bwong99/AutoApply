@@ -617,6 +617,16 @@ function currentCompanyDecision(f: FieldDescriptor, experience: Profile["experie
 }
 
 /**
+ * "Other School (if not in school picklist)": the profile's school. iCIMS's picklist lacks most schools outside the
+ * US, so it takes "Other" (fill/engine.ts) and this box names the school; the model skipped it as optional.
+ */
+function otherSchoolDecision(f: FieldDescriptor, education: Profile["education"]): Decision | null {
+  if (f.kind !== "text" || !/^other (school|college|university|institution)\b/i.test(f.label.trim())) return null;
+  const school = education.find((e) => e.school)?.school;
+  return school ? { fieldId: f.id, action: "fill", text: school, confidence: "high", sources: ["education"] } : null;
+}
+
+/**
  * "Do you currently work at/for …?" with no current role in the profile: "No". Huntress's "currently work at a company
  * or partner that uses or sells Huntress products?" was left blank.
  */
@@ -2160,6 +2170,7 @@ export async function mapFields(
       raceDecision(f, input.profile.demographics.raceEthnicity) ??
       genderDecision(f, input.profile.demographics.gender) ??
       currentCompanyDecision(f, input.profile.experience) ??
+      otherSchoolDecision(f, input.profile.education) ??
       notWorkingDecision(f, input.profile.experience) ??
       contactEmployerDecision(f, input.profile.experience) ??
       statusDecision(f, input.profile.workAuthorization.entries) ??

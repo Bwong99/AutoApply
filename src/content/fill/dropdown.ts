@@ -106,6 +106,14 @@ export async function openDropdown(h: FieldHandle): Promise<HTMLElement | null> 
     realClick(t);
     c = await waitFor(() => findOptionsContainer(h, before), 300);
   }
+  // A list empty until searched (iCIMS's schools): its search box shows beside the trigger, controlling the list.
+  if (!c && t.getAttribute("aria-expanded") === "true") {
+    const search = [...(t.parentElement?.querySelectorAll<HTMLInputElement>("input[aria-controls]") ?? [])].find(
+      (i) => i !== h.searchInput && isTextInput(i) && isVisible(i),
+    );
+    const list = search && controlledBy([search]).find(isVisible);
+    if (list) return list;
+  }
   // Opened and settled with no options ("No results found" until a parent field is set): nothing more will come.
   const popups = controlledBy([t]).filter(isVisible);
   if (!c && t.getAttribute("aria-expanded") === "true" && popups.length && !busy(popups)) {
@@ -275,7 +283,16 @@ export async function harvestOptions(h: FieldHandle, budgetMs = Infinity): Promi
 // Select2 keeps its search box in the popup, focused on open and tied to the list by aria-controls.
 function searchBoxOf(h: FieldHandle, c: HTMLElement): HTMLInputElement | undefined {
   const a = document.activeElement;
-  return h.searchInput ?? (a && isTextInput(a) && !a.readOnly && controlledBy([a]).includes(c) ? a : undefined);
+  const searches = (i: Element | null): i is HTMLInputElement =>
+    !!i && isTextInput(i) && !i.readOnly && controlledBy([i]).includes(c);
+  if (h.searchInput) return h.searchInput;
+  if (searches(a)) return a;
+  // Not focused in a page without focus (YOLO's hidden frame): iCIMS's box sits near the results it controls.
+  for (let p = c.parentElement, i = 0; p && i < 3; p = p.parentElement, i++) {
+    const box = [...p.querySelectorAll("input")].find((x) => searches(x) && isVisible(x));
+    if (box) return box;
+  }
+  return undefined;
 }
 
 /** Workday's prompts search only on Enter, as their box declares; in filter-as-you-type boxes Enter picks an option. */

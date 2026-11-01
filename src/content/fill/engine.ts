@@ -39,6 +39,8 @@ export interface EngineDeps {
 }
 
 const RE_HEARD_Q = /\b(hear|heard|learn(ed)?) (about|of)\b|\bbrought you to\b/i;
+/** A list whose label says to take its "Other" when the answer isn't on it. */
+const RE_PICK_OTHER = /\b(select|choose|pick)\s+["“']?other\b/i;
 
 // Remote lists can page very slowly (EA skills: 3 options per request); past this, searching beats paging.
 const HARVEST_MS = 3000;
@@ -157,12 +159,22 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
       if (!options) {
         // Search by the short query: Greenhouse's places search for the full "Langley, British Columbia, Canada"
         // lists only "Fort Langley, …".
-        if (h.searchInput)
-          return fillTypeahead(h, (op.type === "intended" && op.query) || answerOf(op), answerOf(op), (o) =>
+        const query = (op.type === "intended" && op.query) || answerOf(op);
+        // Not on its list: the "Other" its label asks for then (iCIMS: "School (If not applicable, select Other)").
+        const other = RE_PICK_OTHER.test(h.desc.label);
+        if (h.searchInput) {
+          const r = await fillTypeahead(h, query, answerOf(op), (o) =>
             deps.choose(h, answerOf(op), o).then((r) => r?.[0] ?? null),
           );
+          if (r.outcome !== "flag" || !other) return r;
+          return fillTypeahead(h, "Other", "Other", async (o) => localMatch("Other", o));
+        }
         // Too long to harvest (remote paging): choose among what its popup search finds instead.
-        options = await searchOptions(h, (op.type === "intended" && op.query) || answerOf(op));
+        options = await searchOptions(h, query);
+        if (!options && other) {
+          const pick = (await searchOptions(h, "Other"))?.find((o) => /^other\b/i.test(o.trim()));
+          if (pick) return fillDropdown(h, [pick]);
+        }
         if (!options) return flag(`Suggested: ${answerOf(op)}`);
       }
       let texts = textsFor(op, options);

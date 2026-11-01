@@ -2095,6 +2095,27 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask(["South Asian", "Southeast Asian", "White"])).toBe("flag");
   });
 
+  it('names the profile\'s school in an "Other School" box', async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "skip", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const profile = emptyProfile();
+    profile.education = [{ ...profile.education[0], school: "University of British Columbia" }];
+    const r = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      {
+        fields: [field("a", { label: "Other School (if not in school picklist)" }), field("b", { label: "Other" })],
+        profile,
+        documents: [],
+        job: null,
+      },
+    );
+    expect(r.decisions.map((d) => d.text ?? d.action)).toEqual(["University of British Columbia", "skip"]);
+  });
+
   it("picks the gender option for the profile's male/female", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
