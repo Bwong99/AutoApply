@@ -2095,6 +2095,31 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask(["South Asian", "Southeast Asian", "White"])).toBe("flag");
   });
 
+  it("picks the gender option for the profile's male/female", async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const profile = emptyProfile();
+    profile.demographics.gender = "Male";
+    const ask = async (label: string, options: string[]) => {
+      const r = await mapFields(
+        { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+        { fields: [field("a", { label, kind: "dropdown", options })], profile, documents: [], job: null },
+      );
+      return r.decisions[0].intendedAnswer ?? r.decisions[0].action;
+    };
+    const identity = ["Woman", "Man", "Non Binary", "I want to self describe", "I don't wish to answer"];
+    expect(await ask("Gender Identity", identity)).toBe("Man");
+    expect(await ask("Gender", ["Female", "Male", "Decline to self identify"])).toBe("Male");
+    expect(await ask("Do you identify as transgender?", ["Yes", "No"])).toBe("flag");
+    expect(await ask("Is your gender identity the same as the sex assigned at birth?", ["Yes", "No"])).toBe("flag");
+    profile.demographics.gender = "decline";
+    expect(await ask("Gender Identity", identity)).toBe("flag");
+  });
+
   it("says a document wasn't attached when the page had nowhere to upload it", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {

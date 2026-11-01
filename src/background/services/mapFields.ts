@@ -1569,6 +1569,30 @@ function raceDecision(f: FieldDescriptor, races: string[]): Decision | null {
   };
 }
 
+/**
+ * The man/woman option for the profile's male/female gender. The model flagged MongoDB's "Gender Identity" (Woman /
+ * Man / Non Binary …) as unknown, and the guess then declined it. Not transgender or "same as at birth" questions.
+ */
+function genderDecision(f: FieldDescriptor, gender: string): Decision | null {
+  const want = /^(male|man)$/i.test(gender)
+    ? /^(male|man)\b/i
+    : /^(female|woman)$/i.test(gender)
+      ? /^(female|woman)\b/i
+      : null;
+  if (!want || !f.options || !/\bgender\b/i.test(f.label) || /\b(trans|cis)|\bsame as\b|\bassigned\b/i.test(f.label))
+    return null;
+  const hits = f.options.flatMap((o, i) => (want.test(o.trim()) ? [i] : []));
+  if (hits.length !== 1) return null;
+  return {
+    fieldId: f.id,
+    action: "fill",
+    optionIndexes: hits,
+    intendedAnswer: f.options[hits[0]],
+    confidence: "high",
+    sources: ["demographics.gender"],
+  };
+}
+
 const RE_AI = String.raw`\b(AI|artificial intelligence|ChatGPT|LLMs?|generative)\b`;
 const RE_AI_USE = new RegExp(
   String.raw`\bI (have |will |did |do )?(not|never)\b[^?.]*\buse\b[^?.]*${RE_AI}|\b(did|have) you (use|used)\b[^?]*${RE_AI}` +
@@ -2134,6 +2158,7 @@ export async function mapFields(
       countryDecision(f, home) ??
       regionDecision(f, input.profile.personal.address) ??
       raceDecision(f, input.profile.demographics.raceEthnicity) ??
+      genderDecision(f, input.profile.demographics.gender) ??
       currentCompanyDecision(f, input.profile.experience) ??
       notWorkingDecision(f, input.profile.experience) ??
       contactEmployerDecision(f, input.profile.experience) ??
