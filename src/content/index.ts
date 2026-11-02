@@ -27,7 +27,7 @@ import type {
   UploadedDoc,
 } from "../shared/types";
 import { extractJobContext, jobUrl, readPay } from "./jobContextExtract";
-import { deterministicValue, isFreeText, matchLearned, RE_CITY_FIELD } from "./match/deterministic";
+import { deterministicValue, isFreeText, matchLearned, RE_CITY_FIELD, shoutedName } from "./match/deterministic";
 import { localMatchAll } from "./match/localMatch";
 import { harvestOptions } from "./fill/dropdown";
 import { fill, serial, type FillOp } from "./fill/engine";
@@ -724,7 +724,13 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
         continue;
       }
       // Not one the page rejected: what it holds is ours, and wrong (a typed place never picked from its list).
-      if (h.prefilled && !config.settings.overwritePrefilled && !defaultCountry(h) && !rejected.has(h.id)) {
+      if (
+        h.prefilled &&
+        !config.settings.overwritePrefilled &&
+        !defaultCountry(h) &&
+        !shoutedName(h.desc, det.personal) &&
+        !rejected.has(h.id)
+      ) {
         setStatus(h, "prefilled");
         continue;
       }

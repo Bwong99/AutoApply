@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { localMatch, localMatchAll } from "../../src/content/match/localMatch";
-import { deterministicValue, formatPhone, matchLearned } from "../../src/content/match/deterministic";
+import { deterministicValue, formatPhone, matchLearned, shoutedName } from "../../src/content/match/deterministic";
 import { fitLength, formatDateFor } from "../../src/content/fill/native";
 import { sameValue } from "../../src/content/fill/verify";
 import { emptyProfile } from "../../src/shared/profileSchema";
@@ -75,6 +75,20 @@ describe("deterministic matching (§13.2)", () => {
   p.address.region = "British Columbia";
   p.address.regionCode = "BC";
   p.links.linkedin = "https://linkedin.com/in/ada";
+
+  it("recognizes the profile's name in the capitals a résumé parser wrote (Workday)", () => {
+    const shout = (label: string, currentValue: string) => shoutedName(f(label, { currentValue }), p);
+    expect(shout("Given Name(s)", "ADA")).toBe(true);
+    expect(shout("Family Name", " LOVELACE ")).toBe(true);
+    expect(shout("Full name", "ADA LOVELACE")).toBe(true);
+    // Already fine, someone else's name, or not a name.
+    expect(shout("Given Name(s)", "Ada")).toBe(false);
+    expect(shout("Given Name(s)", "AUGUSTA")).toBe(false);
+    expect(shout("City", "ADA")).toBe(false);
+    // A profile in capitals is what the person chose.
+    const caps = { ...p, firstName: "ADA" };
+    expect(shoutedName(f("First name", { currentValue: "ADA" }), caps)).toBe(false);
+  });
 
   it("maps autocomplete tokens", () => {
     expect(deterministicValue(f("Given", { autocomplete: "given-name" }), p)?.value).toBe("Ada");
