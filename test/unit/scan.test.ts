@@ -321,6 +321,23 @@ describe("grouping (§11.5)", () => {
     expect(h.consent).toBe(true);
   });
 
+  it("labels a lone 'Yes' box outside any fieldset by the question before it (Lever)", () => {
+    setBody(`<form><div><div class="application-label"><div class="text">Please confirm that your answer matches the
+      role you are applying for.</div></div><div class="application-field"><ul><li><label><input type="checkbox"
+      name="cards[c][field4]" value="Yes"><span>Yes</span></label></li></ul></div></div>
+      <div><label for="n">Name</label><input id="n"></div></form>`);
+    expect(fields()[0].desc).toMatchObject({
+      kind: "checkbox",
+      label: "Please confirm that your answer matches the role you are applying for.",
+    });
+  });
+
+  it("keeps a lone 'Yes' box's own label when nothing else asks", () => {
+    setBody(`<form><div><label><input type="checkbox" name="x"><span>Yes</span></label></div>
+      <div><label for="n">Name</label><input id="n"></div></form>`);
+    expect(fields()[0].desc.label).toBe("Yes");
+  });
+
   it("reads a CSS '*' after a question's label as required (Ashby)", () => {
     // jsdom computes no pseudo-element content.
     const real = window.getComputedStyle;

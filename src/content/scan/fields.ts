@@ -109,18 +109,20 @@ function labelAbove(unit: Unit, container: Element, owner: Map<Element, Set<Unit
   return "";
 }
 
+const RE_BARE_ANSWER = /^(yes|i agree|agree|i accept|accept|i acknowledge|acknowledged?)$/i;
+/** A lone box labelled only "Yes": the question is elsewhere. */
+const bareAnswer = (el: HTMLElement, unit: Unit) => unit.kind === "checkbox" && RE_BARE_ANSWER.test(controlLabel(el));
+
 /**
  * Upload widgets (e.g. Greenhouse) label the input "Attach"; the question sits on an enclosing group of its own.
- * So does a lone box labelled only "Yes" (Ashby's "I certify the information … is true" fieldset).
+ * So does a lone box labelled only "Yes" (Ashby's "I certify the information … is true" fieldset), else the text
+ * before it asks (Lever's "Please confirm that your answer … matches the role").
  */
 function ownLabel(el: HTMLElement, unit: Unit, owner: Map<Element, Set<Unit>>): string {
   const own = controlLabel(el);
-  const bare =
-    unit.kind === "checkbox" && /^(yes|i agree|agree|i accept|accept|i acknowledge|acknowledged?)$/i.test(own);
-  if (!bare && !RE_ACTION_LABEL.test(own)) return own;
+  if (!bareAnswer(el, unit) && !RE_ACTION_LABEL.test(own)) return own;
   const g = el.closest("[role=group],fieldset");
-  const question = g && owner.get(g)?.size === 1 && owner.get(g)!.has(unit) ? groupLabel(g) : "";
-  return bare ? question || own : question;
+  return g && owner.get(g)?.size === 1 && owner.get(g)!.has(unit) ? groupLabel(g) : "";
 }
 
 /** Text of the largest region around `el` holding no other field (across shadow roots): an uploader's own panel. */
@@ -205,6 +207,7 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
             (u.searchInput ? controlLabel(u.searchInput) : "") ||
             precedingText(container, el, [...memberLabels, labelElementFor(el) ?? el])) ||
       labelAbove(u, container, owner, collected.order) ||
+      (bareAnswer(el, u) ? controlLabel(el) : "") ||
       fallbackLabel(u.searchInput ?? el);
     let label = finishLabel(rawLabel);
     // Jobvite keeps each attachment's file box in its own menu dialog, named only "File" ("Dropbox · File · Type or
