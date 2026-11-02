@@ -146,6 +146,9 @@ describe("deterministic matching (§13.2)", () => {
     expect(deterministicValue(f("Please write out how your name is pronounced phonetically."), p)).toBeNull();
     // Stripe: a Canadian resident must not answer a US-only question with their province.
     expect(deterministicValue(f("If located in the US, in what city and state do you reside?"), p)).toBeNull();
+    const zip = 'Zip Code / Postal Code (Non-U.S. based candidates, please enter "00000")';
+    expect(deterministicValue(f(zip), p)).toBeNull();
+    expect(deterministicValue(f("Zip Code / Postal Code"), p)?.path).toBe("personal.address.postalCode");
   });
   it("answers city and location typeaheads with the full place, searched by city", () => {
     const q = { ...p, address: { ...p.address, city: "Langley", region: "British Columbia", country: "Canada" } };
