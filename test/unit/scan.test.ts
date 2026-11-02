@@ -694,6 +694,13 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(readValue(h)).toBe("May");
   });
 
+  it("reads a form's search box beside its own suggestion list as a typeahead (Greenhouse web-ui)", () => {
+    setBody(`<form><div><label for="s">School<span>*</span></label><div><div><div><input type="search" id="w">
+      </div><ul role="listbox"></ul></div></div><input type="hidden" id="s" required></div></form>
+      <div><input type="search" placeholder="Search jobs"><ul role="listbox"></ul></div>`);
+    expect(fields().map((h) => [h.desc.kind, h.desc.label, h.desc.required])).toEqual([["typeahead", "School", true]]);
+  });
+
   it("labels an upload named only 'Choose a file or drop it here' by its context (SmartRecruiters)", () => {
     setBody(`<form><div><h3>Resume</h3><label for="u">Choose a file or drop it here</label><input type="file" id="u"></div>
       <div><label for="n">Name</label><input id="n"></div></form>`);

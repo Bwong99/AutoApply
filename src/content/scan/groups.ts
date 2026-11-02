@@ -104,6 +104,17 @@ function triggerVisible(el: HTMLElement): boolean {
   );
 }
 
+/**
+ * A form's search box beside a suggestion list of its own asks a question (Greenhouse's web-ui School, Degree and
+ * Discipline): not a site search.
+ */
+function searchesOwnList(el: HTMLInputElement): boolean {
+  if (el.type !== "search" || el.readOnly || !el.closest("form")) return false;
+  for (let p = el.parentElement, i = 0; p && i < 3; p = p.parentElement, i++)
+    if (p.querySelector("[role=listbox]")) return p.querySelectorAll("input:not([type=hidden])").length === 1;
+  return false;
+}
+
 function groupBy<T>(items: T[], key: (t: T) => unknown): T[][] {
   const m = new Map<unknown, T[]>();
   for (const it of items) {
@@ -308,7 +319,7 @@ export function buildUnits(c: Collected): Unit[] {
     const role = el.getAttribute("role");
     if (el instanceof HTMLInputElement) {
       if (el.type === "radio" || el.type === "checkbox") continue;
-      const kind = INPUT_KIND[el.type] ?? (el.type in INPUT_KIND ? null : "text");
+      const kind = searchesOwnList(el) ? "typeahead" : (INPUT_KIND[el.type] ?? (el.type in INPUT_KIND ? null : "text"));
       if (!kind) continue;
       if (kind !== "file" && !isVisible(el)) continue;
       take({ kind: role === "combobox" && isTextInput(el) ? "typeahead" : kind, el });
