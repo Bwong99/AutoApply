@@ -5,6 +5,7 @@ import { deepQueryAll } from "../../src/content/scan/traverse";
 import { RE_OPTIONAL_CONSENT } from "../../src/shared/constants";
 import { extractJobContext, payIn, readPay } from "../../src/content/jobContextExtract";
 import { findOptionsContainer, snapshot } from "../../src/content/fill/dropdown";
+import { readValue } from "../../src/content/fill/verify";
 
 beforeAll(stubLayout);
 beforeEach(() => setBody(""));
@@ -679,6 +680,18 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     const [h] = fields();
     expect(h.desc.kind).toBe("dropdown");
     expect(h.prefilled).toBe(false);
+  });
+
+  it("finds a transparent select trigger laid over the box showing its pick (Greenhouse web-ui)", () => {
+    // The layout stub gives opacity 0 no box, so 0.01 stands in for it.
+    setBody(`<form><label for="m">End date month<span>*</span></label><div id="m" role="group" aria-required="true">
+      <div><span class="pick"></span><button type="button" aria-haspopup="listbox" aria-controls="l"
+        style="opacity:0.01"></button></div></div></form>`);
+    const [h] = fields();
+    expect(h.desc).toMatchObject({ kind: "dropdown", label: "End date month", required: true });
+    expect(h.prefilled).toBe(false);
+    document.querySelector(".pick")!.textContent = "May";
+    expect(readValue(h)).toBe("May");
   });
 
   it("labels an upload named only 'Choose a file or drop it here' by its context (SmartRecruiters)", () => {

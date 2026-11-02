@@ -83,6 +83,27 @@ const choiceVisible = (m: HTMLElement) => {
   return !!l && isVisible(l);
 };
 
+/**
+ * A transparent trigger laid over the box showing the pick (Greenhouse's web-ui selects, Duolingo's board): only the
+ * button itself is opacity 0. Not a 1px proxy input.
+ */
+function triggerVisible(el: HTMLElement): boolean {
+  if (isVisible(el)) return true;
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  return (
+    Number(cs.opacity || 1) <= 0.05 &&
+    cs.visibility !== "hidden" &&
+    cs.visibility !== "collapse" &&
+    cs.pointerEvents !== "none" &&
+    r.width >= 20 &&
+    r.height >= 10 &&
+    !!el.parentElement &&
+    isVisible(el.parentElement) &&
+    el.getAttribute("aria-hidden") !== "true"
+  );
+}
+
 function groupBy<T>(items: T[], key: (t: T) => unknown): T[][] {
   const m = new Map<unknown, T[]>();
   for (const it of items) {
@@ -155,7 +176,7 @@ export function buildUnits(c: Collected): Unit[] {
   // 1. Custom dropdown triggers: outermost wins; an inner editable input becomes its search box.
   const triggers: HTMLElement[] = [];
   for (const el of cands) {
-    if (!isDropdownTrigger(el) || !wrapsSingleControl(el) || !isVisible(el)) continue;
+    if (!isDropdownTrigger(el) || !wrapsSingleControl(el) || !triggerVisible(el)) continue;
     if (triggers.some((t) => t.contains(el))) continue;
     if (el.getAttribute("role") === "radiogroup") continue;
     triggers.push(el);
