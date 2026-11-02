@@ -1,6 +1,6 @@
 // §16.1 overlay panel (top frame only): collapsed 44 px button, expandable status panel, draggable vertically.
 import { ellipsize } from "../../shared/normalize";
-import type { ApiError, NeedsYouItem, StatusCounts, UploadedDoc } from "../../shared/types";
+import type { ApiError, JobBrief, NeedsYouItem, StatusCounts, UploadedDoc } from "../../shared/types";
 import { el, onOutsideClick, uiLayer } from "./root";
 
 export interface OverlayView {
@@ -24,6 +24,34 @@ export interface OverlayHandlers {
   onFocus(item: NeedsYouItem): void;
   onMove(bottom: number): void;
   onOpenDoc(id: string): void;
+  /** The job details an AI-made upload was written from; null when no longer kept. */
+  onJobInfo(id: string): Promise<JobBrief | null>;
+}
+
+const JOB_ROWS: [keyof JobBrief, string][] = [
+  ["company", "Company"],
+  ["title", "Job title"],
+  ["location", "Location"],
+  ["url", "Page"],
+  ["description", "Description"],
+];
+
+/** One job brief as label/value rows; the description scrolls on its own so the panel stays short. */
+function jobRows(b: JobBrief | null): HTMLElement {
+  const rows = JOB_ROWS.filter(([k]) => b?.[k]);
+  if (!rows.length)
+    return el("div", {
+      className: "muted",
+      textContent: b ? "No job details were found on the page" : "No longer available",
+    });
+  return el(
+    "dl",
+    {},
+    ...rows.flatMap(([k, label]) => [
+      el("dt", { textContent: label }),
+      el("dd", { className: k === "description" ? "desc" : "", textContent: b![k] }),
+    ]),
+  );
 }
 
 export function statusLine(c: StatusCounts, running: boolean): string {
@@ -51,6 +79,36 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
   const error = el("div", { className: "error" });
   const needs = el("ul", { className: "needs" });
   const files = el("ul", { className: "files" });
+  // Collapsed by default and fetched on first open: what the AI was told about the job, for tailoring/cover letters.
+  const jobBody = el("div");
+  const jobInfo = el(
+    "details",
+    { className: "jobinfo" },
+    el("summary", { textContent: "Job details the AI used" }),
+    jobBody,
+  );
+  let jobDocs: UploadedDoc[] = [];
+  let jobKey = "";
+  const loadJob = async () => {
+    const key = jobKey;
+    const briefs = await Promise.all(jobDocs.map((d) => h.onJobInfo(d.id)));
+    if (key !== jobKey) return;
+    // The résumé and cover letter usually share one job; captions only when they were given different details.
+    const shown = briefs
+      .map((b, i) => ({ b, d: jobDocs[i] }))
+      .filter((x, i) => briefs.findIndex((b) => JSON.stringify(b) === JSON.stringify(x.b)) === i);
+    jobBody.replaceChildren(
+      ...shown.flatMap(({ b, d }) => [
+        ...(shown.length > 1
+          ? [el("div", { className: "caption", textContent: d.kind === "resume" ? "Résumé" : "Cover letter" })]
+          : []),
+        jobRows(b),
+      ]),
+    );
+  };
+  jobInfo.ontoggle = () => {
+    if (jobInfo.open && !jobBody.childElementCount) void loadJob();
+  };
   const timings = el("pre", { className: "timings" });
   const close = el("button", { className: "icon", type: "button", textContent: "×", title: "Collapse" });
   close.setAttribute("aria-label", "Collapse panel");
@@ -64,7 +122,7 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
     "div",
     { className: "panel" },
     head,
-    el("div", { className: "body" }, status, notice, model, error, needs, files, timings),
+    el("div", { className: "body" }, status, notice, model, error, needs, files, jobInfo, timings),
     el("div", { className: "actions" }, btn("Re-run", h.onRerun, "btn primary"), btn("Stop", h.onStop)),
   );
   panel.setAttribute("role", "region");
@@ -158,6 +216,14 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
           return el("li", {}, b);
         }),
       );
+      const ai = v.uploads.filter((d) => d.ai);
+      jobInfo.style.display = ai.length ? "" : "none";
+      if (ai.map((d) => d.id).join() !== jobKey) {
+        jobKey = ai.map((d) => d.id).join();
+        jobDocs = ai;
+        jobBody.replaceChildren();
+        if (jobInfo.open && ai.length) void loadJob();
+      }
       timings.textContent = v.debug;
       timings.style.display = v.debug ? "" : "none";
       // Auto-expand while filling and for DONE_PIN_MS after it ends.

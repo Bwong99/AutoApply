@@ -133,6 +133,8 @@ let yolo = false;
 let yoloFatal: string | undefined;
 /** Résumés and cover letters uploaded per field, for the overlay to preview. */
 const uploads = new Map<string, UploadedDoc>();
+/** Documents the AI tailored or wrote for this job: the overlay offers the job details it was given. */
+const aiDocs = new Set<string>();
 /** Answers the AI made up on this page, for the run's log. */
 const guesses = new Map<string, Guess>();
 
@@ -200,6 +202,7 @@ function renderOverlay() {
           : focusField(n.fieldId),
       onMove: (bottom) => void send({ type: "SET_OVERLAY_POS", host: HOST, bottom }).catch(() => undefined),
       onOpenDoc: (id) => void openDoc(id),
+      onJobInfo: (id) => send({ type: "GET_DOC_JOB", id }).catch(() => null),
     },
     config?.overlayBottom ?? null,
   );
@@ -532,7 +535,7 @@ async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: str
   if (states.get(h.id)?.userOwned) return;
   const doc = r.outcome === "ok" && config.documentsIndex.find((d) => d.id === r.docId);
   if (doc && (doc.kind === "resume" || doc.kind === "cover_letter"))
-    uploads.set(h.id, { id: doc.id, kind: doc.kind, fileName: doc.fileName });
+    uploads.set(h.id, { id: doc.id, kind: doc.kind, fileName: doc.fileName, ...(aiDocs.has(doc.id) && { ai: true }) });
   else uploads.delete(h.id);
   if (r.outcome === "ok") {
     setStatus(h, okStatus, r.note, okStatus === "ai" && r.shown ? `${tooltip} → "${r.shown}"` : tooltip);
@@ -931,6 +934,7 @@ async function tailoredUpload(h: FieldHandle, groupId: string, ctrl: AbortContro
   if (!config.documentsIndex.some((d) => d.id === r.meta.id))
     config.documentsIndex = [...config.documentsIndex, r.meta];
   resumeNotice = r.tailored ? "" : `Untailored résumé used: ${r.note}`;
+  if (r.tailored) aiDocs.add(r.meta.id);
   const tooltip = r.tailored ? `AI-tailored résumé (${r.note})` : `Untailored résumé (${r.note})`;
   await doFill(h, { type: "file", documentId: r.meta.id }, "filled", tooltip, ctrl);
 }
@@ -944,6 +948,7 @@ async function coverLetter(h: FieldHandle, ctrl: AbortController) {
     return setStatus(h, "needs", r.error.message);
   }
   config.documentsIndex = [...config.documentsIndex, r.meta];
+  aiDocs.add(r.meta.id);
   guesses.set(h.id, { q: h.desc.label, a: "A cover letter written for this job" });
   await doFill(h, { type: "file", documentId: r.meta.id }, "draft", "Generated cover letter", ctrl);
 }

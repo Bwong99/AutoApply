@@ -18,6 +18,7 @@ import {
 import { RELEVANCE_PROMPT } from "../gemini/prompts";
 import { RELEVANCE_SCHEMA, RelevanceZ } from "../gemini/schemas";
 import { draftEssays } from "../services/draftEssays";
+import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
@@ -697,6 +698,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       session.set(`yolodoc:${id}`, { meta, base64 }),
       // For the debug log: its text, not the PDF.
       session.set(`yololetter:${id}`, { name: meta.fileName.replace(/\.pdf$/i, ".txt"), text: e.text }),
+      // For the overlay: the job as draftEssays gave it to the AI.
+      session.set(`docjob:${id}`, jobBrief(job) ?? {}),
     ]);
     return { meta };
   },

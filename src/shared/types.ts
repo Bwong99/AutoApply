@@ -57,7 +57,19 @@ export interface DocumentMeta {
   uploadedAt: number;
 }
 
-export type UploadedDoc = Pick<DocumentMeta, "id" | "kind" | "fileName">;
+export type UploadedDoc = Pick<DocumentMeta, "id" | "kind" | "fileName"> & {
+  /** Tailored or written by the AI for this job: the overlay offers the job details it was given. */
+  ai?: boolean;
+};
+
+/** The job as the AI's writing services were given it (background/services/jobBrief.ts). */
+export interface JobBrief {
+  company?: string;
+  title?: string;
+  url?: string;
+  location?: string;
+  description?: string;
+}
 
 export interface ApiKeyEntry {
   id: string;

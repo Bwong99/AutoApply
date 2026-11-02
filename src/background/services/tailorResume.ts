@@ -188,6 +188,8 @@ export async function tailoredResume(
           session.set(`tailordoc:${id}`, { meta, base64: r.pdf }),
           // For YOLO's debug log: the .tex is ~10x smaller than the PDF.
           session.set(`tailortex:${id}`, { name: fileName.replace(/\.pdf$/i, ".tex"), text: r.tex }),
+          // For the overlay: the job as tailor() gave it to the AI.
+          session.set(`docjob:${id}`, { ...jobBrief(job), location: job?.location }),
         ]);
         return { meta, tailored: true, note: r.note };
       } catch (e) {

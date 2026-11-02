@@ -196,6 +196,37 @@
   color: var(--muted);
   display: block;
 }
+.jobinfo {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.jobinfo summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.jobinfo dl {
+  margin: 4px 0 0;
+}
+.jobinfo dt,
+.jobinfo .caption {
+  color: var(--muted);
+  margin-top: 6px;
+}
+.jobinfo .caption {
+  font-weight: 600;
+}
+.jobinfo dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.jobinfo .desc {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  scrollbar-width: thin;
+}
 .actions {
   display: flex;
   gap: 6px;
@@ -219,7 +250,8 @@
 .btn:focus-visible,
 .fab:focus-visible,
 .needs button:focus-visible,
-.files button:focus-visible {
+.files button:focus-visible,
+.jobinfo summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

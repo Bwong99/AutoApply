@@ -7,6 +7,7 @@ import type {
   EssayItem,
   FieldDescriptor,
   FrameStatus,
+  JobBrief,
   JobContext,
   LearnedAnswerInput,
   Pay,
@@ -73,6 +74,7 @@ export type Message =
   // C → B
   | { type: "GET_RUNTIME_CONFIG"; yolo?: boolean }
   | { type: "GET_DOCUMENT"; id: string }
+  | { type: "GET_DOC_JOB"; id: string }
   | { type: "SET_JOB_CONTEXT"; ctx: JobContext }
   /** Which résumé variant to upload for the tab's job. */
   | { type: "PICK_RESUME" }
@@ -155,6 +157,7 @@ export interface TabStatusResponse {
 export interface Responses {
   GET_RUNTIME_CONFIG: RuntimeConfig;
   GET_DOCUMENT: { meta: DocumentMeta; base64: string } | null;
+  GET_DOC_JOB: JobBrief | null;
   SET_JOB_CONTEXT: Ok;
   PICK_RESUME: { id: string | null };
   SET_JOB_PAY: Ok;

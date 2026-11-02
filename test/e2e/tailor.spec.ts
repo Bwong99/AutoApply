@@ -106,6 +106,11 @@ test("tailor: a fill uploads the résumé tailored for the job, after the AI's e
   );
   expect(await uploadedBase64(page)).not.toBe((fallback as { base64: string }).base64);
   await expect(page.locator("autoapply-root .panel .notice")).not.toContainText("Untailored");
+  // The panel shows, on request, the job details the résumé was tailored from.
+  await page.locator("autoapply-root .fab").click();
+  const jobInfo = page.locator("autoapply-root .jobinfo");
+  await jobInfo.locator("summary").click();
+  await expect(jobInfo.locator("dl")).toContainText("Software Developer Co-op");
 
   // One tailoring call with the job and the numbered résumé body, not the preamble.
   const [call] = mock.calls_("tailor");
@@ -149,6 +154,8 @@ test("tailor: unusable AI edits fall back to the untailored résumé, with a not
   await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 30_000 });
   expect(await uploadedBase64(page)).toBe((fallback as { base64: string }).base64);
   await expect(page.locator("autoapply-root .panel .notice")).toContainText("Untailored résumé used");
+  // No AI wrote it: no job details are offered.
+  await expect(page.locator("autoapply-root .jobinfo")).toBeHidden();
 });
 
 test("tailor: Flag for me leaves the résumé upload to the user", async ({ page, sw }) => {

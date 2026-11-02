@@ -317,6 +317,9 @@ const handlers: Handlers = {
     return meta && base64 ? { meta, base64 } : null;
   },
 
+  /** The job details an AI-made document (tailored résumé, generated cover letter) was written from. */
+  GET_DOC_JOB: ({ id }) => session.get(`docjob:${id}`),
+
   async SET_JOB_CONTEXT({ ctx }, sender) {
     const tab = await runTab(sender);
     const job = await yoloJob(sender);
