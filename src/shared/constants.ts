@@ -98,7 +98,7 @@ export const RE_NEWSLETTER = /newsletter|subscribe/i;
 export const RE_SENSITIVE_LABEL =
   /card number|\bcvv\b|\bcvc\b|expiry|iban|routing|\bsin\b|social insurance|social security|ssn|passport (number|no)/i;
 export const RE_CONSENT =
-  /i (agree|acknowledge|certify|confirm|understand|accept)|\b(agreement|understanding)\b|consent|terms|privacy (policy|notice)|attest|\b(true|accurate|correct),? and (complete|correct|accurate|your own)\b/i;
+  /i (agree|acknowledge|certify|confirm|understand|accept|have read)|i['’]ve read|\b(agreement|understanding)\b|consent|terms|privacy (policy|notice)|attest|\b(true|accurate|correct),? and (complete|correct|accurate|your own)\b/i;
 /** Consent that is not needed to apply: future/other roles, talent pools, marketing. */
 /** A job board as where someone heard of a job (the profile's "How did you hear" source). */
 export const RE_JOB_BOARD = /\b(linkedin|indeed|glassdoor|handshake|simplify|ziprecruiter|wellfound|angel ?list)\b/i;

@@ -41,6 +41,8 @@ describe("consent patterns", () => {
     "Please select the checkbox to indicate your understanding and agreement with the above.",
     // Hugging Face (Workable), YES / NO.
     "Can you confirm that everything in this application is true and your own, including your experience and identity?",
+    // CIBC (Workday) self-identification statement: a box per acknowledgement.
+    "I have read the above statement.",
   ];
   const optional = [
     "I want EA recruiters to contact me in relation to other relevant job opportunities, including related events. I understand that I can withdraw my consent at any time by clicking unsubscribe on any emails received from EA.",
