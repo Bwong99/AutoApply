@@ -24,6 +24,7 @@ import type {
   NeedsYouItem,
   RuntimeConfig,
   StatusCounts,
+  UploadedDoc,
 } from "../shared/types";
 import { extractJobContext, jobUrl, readPay } from "./jobContextExtract";
 import { deterministicValue, isFreeText, matchLearned, RE_CITY_FIELD } from "./match/deterministic";
@@ -130,6 +131,8 @@ const life = new AbortController();
 let yolo = false;
 /** Why the run can't go on, from the last fill (a required ID number, no résumé). */
 let yoloFatal: string | undefined;
+/** Résumés and cover letters uploaded per field, for the overlay to preview. */
+const uploads = new Map<string, UploadedDoc>();
 /** Answers the AI made up on this page, for the run's log. */
 const guesses = new Map<string, Guess>();
 
@@ -163,7 +166,8 @@ function frameStatus(): FrameStatus {
   for (const [id, s] of states)
     if (s.status === "needs" || s.status === "failed")
       needsYou.push({ fieldId: id, label: handles.get(id)?.desc.label ?? "", note: s.note ?? "" });
-  return { frameId: 0, counts: counts(), needsYou, running, error: lastError?.message };
+  const docs = [...uploads].filter(([id]) => !states.get(id)?.userOwned).map(([, d]) => d);
+  return { frameId: 0, counts: counts(), needsYou, running, error: lastError?.message, uploads: docs };
 }
 
 let reportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -195,6 +199,7 @@ function renderOverlay() {
           ? void send({ type: "FOCUS_FIELD", frameId: n.frameId, fieldId: n.fieldId }).catch(() => undefined)
           : focusField(n.fieldId),
       onMove: (bottom) => void send({ type: "SET_OVERLAY_POS", host: HOST, bottom }).catch(() => undefined),
+      onOpenDoc: (id) => void openDoc(id),
     },
     config?.overlayBottom ?? null,
   );
@@ -213,6 +218,7 @@ function renderOverlay() {
     counts: total,
     needsYou: frames.flatMap((f) => f.needsYou.map((n) => ({ ...n, frameId: f.frameId }))),
     running: frames.some((f) => f.running),
+    uploads: [...new Map(frames.flatMap((f) => f.uploads ?? []).map((d) => [d.id, d])).values()],
     error,
     model: usedModel ?? config?.selectedModel ?? null,
     debug: config?.settings.debugLogging ? timings.map(([k, v]) => `${k.padEnd(10)} ${v} ms`).join("\n") : "",
@@ -264,6 +270,16 @@ function badgeTarget(h: FieldHandle): HTMLElement {
 }
 
 // ---------- helpers ----------
+/** Opens an uploaded document in a new tab (the browser's PDF viewer), fetched only when clicked. */
+async function openDoc(id: string) {
+  const d = await send({ type: "GET_DOCUMENT", id }).catch(() => null);
+  if (!d) return;
+  const bytes = Uint8Array.from(atob(d.base64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: d.meta.mimeType }));
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 function focusField(id: string) {
   const h = handles.get(id);
   const target = h?.members?.[0] ?? h?.searchInput ?? h?.el;
@@ -514,6 +530,10 @@ async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: str
     signal: ctrl.signal,
   });
   if (states.get(h.id)?.userOwned) return;
+  const doc = r.outcome === "ok" && config.documentsIndex.find((d) => d.id === r.docId);
+  if (doc && (doc.kind === "resume" || doc.kind === "cover_letter"))
+    uploads.set(h.id, { id: doc.id, kind: doc.kind, fileName: doc.fileName });
+  else uploads.delete(h.id);
   if (r.outcome === "ok") {
     setStatus(h, okStatus, r.note, okStatus === "ai" && r.shown ? `${tooltip} → "${r.shown}"` : tooltip);
   } else if (r.outcome === "mismatch") setStatus(h, "check", r.note, tooltip);

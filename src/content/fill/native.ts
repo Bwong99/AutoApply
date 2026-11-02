@@ -12,6 +12,8 @@ export interface FillResult {
   outcome: "ok" | "mismatch" | "failed" | "flag";
   note?: string;
   shown?: string;
+  /** File fields: the document uploaded, which may be a compatible substitute for the one asked for. */
+  docId?: string;
 }
 
 const ok = (shown?: string): FillResult => ({ outcome: "ok", shown });

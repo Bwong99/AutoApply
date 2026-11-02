@@ -57,6 +57,8 @@ export interface DocumentMeta {
   uploadedAt: number;
 }
 
+export type UploadedDoc = Pick<DocumentMeta, "id" | "kind" | "fileName">;
+
 export interface ApiKeyEntry {
   id: string;
   label: string;
@@ -156,6 +158,8 @@ export interface FrameStatus {
   needsYou: NeedsYouItem[];
   running: boolean;
   error?: string;
+  /** Résumés and cover letters this frame's fill uploaded, for the overlay to preview. */
+  uploads?: UploadedDoc[];
   detected?: boolean;
   /** When the background got it (Date.now()). */
   at?: number;

@@ -1,12 +1,14 @@
 // §16.1 overlay panel (top frame only): collapsed 44 px button, expandable status panel, draggable vertically.
 import { ellipsize } from "../../shared/normalize";
-import type { ApiError, NeedsYouItem, StatusCounts } from "../../shared/types";
+import type { ApiError, NeedsYouItem, StatusCounts, UploadedDoc } from "../../shared/types";
 import { el, onOutsideClick, uiLayer } from "./root";
 
 export interface OverlayView {
   counts: StatusCounts;
   needsYou: NeedsYouItem[];
   running: boolean;
+  /** Résumés and cover letters the fill uploaded, opened in a new tab on click. */
+  uploads: UploadedDoc[];
   error: ApiError | null;
   model: string | null;
   debug: string;
@@ -21,6 +23,7 @@ export interface OverlayHandlers {
   onOpenSettings(): void;
   onFocus(item: NeedsYouItem): void;
   onMove(bottom: number): void;
+  onOpenDoc(id: string): void;
 }
 
 export function statusLine(c: StatusCounts, running: boolean): string {
@@ -47,6 +50,7 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
   const notice = el("div", { className: "notice" });
   const error = el("div", { className: "error" });
   const needs = el("ul", { className: "needs" });
+  const files = el("ul", { className: "files" });
   const timings = el("pre", { className: "timings" });
   const close = el("button", { className: "icon", type: "button", textContent: "×", title: "Collapse" });
   close.setAttribute("aria-label", "Collapse panel");
@@ -60,7 +64,7 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
     "div",
     { className: "panel" },
     head,
-    el("div", { className: "body" }, status, notice, model, error, needs, timings),
+    el("div", { className: "body" }, status, notice, model, error, needs, files, timings),
     el("div", { className: "actions" }, btn("Re-run", h.onRerun, "btn primary"), btn("Stop", h.onStop)),
   );
   panel.setAttribute("role", "region");
@@ -140,6 +144,17 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
             el("span", { textContent: n.note }),
           );
           b.onclick = () => h.onFocus(n);
+          return el("li", {}, b);
+        }),
+      );
+      files.replaceChildren(
+        ...v.uploads.map((d) => {
+          const b = el(
+            "button",
+            { type: "button", textContent: ellipsize(d.fileName, 110), title: "Open in a new tab" },
+            el("span", { textContent: d.kind === "resume" ? "Résumé submitted" : "Cover letter submitted" }),
+          );
+          b.onclick = () => h.onOpenDoc(d.id);
           return el("li", {}, b);
         }),
       );

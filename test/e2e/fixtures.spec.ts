@@ -103,6 +103,12 @@ test("followup: a question revealed by an answer is filled in a second pass", as
   // The swapped-in file input is the same, already uploaded field.
   expect(await page.evaluate(() => (window as unknown as { uploads: number }).uploads)).toBe(1);
   await expect(badge(page, "Which province do you prefer?")).toHaveAttribute("data-color", "blue");
+  // The overlay lists the uploaded résumé, which opens in a new tab.
+  await page.locator("autoapply-root .fab").click();
+  const file = page.locator("autoapply-root .files button");
+  await expect(file).toHaveText(/ada-resume\.pdf\s*Résumé submitted/);
+  const [tab] = await Promise.all([page.context().waitForEvent("page"), file.click()]);
+  expect(tab.url()).toMatch(/^blob:/);
 });
 
 test("shadow: fields inside an open shadow root are filled", async ({ page, sw }) => {

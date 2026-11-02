@@ -228,7 +228,7 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
       const doc = compatibleDoc(meta, deps.documents, h.desc.accept);
       if (!doc) return flag(`No uploaded file matches ${h.desc.accept}`);
       const data = await deps.getDocument(doc.id);
-      return data ? fillFile(h, data.meta, data.base64) : flag("Document not found");
+      return data ? { ...(await fillFile(h, data.meta, data.base64)), docId: doc.id } : flag("Document not found");
     }
   }
 }
