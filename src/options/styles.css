@@ -185,6 +185,9 @@ input[type="radio"] {
 textarea {
   resize: vertical;
 }
+textarea:disabled {
+  color: var(--muted);
+}
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
