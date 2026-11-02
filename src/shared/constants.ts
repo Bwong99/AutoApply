@@ -291,16 +291,25 @@ export const LABEL_RULES: [RegExp, DetKey][] = [
   // Westinghouse's "Electronic Signature : Please sign with your full name (first name and last name or surname)" got
   // the last name. Not "Signature Date".
   [/^(?!.*\bdate\b).*(\bsignature\b|\bsign (here )?with your (full |legal )?name\b)/i, "fullName"],
-  [/^first\s*name|given name|legal first/i, "firstName"],
-  [/^last\s*name|^(?!.*\b(signature|full name)\b).*(surname|family name)/i, "lastName"],
+  // Not "Legal First and Last Name" (it got the first name alone).
+  [/^first\s*name|given name|legal first(?! (and|&) last)/i, "firstName"],
+  [/^last\s*name|legal last|^(?!.*\b(signature|full name)\b).*(surname|family name)/i, "lastName"],
   // Sentry's "First and Last Name" went to the AI, which added the middle name.
-  [/^(full\s*)?name$|^first (and|&) last name$/i, "fullName"],
+  [/^(full\s*)?name$|^(legal )?first (and|&) last name$/i, "fullName"],
   [/\blegal name\b/i, "legalName"],
   [/preferred (first )?name/i, "preferredName"],
-  // Not a school address (Jane Street's "university email" got the personal one): the AI decides.
-  [/^(?!.*\b(school|university|college|student|\.?edu)\b).*e-?mail/i, "email"],
-  // Not "phonetically" (Akuna's name pronunciation got the phone number), nor "Phone Extension" (it got the number too).
-  [/^(?!.*\bext(ension)?\b).*(phone(?!tic)|mobile|\bcell)/i, "phone"],
+  // Not a school address (Jane Street's "university email" got the personal one): the AI decides. Nor someone else's,
+  // or a second one (Duolingo's "Alternate Email" got the same address again).
+  [
+    /^(?!.*\b(school|university|college|student|\.?edu|alternat(e|ive)|secondary|backup|emergency|referr(er|al)|reference|parent|guardian)\b).*e-?mail/i,
+    "email",
+  ],
+  // Not "phonetically" (Akuna's name pronunciation got the phone number), nor "Phone Extension" (it got the number too),
+  // nor someone else's or a second number.
+  [
+    /^(?!.*\b(ext(ension)?|alternat(e|ive)|secondary|backup|emergency|referr(er|al)|reference|parent|guardian)\b).*(phone(?!tic)|mobile|\bcell)/i,
+    "phone",
+  ],
   [/\b(phone|mobile|tel(ephone)?)\b.*\bext(ension)?\b|^ext(ension)?\.?$/i, "phoneExtension"],
   [/country code|dialing code/i, "phoneCountryCode"],
   [/linkedin/i, "linkedin"],
@@ -317,7 +326,8 @@ export const LABEL_RULES: [RegExp, DetKey][] = [
   [/\bpronouns?\b/i, "pronouns"],
   [/^address( line)? ?1|street address/i, "line1"],
   [/address( line)? ?2|\bapt\b|\bsuite\b|\bunit\b/i, "line2"],
-  [/\b(province|state|region)\b/i, "region"],
+  // Not the verb: "Please state your full legal name" (or salary, reason…) is no question about the province.
+  [/\b(province|region)\b|\bstate\b(?! (your|the|any|whether|how|why|what|if|briefly)\b)/i, "region"],
   [/^country$/i, "country"],
 ];
 

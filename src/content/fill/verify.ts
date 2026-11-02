@@ -32,6 +32,14 @@ export function dropdownText(h: FieldHandle): string {
   // A trigger inside a shadow root shows its value through a <slot> (SmartRecruiters' phone country: "+1").
   const text = collapse(clone.textContent ?? "") || (h.el.querySelector("slot") ? collapse(shownText(h.el)) : "");
   if (text) return text;
+  // A transparent trigger laid over the box showing the pick (Greenhouse's web-ui selects): the box's own text.
+  const box = h.el.parentElement;
+  if (box && Number(getComputedStyle(h.el).opacity || 1) <= 0.05) {
+    const shown = box.cloneNode(true) as HTMLElement;
+    shown.querySelectorAll('button,input,select,[role=listbox],[class*="placeholder" i]').forEach((n) => n.remove());
+    const t = collapse(shown.textContent ?? "");
+    if (t) return t;
+  }
   if (h.hiddenSelect && h.hiddenSelect.selectedIndex >= 0) {
     const o = h.hiddenSelect.options[h.hiddenSelect.selectedIndex];
     if (!isPlaceholderOption(o, h.hiddenSelect.selectedIndex)) return collapse(o.text);

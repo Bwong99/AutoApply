@@ -83,6 +83,38 @@ const choiceVisible = (m: HTMLElement) => {
   return !!l && isVisible(l);
 };
 
+/**
+ * A transparent trigger laid over the box showing the pick (Greenhouse's web-ui selects, Duolingo's board): only the
+ * button itself is opacity 0. Not a 1px proxy input.
+ */
+function triggerVisible(el: HTMLElement): boolean {
+  if (isVisible(el)) return true;
+  const r = el.getBoundingClientRect();
+  const cs = getComputedStyle(el);
+  return (
+    Number(cs.opacity || 1) <= 0.05 &&
+    cs.visibility !== "hidden" &&
+    cs.visibility !== "collapse" &&
+    cs.pointerEvents !== "none" &&
+    r.width >= 20 &&
+    r.height >= 10 &&
+    !!el.parentElement &&
+    isVisible(el.parentElement) &&
+    el.getAttribute("aria-hidden") !== "true"
+  );
+}
+
+/**
+ * A form's search box beside a suggestion list of its own asks a question (Greenhouse's web-ui School, Degree and
+ * Discipline): not a site search.
+ */
+function searchesOwnList(el: HTMLInputElement): boolean {
+  if (el.type !== "search" || el.readOnly || !el.closest("form")) return false;
+  for (let p = el.parentElement, i = 0; p && i < 3; p = p.parentElement, i++)
+    if (p.querySelector("[role=listbox]")) return p.querySelectorAll("input:not([type=hidden])").length === 1;
+  return false;
+}
+
 function groupBy<T>(items: T[], key: (t: T) => unknown): T[][] {
   const m = new Map<unknown, T[]>();
   for (const it of items) {
@@ -155,7 +187,7 @@ export function buildUnits(c: Collected): Unit[] {
   // 1. Custom dropdown triggers: outermost wins; an inner editable input becomes its search box.
   const triggers: HTMLElement[] = [];
   for (const el of cands) {
-    if (!isDropdownTrigger(el) || !wrapsSingleControl(el) || !isVisible(el)) continue;
+    if (!isDropdownTrigger(el) || !wrapsSingleControl(el) || !triggerVisible(el)) continue;
     if (triggers.some((t) => t.contains(el))) continue;
     if (el.getAttribute("role") === "radiogroup") continue;
     triggers.push(el);
@@ -287,7 +319,7 @@ export function buildUnits(c: Collected): Unit[] {
     const role = el.getAttribute("role");
     if (el instanceof HTMLInputElement) {
       if (el.type === "radio" || el.type === "checkbox") continue;
-      const kind = INPUT_KIND[el.type] ?? (el.type in INPUT_KIND ? null : "text");
+      const kind = searchesOwnList(el) ? "typeahead" : (INPUT_KIND[el.type] ?? (el.type in INPUT_KIND ? null : "text"));
       if (!kind) continue;
       if (kind !== "file" && !isVisible(el)) continue;
       take({ kind: role === "combobox" && isTextInput(el) ? "typeahead" : kind, el });

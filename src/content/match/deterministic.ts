@@ -60,6 +60,8 @@ function keyFor(d: FieldDescriptor): DetKey | null {
   if (ac) return ac === "dateOfBirth" && !/birth/i.test(d.label) ? null : ac;
   // A conditional question ("If located in the US, in what city and state…") may not apply: the AI decides.
   if (/^if\b/i.test(d.label)) return null;
+  // So may one naming what to type instead: "Zip Code (Non-U.S. based candidates, please enter "00000")" got V2Y 3C7.
+  if (/\b(enter|type|put|use|write)\s+["“'][^"”']+["”']/i.test(d.label)) return null;
   const keys = new Set(LABEL_RULES.filter(([re]) => re.test(d.label)).map(([, k]) => k));
   return keys.size === 1 ? [...keys][0] : null;
 }

@@ -137,15 +137,32 @@ describe("deterministic matching (§13.2)", () => {
     expect(deterministicValue(f("Legal Name (if different than above)"), { ...p, middleName: "King" })?.value).toBe(
       "Ada King Lovelace",
     );
+    expect(deterministicValue(f("Legal First and Last Name"), { ...p, middleName: "King" })?.value).toBe(
+      "Ada Lovelace",
+    );
+    expect(deterministicValue(f("Legal First Name"), p)?.value).toBe("Ada");
+    expect(deterministicValue(f("Legal Last Name"), p)?.value).toBe("Lovelace");
     expect(deterministicValue(f("Email address", { kind: "email" }), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("university email", { kind: "email" }), p)).toBeNull();
+    // Duolingo: an "Alternate Email" got the same address again; nor is a contact's email or phone the applicant's.
+    for (const label of ["Alternate Email", "Secondary phone number", "Emergency contact phone", "Referrer's email"])
+      expect(deterministicValue(f(label), p)).toBeNull();
+    expect(deterministicValue(f("Email Address (Primary)"), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("LinkedIn profile"), p)?.value).toBe("https://linkedin.com/in/ada");
     expect(deterministicValue(f("Province / State"), p)?.value).toBe("British Columbia");
+    expect(deterministicValue(f("What state do you live in?"), p)?.value).toBe("British Columbia");
+    expect(deterministicValue(f("Please state your expected salary"), p)).toBeNull();
+    expect(deterministicValue(f("Please state your full legal name"), { ...p, middleName: "King" })?.value).toBe(
+      "Ada King Lovelace",
+    );
     // Lever: "Name Pronunciation | How do you pronounce your name?" is not a pronouns question.
     expect(deterministicValue(f("Name Pronunciation | How do you pronounce your name?"), p)).toBeNull();
     expect(deterministicValue(f("Please write out how your name is pronounced phonetically."), p)).toBeNull();
     // Stripe: a Canadian resident must not answer a US-only question with their province.
     expect(deterministicValue(f("If located in the US, in what city and state do you reside?"), p)).toBeNull();
+    const zip = 'Zip Code / Postal Code (Non-U.S. based candidates, please enter "00000")';
+    expect(deterministicValue(f(zip), p)).toBeNull();
+    expect(deterministicValue(f("Zip Code / Postal Code"), p)?.path).toBe("personal.address.postalCode");
   });
   it("answers city and location typeaheads with the full place, searched by city", () => {
     const q = { ...p, address: { ...p.address, city: "Langley", region: "British Columbia", country: "Canada" } };
