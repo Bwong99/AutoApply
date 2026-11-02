@@ -136,6 +136,11 @@ describe("deterministic matching (§13.2)", () => {
     expect(deterministicValue(f("Email Address (Primary)"), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("LinkedIn profile"), p)?.value).toBe("https://linkedin.com/in/ada");
     expect(deterministicValue(f("Province / State"), p)?.value).toBe("British Columbia");
+    expect(deterministicValue(f("What state do you live in?"), p)?.value).toBe("British Columbia");
+    expect(deterministicValue(f("Please state your expected salary"), p)).toBeNull();
+    expect(deterministicValue(f("Please state your full legal name"), { ...p, middleName: "King" })?.value).toBe(
+      "Ada King Lovelace",
+    );
     // Lever: "Name Pronunciation | How do you pronounce your name?" is not a pronouns question.
     expect(deterministicValue(f("Name Pronunciation | How do you pronounce your name?"), p)).toBeNull();
     expect(deterministicValue(f("Please write out how your name is pronounced phonetically."), p)).toBeNull();

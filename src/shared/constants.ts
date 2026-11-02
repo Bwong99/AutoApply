@@ -326,7 +326,8 @@ export const LABEL_RULES: [RegExp, DetKey][] = [
   [/\bpronouns?\b/i, "pronouns"],
   [/^address( line)? ?1|street address/i, "line1"],
   [/address( line)? ?2|\bapt\b|\bsuite\b|\bunit\b/i, "line2"],
-  [/\b(province|state|region)\b/i, "region"],
+  // Not the verb: "Please state your full legal name" (or salary, reason…) is no question about the province.
+  [/\b(province|region)\b|\bstate\b(?! (your|the|any|whether|how|why|what|if|briefly)\b)/i, "region"],
   [/^country$/i, "country"],
 ];
 
