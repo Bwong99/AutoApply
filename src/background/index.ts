@@ -464,15 +464,19 @@ const handlers: Handlers = {
 
   async TAB_STATUS({ tabId }) {
     const status = await currentTabStatus(tabId);
-    if (settings.aiProvider === "claude")
+    if (settings.aiProvider === "claude") {
+      // Same name the AI page's Model list shows; capitalized alias until Claude Code has listed its models.
+      const { model } = settings.claude.fill;
+      const listed = (await store.get("claudeModels")).find((m) => m.value === model)?.displayName;
       return {
         status,
         provider: "claude",
         ready: await store.get("claudeReady"),
-        model: claudeLabel(settings.claude.fill),
+        model: `Claude (${listed ?? (model ? model[0].toUpperCase() + model.slice(1) : "Default")})`,
         keysTotal: 0,
         keysHealthy: 0,
       };
+    }
     const selectedModel = await store.get("selectedModel");
     return {
       status,
