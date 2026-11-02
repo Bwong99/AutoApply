@@ -78,6 +78,16 @@ const claude = createClaude({
   onSetupError: () => void store.set({ claudeReady: false }),
 });
 const claudeLabel = (t: ClaudeTask) => `Claude (${t.model || "default"})`;
+/** A Gemini model id (or Claude's fill model) as the AI page's Model list names it, for the popup and overlay. */
+async function modelName(id: string | null): Promise<string | null> {
+  if (settings.aiProvider === "claude") {
+    const { model } = settings.claude.fill;
+    const listed = (await store.get("claudeModels")).find((m) => m.value === model)?.displayName;
+    // Capitalized alias until Claude Code has listed its models.
+    return `Claude (${listed ?? (model ? model[0].toUpperCase() + model.slice(1) : "Default")})`;
+  }
+  return id && ((await store.get("modelCatalog"))[id]?.displayName || id);
+}
 const CLAUDE_MAP_FIELDS = 6;
 
 const ready = (async () => {
@@ -291,7 +301,7 @@ const handlers: Handlers = {
       documentsIndex: s.documentsIndex,
       tailorReady: !!s.tailorResume,
       excluded,
-      selectedModel: settings.aiProvider === "claude" ? claudeLabel(settings.claude.fill) : s.selectedModel,
+      selectedModel: await modelName(s.selectedModel),
       hasKeys: pool.keys.length > 0,
       overlayBottom: s.overlayPos[host] ?? null,
       appliedBefore: y ? undefined : await yoloApplied(sender.tab?.url ?? ""),
@@ -358,7 +368,8 @@ const handlers: Handlers = {
             ...s.documentsIndex.filter((d) => d.kind !== "resume"),
             ...(mode === "tailor" ? [{ ...TAILORED_PLACEHOLDER_META }] : []),
           ];
-    return mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y, uploads });
+    const r = await mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y, uploads });
+    return { ...r, usedModel: (await modelName(r.usedModel)) ?? r.usedModel };
   },
 
   async TAILOR_RESUME({ groupId }, sender) {
@@ -464,19 +475,15 @@ const handlers: Handlers = {
 
   async TAB_STATUS({ tabId }) {
     const status = await currentTabStatus(tabId);
-    if (settings.aiProvider === "claude") {
-      // Same name the AI page's Model list shows; capitalized alias until Claude Code has listed its models.
-      const { model } = settings.claude.fill;
-      const listed = (await store.get("claudeModels")).find((m) => m.value === model)?.displayName;
+    if (settings.aiProvider === "claude")
       return {
         status,
         provider: "claude",
         ready: await store.get("claudeReady"),
-        model: `Claude (${listed ?? (model ? model[0].toUpperCase() + model.slice(1) : "Default")})`,
+        model: await modelName(null),
         keysTotal: 0,
         keysHealthy: 0,
       };
-    }
     const selectedModel = await store.get("selectedModel");
     return {
       status,
