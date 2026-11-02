@@ -297,10 +297,18 @@ export const LABEL_RULES: [RegExp, DetKey][] = [
   [/^(full\s*)?name$|^first (and|&) last name$/i, "fullName"],
   [/\blegal name\b/i, "legalName"],
   [/preferred (first )?name/i, "preferredName"],
-  // Not a school address (Jane Street's "university email" got the personal one): the AI decides.
-  [/^(?!.*\b(school|university|college|student|\.?edu)\b).*e-?mail/i, "email"],
-  // Not "phonetically" (Akuna's name pronunciation got the phone number), nor "Phone Extension" (it got the number too).
-  [/^(?!.*\bext(ension)?\b).*(phone(?!tic)|mobile|\bcell)/i, "phone"],
+  // Not a school address (Jane Street's "university email" got the personal one): the AI decides. Nor someone else's,
+  // or a second one (Duolingo's "Alternate Email" got the same address again).
+  [
+    /^(?!.*\b(school|university|college|student|\.?edu|alternat(e|ive)|secondary|backup|emergency|referr(er|al)|reference|parent|guardian)\b).*e-?mail/i,
+    "email",
+  ],
+  // Not "phonetically" (Akuna's name pronunciation got the phone number), nor "Phone Extension" (it got the number too),
+  // nor someone else's or a second number.
+  [
+    /^(?!.*\b(ext(ension)?|alternat(e|ive)|secondary|backup|emergency|referr(er|al)|reference|parent|guardian)\b).*(phone(?!tic)|mobile|\bcell)/i,
+    "phone",
+  ],
   [/\b(phone|mobile|tel(ephone)?)\b.*\bext(ension)?\b|^ext(ension)?\.?$/i, "phoneExtension"],
   [/country code|dialing code/i, "phoneCountryCode"],
   [/linkedin/i, "linkedin"],

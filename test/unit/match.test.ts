@@ -125,6 +125,10 @@ describe("deterministic matching (§13.2)", () => {
     );
     expect(deterministicValue(f("Email address", { kind: "email" }), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("university email", { kind: "email" }), p)).toBeNull();
+    // Duolingo: an "Alternate Email" got the same address again; nor is a contact's email or phone the applicant's.
+    for (const label of ["Alternate Email", "Secondary phone number", "Emergency contact phone", "Referrer's email"])
+      expect(deterministicValue(f(label), p)).toBeNull();
+    expect(deterministicValue(f("Email Address (Primary)"), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("LinkedIn profile"), p)?.value).toBe("https://linkedin.com/in/ada");
     expect(deterministicValue(f("Province / State"), p)?.value).toBe("British Columbia");
     // Lever: "Name Pronunciation | How do you pronounce your name?" is not a pronouns question.
