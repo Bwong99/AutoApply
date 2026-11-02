@@ -19,7 +19,9 @@ const RE_VERIFY_FAILED =
   /\b(not|n't|unable to|failed to) (be |been )?(verified|confirmed|activated)|expired|invalid|no longer valid|already (been )?used|went wrong/i;
 const RE_RESET = /(reset|new|change|create) (your )?password/i;
 const RE_SIGNUP = /create (an |your )?account|sign ?up|register|new (user|candidate)/i;
-const RE_FLAGGED = /flagged as (possible )?spam|suspicious activity|recaptcha (verification )?failed/i;
+/** "Report suspicious activity here" in a careers site's fraud banner (AMD) is not a flag on us. */
+const RE_FLAGGED =
+  /flagged as (possible )?spam|(detected|due to|because of) (some )?(unusual or )?suspicious activity|recaptcha (verification )?failed/i;
 /** The site turned down our sign-up or sign-in: the address has an account whose password we don't hold. */
 const RE_REFUSED =
   /already (exists|registered|in use|have an account)|account (with|for) this email|email (address )?is (already )?(taken|registered)|incorrect|invalid (email|password|credentials|username|login)|wrong (email|password|credentials)|account (might|may) be locked|not recognized/i;

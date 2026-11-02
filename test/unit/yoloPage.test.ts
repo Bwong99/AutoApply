@@ -52,6 +52,11 @@ describe("YOLO page kinds", () => {
     expect(classify(0)).toBe("flagged");
     // The hidden frame's score won't improve on a reload: the tab retry gets it.
     expect(classify(0, true)).toBe("blocked");
+    setBody(`<p>We detected suspicious activity. Please try again.</p>`);
+    expect(classify(0)).toBe("flagged");
+    // AMD's fraud banner on every careers page.
+    setBody(`<p>Fraud Alert: Learn how to protect yourself and report suspicious activity here.</p>`);
+    expect(classify(0)).toBe("unknown");
   });
 
   it("quotes a confirmation page's message, else its headings", () => {
