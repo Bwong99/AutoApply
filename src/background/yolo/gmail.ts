@@ -1,40 +1,85 @@
 // Sites' verification emails (links and one-time codes), read from the YOLO inbox with the Gmail API, read-only.
+// Connect signs in once (OAuth code flow) and keeps Google's refresh token, encrypted with the vault's device key:
+// later access tokens need no one, whichever Google account is signed in to the browser, across reloads and restarts.
 import { EMAIL_WAIT_MS, SLEPT_MS } from "../../shared/constants";
-import { session } from "../../shared/storage";
+import { createStorage, session } from "../../shared/storage";
+import type { Yolo } from "../../shared/yolo";
+import { decrypt, deviceKey, encrypt } from "./vault";
 
 export class GmailAuthError extends Error {}
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
+const store = createStorage("background");
+type Client = Pick<Yolo, "gmailClientId" | "gmailClientSecret">;
 
-/** An access token for the YOLO inbox; `interactive` shows Google's sign-in, else it renews silently or throws. */
-export async function gmailToken(clientId: string, email: string, interactive: boolean): Promise<string> {
+const b64url = (b: ArrayBuffer | Uint8Array) =>
+  btoa(String.fromCharCode(...new Uint8Array(b)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+/** Google's token endpoint. A refused grant (revoked, expired, wrong secret) is a GmailAuthError; anything else isn't. */
+async function tokenRequest(c: Client, params: Record<string, string>): Promise<string> {
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    body: new URLSearchParams({ client_id: c.gmailClientId, client_secret: c.gmailClientSecret, ...params }),
+  });
+  const j = (await r.json().catch(() => ({}))) as Record<string, string | number | undefined>;
+  if (r.status === 400 || r.status === 401)
+    throw new GmailAuthError(String(j.error_description ?? j.error ?? "Gmail sign-in failed"));
+  if (!r.ok || typeof j.access_token !== "string") throw new Error(`Google token HTTP ${r.status}`);
+  await session.set("gmailToken", { token: j.access_token, exp: Date.now() + Number(j.expires_in ?? 3600) * 1000 });
+  if (typeof j.refresh_token === "string")
+    await store.set({ gmailRefresh: await encrypt(await deviceKey(), j.refresh_token) });
+  return j.access_token;
+}
+
+/** Shows Google's sign-in (the account chooser, `email` suggested) and keeps the refresh token it grants. */
+export async function connectGmail(c: Client, email: string): Promise<void> {
+  if (!c.gmailClientId || !c.gmailClientSecret) throw new GmailAuthError("Enter the client ID and client secret");
+  await session.remove("gmailToken");
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  const redirect = chrome.identity.getRedirectURL();
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
+    client_id: c.gmailClientId,
+    response_type: "code",
+    redirect_uri: redirect,
+    scope: "https://www.googleapis.com/auth/gmail.readonly",
+    // Google knows the account, not its +tag
+    login_hint: email.replace(/\+[^@]*@/, "@"),
+    access_type: "offline",
+    // Consent each time: Google grants a refresh token only then.
+    prompt: "consent",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+  })}`;
+  const back = await chrome.identity.launchWebAuthFlow({ url, interactive: true }).catch((e: Error) => {
+    throw new GmailAuthError(e.message);
+  });
+  const q = new URL(back ?? "about:blank").searchParams;
+  const code = q.get("code");
+  if (!code) throw new GmailAuthError(q.get("error") ?? "Gmail sign-in failed");
+  await tokenRequest(c, { grant_type: "authorization_code", code, code_verifier: verifier, redirect_uri: redirect });
+}
+
+/** An access token for the YOLO inbox, renewed with the saved refresh token; GmailAuthError when that can't work. */
+export async function gmailToken(c: Client): Promise<string> {
   const cached = await session.get<{ token: string; exp: number }>("gmailToken");
   if (cached && cached.exp > Date.now() + 60_000) return cached.token;
-  if (!clientId) throw new GmailAuthError("Gmail isn't connected");
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
-    client_id: clientId,
-    response_type: "token",
-    redirect_uri: chrome.identity.getRedirectURL(),
-    scope: "https://www.googleapis.com/auth/gmail.readonly",
-    login_hint: email,
-    ...(interactive ? {} : { prompt: "none" }),
-  })}`;
-  const back = await chrome.identity
-    .launchWebAuthFlow({ url, interactive, ...(interactive ? {} : { timeoutMsForNonInteractive: 10_000 }) })
-    .catch((e: Error) => {
-      throw new GmailAuthError(e.message);
-    });
-  const h = new URLSearchParams(new URL(back ?? "about:blank").hash.slice(1));
-  const token = h.get("access_token");
-  if (!token) throw new GmailAuthError(h.get("error") ?? "Gmail sign-in failed");
-  await session.set("gmailToken", { token, exp: Date.now() + Number(h.get("expires_in") ?? 3600) * 1000 });
-  return token;
+  const saved = await store.get("gmailRefresh");
+  if (!saved || !c.gmailClientId || !c.gmailClientSecret) throw new GmailAuthError("Gmail isn't connected");
+  // Undecryptable: the device key was deleted (Reset everything).
+  const refresh = await decrypt(await deviceKey(), saved).catch(() => {
+    throw new GmailAuthError("Gmail isn't connected");
+  });
+  return tokenRequest(c, { grant_type: "refresh_token", refresh_token: refresh });
 }
 
 /** Throws GmailAuthError when the YOLO inbox can't be read without the user (access revoked, sign-in expired). */
-export async function checkGmail(clientId: string, email: string): Promise<void> {
+export async function checkGmail(c: Client): Promise<void> {
   const r = await fetch(`${API}/profile`, {
-    headers: { authorization: `Bearer ${await gmailToken(clientId, email, false)}` },
+    headers: { authorization: `Bearer ${await gmailToken(c)}` },
   });
   if (r.status !== 401) return;
   await session.remove("gmailToken");

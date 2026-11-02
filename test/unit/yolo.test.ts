@@ -1,12 +1,12 @@
 import { readFile } from "node:fs/promises";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { installChromeMock } from "./chromeMock";
 import { altKey, applyUrl, jobKey } from "../../src/background/yolo/jobKey";
 import { parseFeed, parseGlassdoor, parseIndeed, parseLinkedIn } from "../../src/background/yolo/sources";
 import { boardOf, findOnEmployerBoard, jobLinks, sameTitle, workdayPosted } from "../../src/background/yolo/careers";
 import { locationMatches, rejectReason, titleMatches } from "../../src/background/yolo/filter";
 import { loadPlaces, PLACES_FILE } from "../../src/background/yolo/places";
-import { extract, feedTexts, siteOf } from "../../src/background/yolo/gmail";
+import { connectGmail, extract, feedTexts, GmailAuthError, gmailToken, siteOf } from "../../src/background/yolo/gmail";
 import { textPdf, wrap } from "../../src/background/yolo/pdf";
 import { decrypt, encrypt, newPassword } from "../../src/background/yolo/vault";
 import { applied, discover, inQueueOrder, RETRY } from "../../src/background/yolo/discover";
@@ -441,6 +441,63 @@ describe("vault", () => {
       expect(p).toHaveLength(18);
       for (const re of [/[A-Z]/, /[a-z]/, /\d/, /[!@#$%^*_-]/]) expect(p).toMatch(re);
     }
+  });
+});
+
+describe("Gmail sign-in", () => {
+  it("keeps the refresh token so an extension reload renews silently", async () => {
+    const chrome = installChromeMock();
+    const saved = { fetch: globalThis.fetch, indexedDB: globalThis.indexedDB };
+    onTestFinished(() => void Object.assign(globalThis, saved));
+    // The vault's IndexedDB, in memory: one object store, get and put.
+    const keys = new Map<string, unknown>();
+    const req = (result: unknown) => {
+      const r = { result } as { result: unknown; onsuccess?: () => void };
+      queueMicrotask(() => r.onsuccess?.());
+      return r;
+    };
+    const os = { get: (k: string) => req(keys.get(k)), put: (v: unknown, k: string) => req(keys.set(k, v)) };
+    const db = { transaction: () => ({ objectStore: () => os }) };
+    (globalThis as unknown as { indexedDB: unknown }).indexedDB = { open: () => req(db) };
+    let url = "";
+    Object.assign(chrome, {
+      identity: {
+        getRedirectURL: () => "https://ext.chromiumapp.org/",
+        launchWebAuthFlow: async (o: { url: string }) => ((url = o.url), "https://ext.chromiumapp.org/?code=c1"),
+      },
+    });
+    const bodies: URLSearchParams[] = [];
+    const replies: [number, object][] = [
+      [200, { access_token: "a1", refresh_token: "r1", expires_in: 3600 }],
+      [200, { access_token: "a2", expires_in: 3600 }],
+      [400, { error: "invalid_grant", error_description: "Token has been expired or revoked." }],
+      [503, {}],
+    ];
+    globalThis.fetch = (async (_u: string, init: { body: URLSearchParams }) => {
+      bodies.push(init.body);
+      const [status, json] = replies.shift()!;
+      return new Response(JSON.stringify(json), { status });
+    }) as unknown as typeof fetch;
+    const c = { gmailClientId: "id", gmailClientSecret: "sec" };
+
+    await connectGmail(c, "me+jobs@gmail.com");
+    const q = new URL(url).searchParams;
+    expect(q.get("login_hint")).toBe("me@gmail.com");
+    expect(q.get("access_type")).toBe("offline");
+    expect(bodies[0].get("code_verifier")).toBeTruthy();
+    expect(JSON.stringify(chrome.storage.local.data())).not.toContain("r1");
+
+    await chrome.storage.session.clear(); // extension reload
+    expect(await gmailToken(c)).toBe("a2");
+    expect(bodies[1].get("grant_type")).toBe("refresh_token");
+    expect(bodies[1].get("refresh_token")).toBe("r1");
+    expect(await gmailToken(c)).toBe("a2"); // cached: no request
+
+    await chrome.storage.session.clear();
+    await expect(gmailToken(c)).rejects.toBeInstanceOf(GmailAuthError);
+    // Google down says nothing about the sign-in
+    await expect(gmailToken(c)).rejects.not.toBeInstanceOf(GmailAuthError);
+    expect(replies).toHaveLength(0);
   });
 });
 

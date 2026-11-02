@@ -22,7 +22,15 @@ import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, inQueueOrder, RETRY } from "./discover";
-import { checkGmail, GmailAuthError, gmailToken, siteOfUrl, waitForEmail, waitForFeedCode } from "./gmail";
+import {
+  checkGmail,
+  connectGmail,
+  GmailAuthError,
+  gmailToken,
+  siteOfUrl,
+  waitForEmail,
+  waitForFeedCode,
+} from "./gmail";
 import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
 import { textPdf } from "./pdf";
@@ -498,8 +506,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
 
   async YOLO_GMAIL_CONNECT() {
     try {
-      await session.remove("gmailToken");
-      await gmailToken(yolo.gmailClientId, await accountEmail(), true);
+      await connectGmail(yolo, await accountEmail());
       await setState({ gmailNeedsAuth: false, gmailConnected: true });
       return { ok: true };
     } catch (e) {
@@ -509,7 +516,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
 
   async YOLO_GMAIL_CHECK() {
     try {
-      await checkGmail(yolo.gmailClientId, await accountEmail());
+      await checkGmail(yolo);
       await setState({ gmailNeedsAuth: false, gmailConnected: true });
     } catch (e) {
       // A network error says nothing about the sign-in: keep the last known state.
@@ -643,7 +650,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       // No API client: codes can still come from the Gmail inbox signed in to this browser, links can't.
       if (!yolo.gmailClientId && want === "link") return off("Gmail isn't connected");
       const found = yolo.gmailClientId
-        ? await waitForEmail(() => gmailToken(yolo.gmailClientId, email, false), email, since, want, sites)
+        ? await waitForEmail(() => gmailToken(yolo), email, since, want, sites)
         : await waitForFeedCode(email, since);
       if (!found) return { error: { kind: "other", message: "No verification email arrived" } };
       if (want === "code") return { code: found };

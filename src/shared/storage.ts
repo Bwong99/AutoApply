@@ -136,6 +136,8 @@ export const LOCAL_SCHEMAS = {
   feedCache: rec(z.object({ etag: z.string().catch(""), modified: z.string().catch("") })),
   /** Site accounts YOLO created, passwords encrypted with a device key (yolo/vault.ts). Never exported. */
   vault: rec(VaultEntrySchema),
+  /** Google's refresh token for the YOLO inbox, encrypted like the vault (yolo/gmail.ts). Never exported. */
+  gmailRefresh: z.object({ iv: z.string(), ct: z.string() }).nullable().catch(null),
   /**
    * The LaTeX résumé for AI tailoring: its source in doc:tailor-tex and its untailored PDF (the fallback) in
    * doc:tailor-pdf. Not a document: never a variant, never offered for other uploads. null: none uploaded.
@@ -254,7 +256,7 @@ export const session = {
     return ((await chrome.storage.session.get(`tabStatus:${tabId}`))[`tabStatus:${tabId}`] as TabStatus) ?? null;
   },
   setTabStatus: (tabId: number, s: TabStatus) => chrome.storage.session.set({ [`tabStatus:${tabId}`]: s }),
-  /** YOLO's run state, temporary documents and Gmail token (yolo/*), cleared with the browser session. */
+  /** YOLO's run state, temporary documents and Gmail access token (yolo/*), cleared with the browser session. */
   async get<T>(key: string): Promise<T | null> {
     return ((await chrome.storage.session.get(key))[key] as T) ?? null;
   },

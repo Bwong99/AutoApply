@@ -139,8 +139,9 @@ function Gmail(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) 
   const [error, setError] = useState("");
   const redirect = chrome.identity?.getRedirectURL() ?? "";
   // Gmail can be disconnected from Google's side: ask once per visit. Later failures arrive through yoloState.
+  const ready = !!(props.y.gmailClientId && props.y.gmailClientSecret);
   useEffect(() => {
-    if (props.y.gmailClientId) void send({ type: "YOLO_GMAIL_CHECK" });
+    if (ready) void send({ type: "YOLO_GMAIL_CHECK" });
   }, []);
   const status = error || (state?.gmailNeedsAuth ? "Gmail needs to be reconnected." : "");
   return (
@@ -152,16 +153,37 @@ function Gmail(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) 
         placeholder="1234-abc.apps.googleusercontent.com"
         help="Optional. Lets YOLO read (read-only) the verification emails job sites send when it creates accounts for you. Without it, emailed codes still work if the YOLO email's Gmail is signed in to this browser, but sites that email a verification link are left for you to finish."
       />
+      <TextInput
+        label="Gmail OAuth client secret"
+        type="password"
+        value={props.y.gmailClientSecret}
+        onInput={(v) => props.set({ gmailClientSecret: v.trim() })}
+        placeholder="GOCSPX-…"
+        help="From the same client. With it, YOLO stays connected through extension reloads and browser restarts."
+      />
       <details class="help">
-        <summary>Set up the client ID (once, about 5 minutes)</summary>
+        <summary>Set up the client (once, about 5 minutes)</summary>
         <ol>
           <li>In Google Cloud Console, create a project and enable the Gmail API.</li>
-          <li>OAuth consent screen: External; add the YOLO email as a test user.</li>
+          <li>OAuth consent screen: External.</li>
+          <li>
+            Branding: any app name; any email for the support and developer contacts (it doesn't matter: no one but you
+            can use this app, since it needs your client ID and secret); no logo (a logo needs Google's review);
+            homepage <code>https://exxml.github.io/AutoApply</code>; privacy policy{" "}
+            <code>https://exxml.github.io/AutoApply/PRIVACY</code>.
+          </li>
+          <li>
+            Audience → Publish app: while it's in Testing, Google ends the sign-in every 7 days. Skip verification.
+            Google calls the app unverified when you sign in: Advanced → Go to (your app).
+          </li>
           <li>
             Credentials → Create OAuth client ID → Web application, with this authorized redirect URI:{" "}
             <code>{redirect}</code>
           </li>
-          <li>Paste the client ID above, then press Connect and sign in with the YOLO email.</li>
+          <li>
+            Paste the client ID and secret above, then press Connect and sign in with the Gmail account the YOLO email
+            arrives in.
+          </li>
           <li>If this extension's folder moves, its redirect URI changes: update it in the client.</li>
         </ol>
       </details>
@@ -169,7 +191,7 @@ function Gmail(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) 
         <button
           type="button"
           class="btn"
-          disabled={!props.y.gmailClientId}
+          disabled={!ready}
           onClick={async () => {
             const r = await send({ type: "YOLO_GMAIL_CONNECT" });
             setError(isErr(r) ? r.error.message : "");
