@@ -215,9 +215,17 @@ export interface Responses {
   YOLO_DELETE_ACCOUNT: Ok;
 }
 
-/** Sends to the background and resolves with the typed response. */
+/**
+ * Sends to the background and resolves with the typed response. Never throws synchronously: in a content script
+ * orphaned by an extension reload, sendMessage throws "Extension context invalidated" before returning a promise,
+ * which would skip every caller's .catch/rejection fallback and surface as an uncaught error.
+ */
 export function send<M extends Message>(msg: M): Promise<Responses[M["type"]]> {
-  return chrome.runtime.sendMessage(msg) as Promise<Responses[M["type"]]>;
+  try {
+    return chrome.runtime.sendMessage(msg) as Promise<Responses[M["type"]]>;
+  } catch (e) {
+    return Promise.reject(e);
+  }
 }
 
 /**

@@ -186,13 +186,15 @@ function renderOverlay() {
   if (!frames.length && !error) return;
   overlay ??= createOverlay(
     {
-      onRerun: () => void send({ type: "BROADCAST_FILL", rerun: true }),
+      onRerun: () => void send({ type: "BROADCAST_FILL", rerun: true }).catch(() => undefined),
       onStop: stop,
-      onRetry: () => void send({ type: "BROADCAST_FILL", rerun: true }),
-      onOpenSettings: () => void send({ type: "OPEN_OPTIONS", hash: "/ai" }),
+      onRetry: () => void send({ type: "BROADCAST_FILL", rerun: true }).catch(() => undefined),
+      onOpenSettings: () => void send({ type: "OPEN_OPTIONS", hash: "/ai" }).catch(() => undefined),
       onFocus: (n) =>
-        n.frameId ? void send({ type: "FOCUS_FIELD", frameId: n.frameId, fieldId: n.fieldId }) : focusField(n.fieldId),
-      onMove: (bottom) => void send({ type: "SET_OVERLAY_POS", host: HOST, bottom }),
+        n.frameId
+          ? void send({ type: "FOCUS_FIELD", frameId: n.frameId, fieldId: n.fieldId }).catch(() => undefined)
+          : focusField(n.fieldId),
+      onMove: (bottom) => void send({ type: "SET_OVERLAY_POS", host: HOST, bottom }).catch(() => undefined),
     },
     config?.overlayBottom ?? null,
   );
@@ -272,7 +274,7 @@ function focusField(id: string) {
 function stop() {
   if (!current) return;
   current.ctrl.abort();
-  void send({ type: "ABORT", groupId: current.groupId });
+  void send({ type: "ABORT", groupId: current.groupId }).catch(() => undefined);
   for (const [id, s] of states) if (s.status === "working") setStatus(handles.get(id)!, "needs", "Stopped");
 }
 
@@ -764,7 +766,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
       }
       pending.push(h);
     }
-    if (usedLearned.length) void send({ type: "LEARNED_USED", ids: usedLearned });
+    if (usedLearned.length) void send({ type: "LEARNED_USED", ids: usedLearned }).catch(() => undefined);
     mark("phaseA");
 
     // PHASE B: batched mapping calls (chunked in the background). Dropdowns with unknown options are harvested
