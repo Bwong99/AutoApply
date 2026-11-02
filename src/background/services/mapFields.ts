@@ -317,9 +317,15 @@ export function jobCountry(location: string): string | undefined {
  */
 function workCountry(label: string, home: string, job: string | undefined): string | undefined {
   if (!isWorkAuth(label)) return undefined;
+  const own = canonicalCountry(home) ?? normalize(home);
+  // National Bank's "authorized to work in Canada if the position is located in Canada OR … in the USA if the position
+  // is located in the USA?": the job's country of those named, else the candidate's (the first named was "the USA").
+  const named = /\bif (the |this )?(position|role|job)\b/i.test(label) ? countriesIn(label) : [];
+  const pick = named.length > 1 ? [job, own].find((c) => c && named.includes(c)) : undefined;
   return (
+    pick ??
     countryIn(label) ??
-    ((RE_RESIDENCE.test(label) ? (canonicalCountry(home) ?? normalize(home)) : job) || undefined) ??
+    ((RE_RESIDENCE.test(label) ? own : job) || undefined) ??
     (/\bH-?1-?B\b/.test(label) ? US : undefined)
   );
 }

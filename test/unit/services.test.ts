@@ -752,6 +752,12 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     await ask("Vancouver, WA", "Will you require sponsorship?");
     await ask("Lisbon", "Will you require sponsorship?");
     await ask("", "Will you require sponsorship for employment visa status (e.g. H-1B visa status)?");
+    // One question per job country (National Bank): the job's of those named, else the candidate's.
+    const either =
+      "Are you legally authorized to work in Canada if the position is located in Canada OR Are you legally authorized to work in the USA if the position is located in the USA?";
+    await ask("", either);
+    await ask("San Francisco, CA", either);
+    await ask("Lisbon", either);
     expect(sent.map((f) => f.workCountry)).toEqual([
       undefined,
       "united states",
@@ -762,6 +768,9 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "united states",
       "portugal",
       "united states",
+      "canada",
+      "united states",
+      "canada",
     ]);
 
     // Yes/no questions with a known country are answered from the profile, not asked.

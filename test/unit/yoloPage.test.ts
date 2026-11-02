@@ -279,6 +279,13 @@ describe("YOLO buttons", () => {
     expect([filled, pressed]).toEqual([1, true]);
     setBody(`<form><input name="username"><input type="password"><button>Log in</button></form>`);
     expect(await handleAuth("signin", async () => undefined)).toEqual({ fail: "Needs an account it can't create" });
+    // National Bank's Avature: "Don't have a profile yet? … Create profile".
+    setBody(`<form><input name="username"><input type="password"><button>Log in</button></form>
+      <p>Don't have a profile yet? Create your profile here.</p><a href="#">Create profile</a>`);
+    let toSignup = false;
+    document.querySelector("a")!.addEventListener("click", () => (toSignup = true));
+    expect(await handleAuth("signin", async () => undefined)).toEqual({ ok: true });
+    expect(toSignup).toBe(true);
     vi.unstubAllGlobals();
   });
 
