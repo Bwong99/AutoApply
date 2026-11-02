@@ -11,6 +11,7 @@ import { TAILOR_SCHEMA, TailorZ } from "../gemini/schemas";
 import { releaseOffscreen, useOffscreen } from "../offscreen";
 import { jobBrief } from "./jobBrief";
 import { compactProfile, type ServiceCtx } from "./mapFields";
+import { pickResume } from "./pickResume";
 
 export type Compile = (tex: string, timeoutMs: number) => Promise<{ pdf: string; log: string; pages: number }>;
 
@@ -128,11 +129,45 @@ const pdfMeta = (id: string, fileName: string, base64: string): DocumentMeta => 
   uploadedAt: Date.now(),
 });
 
-/** A tailored résumé's PDF, or the untailored fallback, for GET_DOCUMENT. */
+/** A tailored résumé's PDF, or an untailored fallback, for GET_DOCUMENT. */
 export async function tailoredDoc(store: Store, id: string): Promise<{ meta: DocumentMeta; base64: string } | null> {
-  if (id !== FALLBACK) return session.get(`tailordoc:${id}`);
-  const [base64, profile] = await Promise.all([store.getDoc("tailor-pdf"), store.get("profile")]);
-  return base64 ? { meta: pdfMeta(FALLBACK, resumeName(profile), base64), base64 } : null;
+  const variant = id.startsWith(`${FALLBACK}:`) ? id.slice(FALLBACK.length + 1) : null;
+  if (id !== FALLBACK && !variant) return session.get(`tailordoc:${id}`);
+  const [base64, profile] = await Promise.all([
+    store.getDoc(variant ? `tailor-pdf:${variant}` : "tailor-pdf"),
+    store.get("profile"),
+  ]);
+  return base64 ? { meta: pdfMeta(id, resumeName(profile), base64), base64 } : null;
+}
+
+const decodeTex = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
+
+/** A .tex's own words for matching it to a job: the body, without its commands. */
+export const texWords = (src: string) =>
+  src
+    .slice(Math.max(0, src.indexOf("\\begin{document}")))
+    .replace(/%.*$/gm, " ")
+    .replace(/\\[a-zA-Z]+\*?/g, " ");
+
+/** Of the LaTeX résumés, the id of the one that fits the job, chosen as Variant select chooses (no AI call); "" is the main one. */
+export function pickTex(
+  main: { fileName: string; tex: string },
+  variants: { id: string; fileName: string; tex: string }[],
+  job: JobContext | null,
+): string {
+  const doc = (id: string, fileName: string, isPrimaryResume: boolean): DocumentMeta => ({
+    ...pdfMeta(id, fileName, ""),
+    label: fileName.replace(/\.tex$/i, ""),
+    isPrimaryResume,
+  });
+  const MAIN = "main";
+  const docs = [doc(MAIN, main.fileName, true), ...variants.map((v) => doc(v.id, v.fileName, false))];
+  const texts = Object.fromEntries([
+    [MAIN, texWords(main.tex)],
+    ...variants.map((v) => [v.id, texWords(v.tex)]),
+  ]) as Record<string, string>;
+  const id = pickResume(docs, job, texts);
+  return id === MAIN || !id ? "" : id;
 }
 
 /**
@@ -144,14 +179,27 @@ export async function tailoredResume(
   job: JobContext | null,
   serviceCtx: () => Promise<ServiceCtx | { error: { message: string } }>,
 ): Promise<TailoredDoc | { error: string }> {
-  const [info, tex, settings, profile] = await Promise.all([
+  const [main, mainTex, settings, profile, variants] = await Promise.all([
     store.get("tailorResume"),
     store.getDoc("tailor-tex"),
     store.get("settings"),
     store.get("profile"),
+    store.get("tailorVariants"),
   ]);
-  const untailored = await store.getDoc("tailor-pdf");
-  if (!info || !tex || !untailored) return { error: "No LaTeX résumé is uploaded" };
+  if (!main || !mainTex) return { error: "No LaTeX résumé is uploaded" };
+  // With several, the one that fits this job is the one tailored, and its PDF the fallback.
+  const sources = await Promise.all(variants.map((v) => store.getDoc(`tailor-tex:${v.id}`)));
+  const usable = variants.flatMap((v, i) =>
+    sources[i] ? [{ ...v, b64: sources[i], tex: decodeTex(sources[i]) }] : [],
+  );
+  const pickedId = usable.length ? pickTex({ fileName: main.fileName, tex: decodeTex(mainTex) }, usable, job) : "";
+  const picked = usable.find((v) => v.id === pickedId);
+  const info = picked ?? main;
+  const tex = picked?.b64 ?? mainTex;
+  const untailored = await store.getDoc(picked ? `tailor-pdf:${picked.id}` : "tailor-pdf");
+  if (!untailored) return { error: "No LaTeX résumé is uploaded" };
+  const fallbackId = picked ? `${FALLBACK}:${picked.id}` : FALLBACK;
+  const which = usable.length ? ` (from ${info.fileName})` : "";
   const key = await digest(
     tex,
     settings.tailorPrompt,
@@ -166,16 +214,16 @@ export async function tailoredResume(
     p = (async () => {
       const fileName = resumeName(profile);
       const fallback = (note: string, transient = false): TailoredDoc => ({
-        meta: pdfMeta(FALLBACK, fileName, untailored),
+        meta: pdfMeta(fallbackId, fileName, untailored),
         tailored: false,
-        note,
+        note: note + which,
         ...(transient ? { transient } : {}),
       });
       const ctx = await serviceCtx();
       if ("error" in ctx) return fallback(ctx.error.message, true);
       const c = offscreenCompiler();
       try {
-        const source = new TextDecoder().decode(Uint8Array.from(atob(tex), (ch) => ch.charCodeAt(0)));
+        const source = decodeTex(tex);
         const r = await tailor(
           ctx,
           { tex: source, pages: info.pages, prompt: settings.tailorPrompt, job, profile },
@@ -191,7 +239,7 @@ export async function tailoredResume(
           // For the overlay: the job as tailor() gave it to the AI.
           session.set(`docjob:${id}`, { ...jobBrief(job), location: job?.location }),
         ]);
-        return { meta, tailored: true, note: r.note };
+        return { meta, tailored: true, note: r.note + which };
       } catch (e) {
         return fallback(`Tailoring failed: ${(e as Error)?.message ?? e}`, true);
       } finally {

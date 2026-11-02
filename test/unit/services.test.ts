@@ -3,6 +3,7 @@ import { validateDecisions, compactProfile, mapFields, payTarget } from "../../s
 import { chooseOptions, validateChoices } from "../../src/background/services/chooseOptions";
 import { draftEssays } from "../../src/background/services/draftEssays";
 import { pickResume } from "../../src/background/services/pickResume";
+import { pickTex, texWords } from "../../src/background/services/tailorResume";
 import { parseEssayLimits, stripMarkdown, trimToLimits, wordCount } from "../../src/shared/essay";
 import { BadOutputError } from "../../src/background/gemini/errors";
 import type { Gemini } from "../../src/background/gemini/client";
@@ -2794,6 +2795,27 @@ describe("essay limits (§15)", () => {
     expect(stripMarkdown("## Title\n**Bold** and *it*\n- item\n[link](http://x)")).toBe(
       "Title\nBold and it\nitem\nlink",
     );
+  });
+});
+
+describe("pickTex", () => {
+  const body = (t: string) =>
+    `\\documentclass{article}\n\\usepackage{geometry}\n\\begin{document}\n${t}\n\\end{document}`;
+  const main = { fileName: "swe.tex", tex: body("\\resumeItem{Built React and PostgreSQL web services}") };
+  const embedded = { id: "e", fileName: "embedded.tex", tex: body("\\resumeItem{Wrote firmware on FreeRTOS}") };
+  const job = (jobTitle: string, text: string) => ({ jobTitle, text, header: "" }) as unknown as JobContext;
+
+  it("chooses the LaTeX résumé whose words fit the job, and the main one otherwise", () => {
+    expect(pickTex(main, [embedded], job("Embedded Intern", "Firmware on an RTOS"))).toBe("e");
+    expect(pickTex(main, [embedded], job("Web Intern", "React and PostgreSQL services"))).toBe("");
+    expect(pickTex(main, [embedded], job("Barista", "Pour coffee"))).toBe("");
+    expect(pickTex(main, [embedded], null)).toBe("");
+  });
+
+  it("reads a résumé's words, not its preamble or commands", () => {
+    const words = texWords(body("% a comment\n\\resumeItem{Wrote firmware}"));
+    expect(words).toContain("Wrote firmware");
+    expect(words).not.toMatch(/geometry|resumeItem|comment/);
   });
 });
 

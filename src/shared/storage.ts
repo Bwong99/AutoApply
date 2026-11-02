@@ -90,6 +90,14 @@ export const ModelCapsSchema = z.object({
 });
 
 /** Every chrome.storage.local key and its schema. All reads are validated. */
+export const TailorVariantSchema = z.object({
+  id: z.string(),
+  fileName: z.string(),
+  size: z.number(),
+  uploadedAt: z.number(),
+  pages: z.number().catch(1),
+});
+
 export const LOCAL_SCHEMAS = {
   schemaVersion: z.number().catch(0),
   settings: SettingsSchema,
@@ -146,6 +154,11 @@ export const LOCAL_SCHEMAS = {
     .object({ fileName: z.string(), size: z.number(), uploadedAt: z.number(), pages: z.number().catch(1) })
     .nullable()
     .catch(null),
+  /**
+   * More LaTeX résumés for AI tailoring, for other kinds of roles: each one's source in doc:tailor-tex:<id> and its
+   * untailored PDF in doc:tailor-pdf:<id>. A fill tailors whichever of these and tailorResume best fits the job.
+   */
+  tailorVariants: list(TailorVariantSchema),
   /** Résumé document id → its extracted text, for matching résumé variants to jobs (options keeps it in sync). */
   resumeTexts: rec(z.string()),
 };

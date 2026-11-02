@@ -158,6 +158,43 @@ test("tailor: unusable AI edits fall back to the untailored résumé, with a not
   await expect(page.locator("autoapply-root .jobinfo")).toBeHidden();
 });
 
+test("tailor: with several LaTeX résumés, the one fitting the job is tailored and is the fallback", async ({
+  page,
+  sw,
+  mock,
+}) => {
+  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false } });
+  await uploadTex(page, sw, "other.tex", JAKE);
+  await expect.poll(() => storage(sw, "tailorResume"), { timeout: 30_000 }).toBeTruthy();
+  await page.getByLabel("Another LaTeX résumé").setInputFiles({
+    name: "software-developer-coop.tex",
+    mimeType: "text/x-tex",
+    buffer: JAKE,
+  });
+  await expect(page.getByText("software-developer-coop.tex", { exact: true })).toBeVisible({ timeout: 30_000 });
+  const [variant] = await storage<{ id: string }[]>(sw, "tailorVariants");
+  const pdf = await sw.evaluate(
+    async (k) => ((await chrome.storage.local.get(k))[k] as { base64: string }).base64,
+    `doc:tailor-pdf:${variant.id}`,
+  );
+  mock.tailorOps = () => ({ edits: [{ id: "S2.E1.B1", text: "\\newfancything{x}" }], add: [], remove: [], order: [] });
+
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 30_000 });
+  expect(mock.calls_("tailor")).toHaveLength(1);
+  expect(await uploadedBase64(page)).toBe(pdf);
+  await expect(page.locator("autoapply-root .panel .notice")).toContainText("from software-developer-coop.tex");
+
+  // Removing the main résumé makes the next one main, so AI tailor keeps working.
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/options/index.html#/documents`);
+  await page.getByRole("button", { name: "Remove" }).first().click();
+  await expect.poll(() => storage(sw, "tailorVariants")).toEqual([]);
+  expect(await storage(sw, "tailorResume")).toMatchObject({ fileName: "software-developer-coop.tex" });
+});
+
 test("tailor: Flag for me leaves the résumé upload to the user", async ({ page, sw }) => {
   await seed(sw, { settings: { resumeUpload: "flag", autoAcceptAcknowledgements: false } });
   await page.goto(BASE + "plain.html");

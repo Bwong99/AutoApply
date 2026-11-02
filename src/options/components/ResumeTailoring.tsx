@@ -64,6 +64,7 @@ export function ResumeModes() {
 /** The one LaTeX résumé: checked and test-compiled on upload, so problems show here and never mid-fill. */
 export function TailorUpload() {
   const tailor = useStored("tailorResume");
+  const variants = useStored("tailorVariants") ?? [];
   const s = useStored("settings");
   const y = useStored("yolo");
   const [profile, update] = useProfile();
@@ -71,7 +72,8 @@ export function TailorUpload() {
   const [busy, setBusy] = useState(false);
   const used = s?.resumeUpload === "tailor" || y?.resumeUpload === "tailor";
 
-  const upload = async (file: File) => {
+  /** `extra`: added as another résumé to choose from, not replacing the main one. */
+  const upload = async (file: File, extra = false) => {
     setErrors([]);
     if (!/\.tex$/i.test(file.name)) return setErrors(["Upload a .tex file."]);
     if (file.size > MAX_TEX) return setErrors(["The .tex file must be 1 MB or smaller."]);
@@ -87,6 +89,13 @@ export function TailorUpload() {
       if (!parseTex(src)) return setErrors(["No \\begin{document} … \\end{document} found in this file."]);
       const r = await compileTex(src, 60_000);
       if (!r.pdf) return setErrors(compileErrors(r.log));
+      if (extra) {
+        const id = crypto.randomUUID();
+        await store.setDoc(`tailor-tex:${id}`, toBase64(new TextEncoder().encode(src)));
+        await store.setDoc(`tailor-pdf:${id}`, r.pdf);
+        const info = { id, fileName: file.name, size: file.size, uploadedAt: Date.now(), pages: r.pages };
+        return void (await save({ tailorVariants: [...variants, info] }));
+      }
       await store.setDoc("tailor-tex", toBase64(new TextEncoder().encode(src)));
       await store.setDoc("tailor-pdf", r.pdf);
       await save({ tailorResume: { fileName: file.name, size: file.size, uploadedAt: Date.now(), pages: r.pages } });
@@ -102,16 +111,38 @@ export function TailorUpload() {
     }
   };
 
-  const download = async () => {
-    const b64 = await store.getDoc("tailor-pdf");
+  const download = async (variant?: { id: string; fileName: string }) => {
+    const b64 = await store.getDoc(variant ? `tailor-pdf:${variant.id}` : "tailor-pdf");
     if (!b64) return;
     const url = URL.createObjectURL(new Blob([bytesOf(b64)], { type: "application/pdf" }));
-    const name = (tailor?.fileName ?? "resume.tex").replace(/\.tex$/i, ".pdf");
+    const name = (variant?.fileName ?? tailor?.fileName ?? "resume.tex").replace(/\.tex$/i, ".pdf");
     Object.assign(document.createElement("a"), { href: url, download: name }).click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const removeVariant = async (id: string) => {
+    await store.removeDoc(`tailor-tex:${id}`);
+    await store.removeDoc(`tailor-pdf:${id}`);
+    await save({ tailorVariants: variants.filter((v) => v.id !== id) });
+    markSaved();
+  };
+
+  // The next résumé, if any, becomes the main one: AI tailor stays usable.
   const remove = async () => {
+    const [next, ...rest] = variants;
+    if (next) {
+      const [tex, pdf] = await Promise.all([
+        store.getDoc(`tailor-tex:${next.id}`),
+        store.getDoc(`tailor-pdf:${next.id}`),
+      ]);
+      await store.setDoc("tailor-tex", tex ?? "");
+      await store.setDoc("tailor-pdf", pdf ?? "");
+      await store.removeDoc(`tailor-tex:${next.id}`);
+      await store.removeDoc(`tailor-pdf:${next.id}`);
+      const { fileName, size, uploadedAt, pages } = next;
+      await save({ tailorResume: { fileName, size, uploadedAt, pages }, tailorVariants: rest });
+      return markSaved();
+    }
     await store.removeDoc("tailor-tex");
     await store.removeDoc("tailor-pdf");
     await save({ tailorResume: null });
@@ -157,6 +188,43 @@ export function TailorUpload() {
           }}
         />
       </label>
+      {tailor && (
+        <>
+          <p class="help">
+            Applying to different kinds of roles? Add a résumé for each. A fill tailors the one whose words best fit the
+            job, chosen without AI; with no clear difference, the main one above.
+          </p>
+          {variants.map((v) => (
+            <p>
+              <strong>{v.fileName}</strong>{" "}
+              <span class="muted">
+                ({Math.round(v.size / 1024)} KB · {v.pages} page{v.pages === 1 ? "" : "s"} · uploaded{" "}
+                {new Date(v.uploadedAt).toLocaleDateString()})
+              </span>{" "}
+              <button type="button" class="btn small" onClick={() => void download(v)}>
+                Download untailored PDF
+              </button>
+              <button type="button" class="btn small danger" onClick={() => void removeVariant(v.id)}>
+                Remove
+              </button>
+            </p>
+          ))}
+          <label class="inline-form">
+            <span>Add another .tex file</span>
+            <input
+              type="file"
+              accept=".tex,text/x-tex"
+              aria-label="Another LaTeX résumé"
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.currentTarget.files?.[0];
+                if (f) void upload(f, true);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        </>
+      )}
       {busy && <span class="muted">Checking and compiling…</span>}
       {errors.length > 0 && (
         <div class="err" role="alert">

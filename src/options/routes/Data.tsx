@@ -2,7 +2,7 @@ import { useState } from "preact/hooks";
 import { z } from "zod";
 import { ProfileSchema } from "../../shared/profileSchema";
 import { SettingsSchema } from "../../shared/settings";
-import { ApiKeyEntrySchema, DocumentMetaSchema, LOCAL_SCHEMAS } from "../../shared/storage";
+import { ApiKeyEntrySchema, DocumentMetaSchema, LOCAL_SCHEMAS, TailorVariantSchema } from "../../shared/storage";
 import { YoloSchema } from "../../shared/yolo";
 import { markSaved, save, store } from "../store";
 
@@ -24,6 +24,8 @@ const ExportSchema = z.object({
     .object({ info: LOCAL_SCHEMAS.tailorResume.unwrap(), tex: z.string(), pdf: z.string() })
     .nullable()
     .optional(),
+  /** More LaTeX résumés for AI tailoring, with the documents. */
+  tailorVariants: z.array(z.object({ info: TailorVariantSchema, tex: z.string(), pdf: z.string() })).optional(),
 });
 type Export = z.infer<typeof ExportSchema>;
 
@@ -55,6 +57,14 @@ export function Data() {
       tex: (await store.getDoc("tailor-tex")) ?? "",
       pdf: (await store.getDoc("tailor-pdf")) ?? "",
     };
+    const tailorVariants = [];
+    if (withDocs)
+      for (const info of await store.get("tailorVariants"))
+        tailorVariants.push({
+          info,
+          tex: (await store.getDoc(`tailor-tex:${info.id}`)) ?? "",
+          pdf: (await store.getDoc(`tailor-pdf:${info.id}`)) ?? "",
+        });
     const data: Export = {
       app: "autoapply",
       version: 1,
@@ -64,7 +74,7 @@ export function Data() {
       fallbackModel,
       yolo,
       applications,
-      ...(withDocs ? { documents, tailorResume } : {}),
+      ...(withDocs ? { documents, tailorResume, tailorVariants } : {}),
       ...(withKeys ? { apiKeys } : {}),
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
@@ -116,6 +126,17 @@ export function Data() {
         await store.setDoc("tailor-pdf", data.tailorResume.pdf);
       }
       await store.set({ tailorResume: data.tailorResume?.info ?? null });
+    }
+    if (data.tailorVariants) {
+      for (const { id } of await store.get("tailorVariants")) {
+        await store.removeDoc(`tailor-tex:${id}`);
+        await store.removeDoc(`tailor-pdf:${id}`);
+      }
+      for (const v of data.tailorVariants) {
+        await store.setDoc(`tailor-tex:${v.info.id}`, v.tex);
+        await store.setDoc(`tailor-pdf:${v.info.id}`, v.pdf);
+      }
+      await store.set({ tailorVariants: data.tailorVariants.map((v) => v.info) });
     }
     await store.set({ profile: ProfileSchema.parse(data.profile) });
     await save({
