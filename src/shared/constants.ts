@@ -291,10 +291,11 @@ export const LABEL_RULES: [RegExp, DetKey][] = [
   // Westinghouse's "Electronic Signature : Please sign with your full name (first name and last name or surname)" got
   // the last name. Not "Signature Date".
   [/^(?!.*\bdate\b).*(\bsignature\b|\bsign (here )?with your (full |legal )?name\b)/i, "fullName"],
-  [/^first\s*name|given name|legal first/i, "firstName"],
-  [/^last\s*name|^(?!.*\b(signature|full name)\b).*(surname|family name)/i, "lastName"],
+  // Not "Legal First and Last Name" (it got the first name alone).
+  [/^first\s*name|given name|legal first(?! (and|&) last)/i, "firstName"],
+  [/^last\s*name|legal last|^(?!.*\b(signature|full name)\b).*(surname|family name)/i, "lastName"],
   // Sentry's "First and Last Name" went to the AI, which added the middle name.
-  [/^(full\s*)?name$|^first (and|&) last name$/i, "fullName"],
+  [/^(full\s*)?name$|^(legal )?first (and|&) last name$/i, "fullName"],
   [/\blegal name\b/i, "legalName"],
   [/preferred (first )?name/i, "preferredName"],
   // Not a school address (Jane Street's "university email" got the personal one): the AI decides. Nor someone else's,

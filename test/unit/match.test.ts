@@ -123,6 +123,11 @@ describe("deterministic matching (§13.2)", () => {
     expect(deterministicValue(f("Legal Name (if different than above)"), { ...p, middleName: "King" })?.value).toBe(
       "Ada King Lovelace",
     );
+    expect(deterministicValue(f("Legal First and Last Name"), { ...p, middleName: "King" })?.value).toBe(
+      "Ada Lovelace",
+    );
+    expect(deterministicValue(f("Legal First Name"), p)?.value).toBe("Ada");
+    expect(deterministicValue(f("Legal Last Name"), p)?.value).toBe("Lovelace");
     expect(deterministicValue(f("Email address", { kind: "email" }), p)?.value).toBe("ada@example.com");
     expect(deterministicValue(f("university email", { kind: "email" }), p)).toBeNull();
     // Duolingo: an "Alternate Email" got the same address again; nor is a contact's email or phone the applicant's.
