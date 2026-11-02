@@ -36,7 +36,19 @@ export function localMatch(answer: string, options: string[]): number | null {
     const r = unique(options, canonicalRegion, canonicalRegion(answer));
     if (r !== null) return r;
   }
-  return unique(options, dateish, dateish(answer));
+  const d = unique(options, dateish, dateish(answer));
+  if (d !== null) return d;
+  // A number on a list of ranges: 41600 is "$40,001 - $50,000" (Oracle's salary expectations).
+  const n = /^\$?\s*(\d[\d,]*(?:\.\d+)?)$/.exec(answer.trim());
+  if (!n) return null;
+  const v = parseFloat(n[1].replace(/,/g, ""));
+  const within = (o: string) => {
+    const m = /^\D{0,4}?(\d[\d,]*(?:\.\d+)?)\s*(?:-|–|—|to)\s*\D{0,4}?(\d[\d,]*(?:\.\d+)?)\D{0,20}$/i.exec(o.trim());
+    const [lo, hi] = m ? [m[1], m[2]].map((x) => parseFloat(x.replace(/,/g, ""))) : [NaN, NaN];
+    return lo <= v && v <= hi;
+  };
+  const hits = options.map((o, i) => (within(o) ? i : -1)).filter((i) => i >= 0);
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /** Multi-value answers are stored joined with " | ". All parts must match. */

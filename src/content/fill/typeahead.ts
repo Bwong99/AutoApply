@@ -6,6 +6,7 @@ import {
   busy,
   closeDropdown,
   findOptionsContainer,
+  openDropdown,
   optText,
   optionElements,
   PAGE_MAX_MS,
@@ -115,9 +116,15 @@ export async function fillTypeahead(
     }
     blur(input);
     await sleep(50);
-    return input.value
-      ? { outcome: "ok", shown: input.value, note: "No suggestion list; typed value" }
-      : { outcome: "flag", note: "No suggestions appeared" };
+    if (input.value) return { outcome: "ok", shown: input.value, note: "No suggestion list; typed value" };
+    // A list filtered by what's typed, naming ranges: Oracle's salary lists "$40,001 - $50,000", nothing for "41600".
+    // Only a sure match there: the AI chose "Armstrong, BC" for Langley off Oracle's unfiltered cities.
+    const all = h.desc.kind === "typeahead" ? await openDropdown(h) : null;
+    if (!all || localMatch(intended, optionElements(all).map(optText)) === null) {
+      await closeDropdown(h, all);
+      return { outcome: "flag", note: "No suggestions appeared" };
+    }
+    c = all;
   }
   let els = optionElements(c);
   let texts = els.map(optText);

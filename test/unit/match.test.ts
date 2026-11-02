@@ -32,6 +32,14 @@ describe("localMatch (§13.3)", () => {
     expect(localMatch("May 2027", ["2027-04", "2027-05"])).toBe(1);
     expect(localMatch("2027-05", ["April 2027", "May 2027"])).toBe(1);
   });
+  it("matches a number to the one range holding it (Oracle's salary expectations)", () => {
+    const pay = ["$30,000 - $40,000", "$40,001 - $50,000", "$50,001 - $60,000", ">$200,000"];
+    expect(localMatch("41600", pay)).toBe(1);
+    expect(localMatch("$50,000", pay)).toBe(1);
+    expect(localMatch("250000", pay)).toBeNull();
+    expect(localMatch("5", ["0-5 years", "5-10 years"])).toBeNull();
+    expect(localMatch("Python 3", ["1 - 5"])).toBeNull();
+  });
   it("never does substring or fuzzy matching", () => {
     expect(localMatch("relocate", ["I am willing to relocate"])).toBeNull();
     expect(localMatch("Python", ["Python 3", "Java"])).toBeNull();
