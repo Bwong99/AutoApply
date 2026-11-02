@@ -64,6 +64,21 @@ function keyFor(d: FieldDescriptor): DetKey | null {
   return keys.size === 1 ? [...keys][0] : null;
 }
 
+const NAMES = new Set<DetKey>(["fullName", "legalName", "firstName", "middleName", "lastName", "preferredName"]);
+
+/**
+ * The profile's name in capitals, as a site's résumé parser wrote it: Workday's "Autofill with Resume" reads a small-caps
+ * heading as "BRADLEY". Not someone's answer, so it is filled; a different name stays.
+ */
+export function shoutedName(d: FieldDescriptor, p: DeterministicProfile["personal"]): boolean {
+  const shown = d.currentValue?.trim();
+  if (!shown || shown !== shown.toUpperCase() || shown === shown.toLowerCase()) return false;
+  const key = keyFor(d);
+  if (!key || !NAMES.has(key)) return false;
+  const value = deterministicValue(d, p)?.value.trim();
+  return !!value && value !== shown && normalize(value) === normalize(shown);
+}
+
 export interface DetResult {
   value: string;
   path: string;

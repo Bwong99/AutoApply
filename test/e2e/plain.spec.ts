@@ -47,3 +47,18 @@ test("no form: a triggered fill on a page without fields shows the overlay with 
   await expect(page.locator("autoapply-root .panel .error")).toHaveText(/No job application form found/);
   await expect(page.locator("autoapply-root .fab .count")).toHaveText("!");
 });
+
+test("plain form: a name in the capitals a résumé parser wrote is corrected, a different one kept", async ({
+  page,
+  sw,
+}) => {
+  await seed(sw);
+  await page.goto(BASE + "plain.html");
+  await page.locator("#fn").fill("ADA");
+  await page.locator("#ln").fill("BYRON");
+  await fillPage(page, sw);
+  await waitDone(page);
+
+  await expect(page.locator("#fn")).toHaveValue("Ada");
+  await expect(page.locator("#ln")).toHaveValue("BYRON");
+});
