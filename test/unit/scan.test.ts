@@ -687,6 +687,16 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(fields()[0].desc.label).toBe("Resume");
   });
 
+  it("labels uploads named only aria-label 'file-input' by their visible question (BambooHR)", () => {
+    const upload = (q: string) =>
+      `<div><p>${q}*</p><div><div><button type="button">Choose File*</button><p>No file selected</p></div>` +
+      `<input type="file" aria-label="file-input" required></div></div>`;
+    setBody(`<form><div>${upload("Cover Letter")}${upload("Resume")}</div></form>`);
+    const [cover, resume] = fields().map((f) => f.desc.label);
+    expect(cover).toMatch(/^Cover Letter\b/);
+    expect(resume).toMatch(/^Resume\b/);
+  });
+
   it("skips a résumé uploader whose own panel offers to autocomplete the application (SmartRecruiters)", () => {
     setBody(`<form><div><h3>Easy Apply</h3><p>Choose an option to autocomplete your application.</p>
         <div><label for="a">Choose a file or drop it here</label><input type="file" id="a"></div></div>
