@@ -1717,8 +1717,9 @@ describe("mapFields chunking and splitting (§10.7)", () => {
           field("c", { label: "Name pronounciation", required: true }),
           field("d", { label: "How do you pronounce your name?" }),
           field("e", { label: "Please write out how your name is pronounced phonetically." }),
+          field("p", { label: "Preferred name and pronunciation", kind: "textarea" }),
         ],
-        profile,
+        profile: { ...profile, personal: { ...profile.personal, firstName: "Andrew", preferredName: "Andy" } },
         documents: [],
         job: null,
       },
@@ -1730,6 +1731,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       "flag",
       "skip",
       "skip",
+      "Andy",
     ]);
   });
 

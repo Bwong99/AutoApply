@@ -1066,14 +1066,18 @@ function attachedDecision(f: FieldDescriptor, uploads: string[] | undefined): De
 
 /**
  * "How do you pronounce your name?": the profile doesn't say. Sierra's "Name pronounciation" got the pronouns, and
- * Akuna's "how your name is pronounced phonetically" a made-up "An-dee Woo".
+ * Akuna's "how your name is pronounced phonetically" a made-up "An-dee Woo". Solink's "Preferred name and
+ * pronunciation" also asks the preferred name: that part is filled.
  */
-const pronunciationDecision = (f: FieldDescriptor): Decision | null =>
-  /\bpronoun(ce|ced|ci?ation)\b|\bpronunciation\b/i.test(f.label)
-    ? f.required
-      ? flag(f.id, "Add how your name is pronounced")
-      : { fieldId: f.id, action: "skip", confidence: "high" }
-    : null;
+function pronunciationDecision(f: FieldDescriptor, p: Profile["personal"]): Decision | null {
+  if (!/\bpronoun(ce|ced|ci?ation)\b|\bpronunciation\b/i.test(f.label)) return null;
+  const name = p.preferredName || p.firstName;
+  if (name && /\bpreferred (first )?name\b/i.test(f.label) && (f.kind === "text" || f.kind === "textarea"))
+    return { fieldId: f.id, action: "fill", text: name, confidence: "high", sources: ["personal.preferredName"] };
+  return f.required
+    ? flag(f.id, "Add how your name is pronounced")
+    : { fieldId: f.id, action: "skip", confidence: "high" };
+}
 
 const RE_DATE_RANGE = /\b([a-z]{3,9})\.? (\d{1,2}),? ?(\d{4})?\s*[-–—]\s*([a-z]{3,9})\.?,? (\d{1,2}),? ?(\d{4})\b/i;
 
@@ -2220,7 +2224,7 @@ export async function mapFields(
       languagesDecision(f, input.profile) ??
       skillsDecision(f, input.profile) ??
       internshipsDecision(f, input.profile.experience) ??
-      pronunciationDecision(f) ??
+      pronunciationDecision(f, input.profile.personal) ??
       attachedDecision(f, input.uploads) ??
       cohortDecision(f, input.profile.preferences) ??
       termsDecision(f, input.profile) ??
