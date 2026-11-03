@@ -205,6 +205,16 @@ export interface EssayItem {
   kind: "essay" | "cover_letter";
 }
 
+/** What "Edit with AI" asks of one answer. */
+export interface AnswerEdit {
+  question: string;
+  hint?: string;
+  current: string;
+  instruction: string;
+  maxChars?: number;
+  maxWords?: number;
+}
+
 export interface DeterministicProfile {
   personal: Profile["personal"];
   /** Set: AI-review consents are answered from the profile instead of the consent settings. */

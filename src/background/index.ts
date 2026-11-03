@@ -24,6 +24,7 @@ import { getJobContext, getJobPay, setJobContext, setJobPay } from "./jobContext
 import { mapFields, type ServiceCtx } from "./services/mapFields";
 import { chooseOptions } from "./services/chooseOptions";
 import { draftEssays } from "./services/draftEssays";
+import { editAnswer } from "./services/editAnswer";
 import { parseResume } from "./services/parseResume";
 import { pickResume } from "./services/pickResume";
 import { tailoredDoc, tailoredResume } from "./services/tailorResume";
@@ -398,6 +399,20 @@ const handlers: Handlers = {
     const tab = await runTab(sender);
     const job = tab?.id !== undefined ? await getJobContext(tab.id) : null;
     return { essays: await draftEssays(ctx, items, profile, job) };
+  },
+
+  async EDIT_ANSWER({ edit, groupId }, sender) {
+    const ctx = await serviceCtx(groupSignal(sender, groupId), "write");
+    if ("error" in ctx) return ctx;
+    const profile = await store.get("profile");
+    const tab = await runTab(sender);
+    const job = tab?.id !== undefined ? await getJobContext(tab.id) : null;
+    try {
+      const text = await editAnswer(ctx, edit, profile, job);
+      return text ? { text } : { error: { kind: "other", message: "The AI returned nothing. Try again." } };
+    } catch (e) {
+      return { error: toApiError(e) };
+    }
   },
 
   async SAVE_LEARNED_ANSWER({ answer }) {

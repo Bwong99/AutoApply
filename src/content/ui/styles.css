@@ -301,6 +301,68 @@ pre.timings {
   white-space: pre-wrap;
 }
 
+/* edit with AI */
+.edit-ai {
+  position: fixed;
+  left: calc(anchor(right) - 4px);
+  top: calc(anchor(bottom, -9999px) + 4px);
+  transform: translateX(-100%);
+  background: var(--purple);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.aiedit {
+  position: fixed;
+  width: 360px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  pointer-events: auto;
+}
+.aiedit .qa {
+  margin: 4px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+.aiedit textarea {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+}
+.aiedit [hidden] {
+  display: none;
+}
+.aiedit .error {
+  margin-bottom: 8px;
+  color: var(--red);
+  font-size: 12px;
+}
+.aiedit .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 /* learning prompt */
 .learn {
   position: fixed;

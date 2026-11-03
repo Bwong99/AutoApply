@@ -45,6 +45,7 @@ import {
   yesNoPair,
   type FieldHandle,
 } from "./scan/fields";
+import { closeAiEditor, hideEditButton, inAiEditor, openAiEditor, showEditButton } from "./ui/aiEditor";
 import { removeBadge, setBadge, setBadgesVisible, type BadgeColor } from "./ui/badges";
 import { showLearnPrompt } from "./ui/learnPrompt";
 import { createOverlay, type Overlay } from "./ui/overlay";
@@ -1070,6 +1071,54 @@ function onUserCommit(e: Event) {
   }, 50);
 }
 
+// ---------- edit with AI ----------
+/** Answers in the user's words: any long-text box, and a short one the AI or the user answered, not a name or an email. */
+function aiEditable(h: FieldHandle): boolean {
+  if (h.desc.kind === "textarea" || h.desc.kind === "contenteditable") return true;
+  const status = states.get(h.id)?.status;
+  return h.desc.kind === "text" && !!status && ["ai", "draft", "needs", "check", "edited", "you"].includes(status);
+}
+
+function onFieldFocus(e: Event) {
+  const path = e.composedPath();
+  if (yolo || isFilling() || inAiEditor(path)) return;
+  const h = handleFor(path[0] ?? e.target);
+  if (h && aiEditable(h) && states.get(h.id)?.status !== "working") showEditButton(badgeTarget(h), () => editWithAi(h));
+  else hideEditButton();
+}
+
+function editWithAi(h: FieldHandle) {
+  const groupId = crypto.randomUUID();
+  const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
+  openAiEditor(badgeTarget(h), {
+    label: h.desc.label,
+    current: () => readValue(h),
+    rewrite: async (instruction, current) => {
+      const edit = { question: h.desc.label, hint: h.desc.hint, current, instruction, ...limits };
+      try {
+        const r = await send({ type: "EDIT_ANSWER", edit, groupId });
+        return isErr(r) ? { error: r.error.message } : r.text;
+      } catch (e) {
+        return { error: (e as Error).message };
+      }
+    },
+    stop: () => void send({ type: "ABORT", groupId }).catch(() => undefined),
+    apply: async (text) => {
+      const fr = await fill(
+        h,
+        { type: "text", value: text },
+        { documents: [], getDocument: async () => null, choose, checkedByUs, harvested, signal: life.signal },
+      );
+      if (fr.outcome !== "ok") return fr.note ?? "The page rejected the text";
+      setStatus(h, "draft", "AI draft – review", `${wordCount(text)} words`);
+      // Asked for by the user: another pass of the fill leaves it alone.
+      states.get(h.id)!.userOwned = true;
+      return null;
+    },
+    onClose: () => h.el.focus?.(),
+  });
+}
+
 // ---------- YOLO (./yolo/driver.ts) ----------
 /** Required fields still without an answer on the page. */
 function unfilledRequired(): FieldHandle[] {
@@ -1267,6 +1316,8 @@ async function main() {
   g.__autoapply = true;
   claimFrame(() => {
     life.abort();
+    closeAiEditor();
+    hideEditButton();
     current?.ctrl.abort(); // no ABORT message: this context's runtime is gone
     queued = null;
     clearTimeout(retryTimer);
@@ -1285,6 +1336,7 @@ function listen() {
   document.addEventListener("input", onUserInput, opts);
   for (const ev of ["change", "focusout", "click"]) document.addEventListener(ev, onUserCommit, opts);
   for (const ev of ["submit", "click"]) document.addEventListener(ev, onSubmitAttempt, opts);
+  document.addEventListener("focusin", onFieldFocus, opts);
   // A page timer set during a fill in a hidden tab (pageTimers.ts): fire it on time.
   document.addEventListener(
     "autoapply-timer",

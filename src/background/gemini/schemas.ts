@@ -130,6 +130,13 @@ export const ChooseZ = z.object({
   ),
 });
 
+export const EDIT_SCHEMA = {
+  type: "OBJECT",
+  properties: { text: { type: "STRING" } },
+  required: ["text"],
+};
+export const EditZ = z.object({ text: z.string() });
+
 export const EssaysZ = z.object({ essays: z.array(z.object({ fieldId: z.string(), text: z.string() })) });
 
 export const ValidationZ = z.object({ ok: z.boolean() });

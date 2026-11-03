@@ -4,6 +4,7 @@ import type {
   ChooseItem,
   Decision,
   DocumentMeta,
+  AnswerEdit,
   EssayItem,
   FieldDescriptor,
   FrameStatus,
@@ -118,6 +119,7 @@ export type Message =
   | { type: "YOLO_DELETE_ACCOUNT"; site: string }
   | { type: "CHOOSE_OPTIONS"; items: ChooseItem[]; groupId: string }
   | { type: "DRAFT_ESSAYS"; items: EssayItem[]; groupId: string }
+  | { type: "EDIT_ANSWER"; edit: AnswerEdit; groupId: string }
   | { type: "SAVE_LEARNED_ANSWER"; answer: LearnedAnswerInput }
   | { type: "LEARNED_USED"; ids: string[] }
   | { type: "FRAME_STATUS"; status: FrameStatus }
@@ -164,6 +166,7 @@ export interface Responses {
   MAP_FIELDS: { decisions: Decision[]; usedModel: string } | Err;
   CHOOSE_OPTIONS: { choices: Choice[] } | Err;
   DRAFT_ESSAYS: { essays: { fieldId: string; text: string | null; note?: string }[] } | Err;
+  EDIT_ANSWER: { text: string } | Err;
   SAVE_LEARNED_ANSWER: Ok;
   LEARNED_USED: Ok;
   FRAME_STATUS: Ok;

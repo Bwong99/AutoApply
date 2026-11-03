@@ -5,7 +5,7 @@ import { normalize } from "../src/shared/normalize";
 
 type Json = Record<string, unknown>;
 export type CallKind =
-  "list" | "validate" | "map" | "audit" | "choose" | "essay" | "resume" | "guess" | "relevance" | "tailor";
+  "list" | "validate" | "map" | "audit" | "choose" | "essay" | "resume" | "guess" | "relevance" | "tailor" | "edit";
 export interface Call {
   kind: CallKind;
   key: string;
@@ -223,15 +223,17 @@ export class MockGemini {
           ? "choose"
           : system.startsWith("You write answers")
             ? "essay"
-            : system.startsWith("You audit")
-              ? "audit"
-              : system.startsWith("You complete the fields")
-                ? "guess"
-                : system.startsWith("You screen job postings")
-                  ? "relevance"
-                  : system.startsWith("You tailor")
-                    ? "tailor"
-                    : "resume";
+            : system.startsWith("You rewrite one answer")
+              ? "edit"
+              : system.startsWith("You audit")
+                ? "audit"
+                : system.startsWith("You complete the fields")
+                  ? "guess"
+                  : system.startsWith("You screen job postings")
+                    ? "relevance"
+                    : system.startsWith("You tailor")
+                      ? "tailor"
+                      : "resume";
     const payload = kind === "resume" ? { text } : (JSON.parse(text) as Json);
     const call = { kind, key, model, payload };
     const gc = body.generationConfig as Json;
@@ -292,6 +294,7 @@ export class MockGemini {
     }
     if (kind === "relevance")
       return send(200, reply({ keep: (payload.jobs as { i: number }[]).map((j) => j.i) }), call);
+    if (kind === "edit") return send(200, reply({ text: `Rewritten: ${String(payload.instruction)}` }), call);
     if (kind === "essay")
       return send(
         200,
