@@ -1,4 +1,4 @@
-// §10.9 "Prefill profile from résumé": proposes values only for empty fields; user ticks what to keep.
+// §10.9 "Extract from résumé": proposes values only for empty fields; user ticks what to keep.
 import { useState } from "preact/hooks";
 import { isErr, send } from "../../shared/messages";
 import { getPath, isEmpty, leaves, setPath, useProfile } from "../store";
@@ -39,7 +39,7 @@ export function Prefill() {
   return (
     <div class="prefill">
       <button type="button" class="btn" onClick={() => void run()} disabled={busy}>
-        {busy ? "Reading résumé…" : "Prefill profile from résumé"}
+        {busy ? "Reading résumé…" : "Extract from résumé"}
       </button>
       {err && <p class="err">{err}</p>}
       {diff && (
