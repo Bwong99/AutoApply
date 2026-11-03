@@ -5,6 +5,12 @@ import { isErr, send } from "../../shared/messages";
 import { pdfText } from "../pdf";
 import { getPath, isEmpty, leaves, setPath, store, useProfile, useStored } from "../store";
 
+/** The AI tailoring résumé's text, from its compiled PDF rather than the LaTeX source: same facts, far fewer tokens. */
+export async function tailorText(): Promise<string> {
+  const b64 = await store.getDoc("tailor-pdf");
+  return b64 ? pdfText(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer).catch(() => "") : "";
+}
+
 const show = (v: unknown) =>
   Array.isArray(v)
     ? v
@@ -25,18 +31,12 @@ export function Prefill() {
   // Re-derived each render, so removing either file never leaves a stale pick.
   const source = tailor && (pick === "tex" || !primary) ? "tex" : "pdf";
 
-  // The compiled PDF's text, not the LaTeX source: same facts, far fewer tokens.
-  const texText = async () => {
-    const b64 = await store.getDoc("tailor-pdf");
-    return b64 ? pdfText(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer).catch(() => "") : "";
-  };
-
   const run = async () => {
     if (!profile) return;
     setErr("");
     setDiff(null);
     setBusy(true);
-    const text = source === "tex" ? await texText() : profile.resumeText;
+    const text = source === "tex" ? await tailorText() : profile.resumeText;
     if (!text.trim()) {
       setBusy(false);
       return setErr(

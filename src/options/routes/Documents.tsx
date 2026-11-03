@@ -2,7 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { toBase64 } from "../../shared/base64";
 import type { DocumentMeta } from "../../shared/types";
 import { TextInput } from "../components/controls";
-import { Prefill } from "../components/Prefill";
+import { Prefill, tailorText } from "../components/Prefill";
 import { downloadDoc, ResumeModes, TailorPrompt, TailorUpload } from "../components/ResumeTailoring";
 import { pdfText } from "../pdf";
 import { markSaved, save, store, useProfile, useStored } from "../store";
@@ -43,6 +43,50 @@ export function useResumeTexts() {
     })();
     return () => void (live = false);
   }, [docs, texts]);
+}
+
+/** Replaces the editable résumé text with a résumé's own text; a second click confirms discarding what's there. */
+function ReloadResumeText() {
+  const [profile, update] = useProfile();
+  const primary = useStored("documentsIndex")?.find((d) => d.isPrimaryResume);
+  const tailor = useStored("tailorResume");
+  const [confirm, setConfirm] = useState<"pdf" | "tex" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!profile || (!primary && !tailor)) return null;
+
+  const reload = async (src: "pdf" | "tex") => {
+    setErr("");
+    if (profile.resumeText.trim() && confirm !== src) return setConfirm(src);
+    setConfirm(null);
+    setBusy(true);
+    const text = await (src === "pdf" ? docText(primary!) : tailorText()).catch(() => "");
+    setBusy(false);
+    // Never swap the user's text for nothing (e.g. a scanned PDF with no text layer).
+    if (!text.trim()) return setErr("Couldn’t read any text from that résumé.");
+    update((p) => void (p.resumeText = text));
+  };
+
+  const button = (src: "pdf" | "tex", label: string) => (
+    <button type="button" class="btn small" disabled={busy} onClick={() => void reload(src)}>
+      {confirm === src ? "Replace the text above? Click again" : label}
+    </button>
+  );
+
+  return (
+    <>
+      <div class="row">
+        {primary && button("pdf", "Reload from primary résumé")}
+        {tailor && button("tex", "Reload from AI tailoring résumé")}
+        {confirm && (
+          <button type="button" class="btn small" onClick={() => setConfirm(null)}>
+            Cancel
+          </button>
+        )}
+      </div>
+      {err && <p class="err">{err}</p>}
+    </>
+  );
 }
 
 export function DocumentUpload() {
@@ -237,6 +281,7 @@ export function Documents() {
             value={profile.resumeText}
             onInput={(v) => update((p) => void (p.resumeText = v))}
           />
+          <ReloadResumeText />
           <Prefill />
         </div>
       )}
