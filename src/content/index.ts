@@ -1216,6 +1216,10 @@ function onMessage(msg: Message, _sender: unknown, sendResponse: (r: unknown) =>
     case "YOLO_ATTACH":
       if (window === window.top) void startYolo();
       break;
+    case "READ_POSTING":
+      // No read of a page that isn't about a job: this runs whenever a link opens a job page in a new tab.
+      sendResponse(jobUrl(location) ? extractJobContext() : null);
+      return false;
     case "FRAME_STATUS":
       if (TOP) {
         childFrames.set(msg.status.frameId, msg.status);
@@ -1275,6 +1279,9 @@ async function main() {
   chrome.runtime.onMessage.addListener(onMessage);
   watchPay();
   if (DRIVER_FRAME) void startYolo();
+  // Except a job page in a fresh tab, like the pay read above: the tab that opened it may show another job by the fill.
+  else if (TOP && history.length === 1 && jobUrl(location))
+    void send({ type: "BORROW_POSTING" }).catch(() => undefined);
 }
 
 /** Edit tracking and page timers, from the first fill on a site that isn't excluded (they only act on its fields). */

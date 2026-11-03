@@ -135,6 +135,8 @@ export interface JobContext {
   location?: string;
   /** Sent by a child frame (an embedded application), which knows the description but not the page's job. */
   embedded?: boolean;
+  /** Read from the tab that opened this one (a job board's posting), for an application without a description. */
+  borrowed?: boolean;
   capturedAt: number;
 }
 

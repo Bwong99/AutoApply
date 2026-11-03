@@ -62,3 +62,31 @@ test("plain form: a name in the capitals a résumé parser wrote is corrected, a
   await expect(page.locator("#fn")).toHaveValue("Ada");
   await expect(page.locator("#ln")).toHaveValue("BYRON");
 });
+
+test("an application opened in a new tab keeps the posting of the job board that opened it", async ({
+  page,
+  context,
+  sw,
+}) => {
+  await seed(sw);
+  await page.goto(BASE + "job-board.html");
+  const [form] = await Promise.all([context.waitForEvent("page"), page.click("#apply")]);
+  await form.waitForLoadState();
+
+  const posting = () =>
+    sw.evaluate(async (url) => {
+      const tab = (await chrome.tabs.query({})).find((t) => t.url === url);
+      const key = `jobContext:${tab?.id}`;
+      return (await chrome.storage.session.get(key))[key] as { text: string; company: string } | undefined;
+    }, form.url());
+  await expect.poll(async () => (await posting())?.text).toContain("motor control firmware");
+
+  // The board moves on to another job before the form is filled.
+  await page.click("#next");
+  await fillPage(form, sw);
+  await waitDone(form);
+  const job = await posting();
+  expect(job?.text).toContain("motor control firmware");
+  expect(job?.text).not.toContain("cold calling");
+  expect(job?.company).not.toBe("Job Board");
+});

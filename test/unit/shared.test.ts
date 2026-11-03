@@ -233,6 +233,39 @@ describe("job context", () => {
     expect(await getJobContext(3)).toMatchObject({ jobTitle: "Engineer", location: "Dublin" });
   });
 
+  it("borrows the posting of the tab that opened an application without a description", async () => {
+    const { adoptPosting, getJobContext, setJobContext } = await import("../../src/background/jobContext");
+    const job = (o: Partial<JobContext>): JobContext =>
+      ({
+        url: "https://board.com/jobs/1",
+        title: "",
+        company: "Board",
+        jobTitle: "Engineer",
+        text: "",
+        capturedAt: Date.now(),
+        ...o,
+      }) as JobContext;
+    const form = job({ url: "https://acme.com/apply", company: "acme", jobTitle: "Apply" });
+    // The employer's form names the company; the board's posting gives the description and location.
+    await adoptPosting(1, job({ text: "Write C++", location: "Vancouver" }));
+    await setJobContext(1, form);
+    expect(await getJobContext(1)).toMatchObject({ company: "acme", text: "Write C++", location: "Vancouver" });
+    // Pinned: the board showing another job later changes nothing, nor does the form's next page.
+    await adoptPosting(1, job({ text: "Sell ads" }));
+    await setJobContext(1, { ...form, jobTitle: "Step 2", url: "https://acme.com/apply/2" });
+    expect(await getJobContext(1)).toMatchObject({ jobTitle: "Apply", text: "Write C++" });
+    // A form with its own description keeps it; a board page without a posting gives nothing.
+    await setJobContext(2, job({ url: "https://acme.com/apply", text: "Own text" }));
+    await adoptPosting(2, job({ text: "Write C++" }));
+    expect(await getJobContext(2)).toMatchObject({ text: "Own text" });
+    await adoptPosting(3, job({ text: "" }));
+    await adoptPosting(4, null);
+    expect([await getJobContext(3), await getJobContext(4)]).toEqual([null, null]);
+    // A page of the form with its own description replaces what was borrowed.
+    await setJobContext(1, job({ url: "https://acme.com/apply/3", text: "Own text" }));
+    expect(await getJobContext(1)).toMatchObject({ text: "Own text" });
+  });
+
   it("keeps a posting's pay for the application's later pages and the tabs it opens", async () => {
     const mock = installChromeMock();
     const tabs: Record<number, string> = { 1: "https://co.com/jobs/1" };

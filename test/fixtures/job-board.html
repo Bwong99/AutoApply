@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Job board</title>
+    <meta property="og:site_name" content="Job Board" />
+  </head>
+  <body>
+    <h1>Firmware Engineer</h1>
+    <main>
+      <div class="job-location">Vancouver, BC</div>
+      <h2>Responsibilities</h2>
+      <p>Write real time motor control firmware in C++ on FreeRTOS for our robot arm, and debug it on the bench.</p>
+      <h2>Qualifications</h2>
+      <p>Experience with embedded C++, SPI and CAN, and an interest in robotics and control systems.</p>
+    </main>
+    <a id="apply" href="http://localhost:5502/jobs/job-form.html" target="_blank" rel="noopener">Apply</a>
+    <a
+      id="next"
+      href="#"
+      onclick="
+        document.querySelector('main').innerHTML =
+          '<h2>Responsibilities</h2><p>Sell ads.</p><h2>Qualifications</h2><p>Enjoys cold calling, spreadsheets and quotas, with a long list of accounts to work through every day of the week.</p>'
+      "
+      >Next job</a
+    >
+  </body>
+</html>
