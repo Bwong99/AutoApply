@@ -78,7 +78,7 @@ function ReloadResumeText() {
   const buttons = (
     <>
       <button type="button" class="btn small" onClick={() => void reload()}>
-        {confirm === source ? "Replace the text above? Click again" : tailor ? "Reload" : "Reload from primary résumé"}
+        {confirm === source ? "Replace the text below? Click again" : tailor ? "Reload" : "Reload from primary résumé"}
       </button>
       {confirm && (
         <button type="button" class="btn small" onClick={() => setConfirm(null)}>
@@ -316,6 +316,7 @@ export function Documents() {
             <p class="help above">
               Sent to the AI as context for answers and essays. Edit it if extraction garbled anything.
             </p>
+            <ReloadResumeText />
             <textarea
               id="resume-text"
               rows={5}
@@ -323,7 +324,6 @@ export function Documents() {
               onInput={(e) => update((p) => void (p.resumeText = e.currentTarget.value))}
             />
           </div>
-          <ReloadResumeText />
           <Prefill />
         </div>
       )}
