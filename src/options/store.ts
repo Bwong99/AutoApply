@@ -94,6 +94,7 @@ const ENTRY_KEY: Record<string, string[]> = {
   education: ["school", "degree"],
   experience: ["company", "title"],
   projects: ["name"],
+  extracurriculars: ["organization", "role"],
   "skills.languages": ["language"],
   "skills.certifications": ["name"],
 };
