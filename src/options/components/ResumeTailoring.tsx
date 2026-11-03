@@ -289,6 +289,11 @@ export function TailorPrompt() {
       {!used && <p class="muted">Set Upload résumés to AI tailor (Behavior or YOLO) to use this prompt.</p>}
       <div class="field full">
         <label for="tailor-prompt">What the AI is told about tailoring your résumé</label>
+        <p class="help above">
+          Edit it to change what the AI may do; it overrides the defaults (for example, to let it add more bullets).
+          AutoApply always adds its own rules for the answer format and LaTeX safety, and keeps only edits that leave
+          your template’s layout, packages and commands as they are.
+        </p>
         <textarea
           id="tailor-prompt"
           rows={16}
@@ -296,11 +301,6 @@ export function TailorPrompt() {
           value={s.tailorPrompt}
           onInput={(e) => set({ tailorPrompt: e.currentTarget.value })}
         />
-        <p class="help">
-          Edit it to change what the AI may do; it overrides the defaults (for example, to let it add more bullets).
-          AutoApply always adds its own rules for the answer format and LaTeX safety, and keeps only edits that leave
-          your template’s layout, packages and commands as they are.
-        </p>
       </div>
       <button
         type="button"

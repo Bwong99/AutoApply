@@ -1,15 +1,8 @@
-// §10.9 "Prefill Profile with résumé": proposes values only for empty fields; user ticks what to keep. The source is the
-// résumé text (primary PDF's, with the user's edits) or the AI tailoring .tex résumé's untailored PDF.
+// §10.9 "Prefill Profile using extracted résumé": proposes values only for empty fields; user ticks what to keep. The source is the
+// editable résumé text (Documents → Résumé text), including the user's edits.
 import { useState } from "preact/hooks";
 import { isErr, send } from "../../shared/messages";
-import { pdfText } from "../pdf";
-import { getPath, isEmpty, leaves, setPath, store, useProfile, useStored } from "../store";
-
-/** The AI tailoring résumé's text, from its compiled PDF rather than the LaTeX source: same facts, far fewer tokens. */
-export async function tailorText(): Promise<string> {
-  const b64 = await store.getDoc("tailor-pdf");
-  return b64 ? pdfText(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer).catch(() => "") : "";
-}
+import { getPath, isEmpty, leaves, setPath, useProfile } from "../store";
 
 const show = (v: unknown) =>
   Array.isArray(v)
@@ -25,25 +18,16 @@ export function Prefill() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [diff, setDiff] = useState<{ path: string; value: unknown; on: boolean }[] | null>(null);
-  const primary = useStored("documentsIndex")?.find((d) => d.isPrimaryResume);
-  const tailor = useStored("tailorResume");
-  const [pick, setPick] = useState<"pdf" | "tex" | null>(null);
-  // Re-derived each render, so removing either file never leaves a stale pick.
-  const source = tailor && (pick === "tex" || !primary) ? "tex" : "pdf";
 
   const run = async () => {
     if (!profile) return;
     setErr("");
     setDiff(null);
     setBusy(true);
-    const text = source === "tex" ? await tailorText() : profile.resumeText;
+    const text = profile.resumeText;
     if (!text.trim()) {
       setBusy(false);
-      return setErr(
-        source === "tex"
-          ? "Couldn’t read any text from your AI tailoring résumé. Try uploading the .tex again."
-          : "Upload a résumé (or paste its text) first.",
-      );
+      return setErr("Upload a résumé (or paste its text) first.");
     }
     const r = await send({ type: "PARSE_RESUME", text });
     setBusy(false);
@@ -61,32 +45,8 @@ export function Prefill() {
 
   return (
     <div class="prefill">
-      {tailor && (
-        <fieldset class="field" disabled={busy}>
-          <legend>Extract from</legend>
-          <label class="inline">
-            <input
-              type="radio"
-              name="prefill-source"
-              checked={source === "pdf"}
-              disabled={!primary}
-              onChange={() => setPick("pdf")}
-            />
-            Primary résumé (.pdf) <span class="muted">{primary ? `· ${primary.label}` : "· none chosen"}</span>
-          </label>
-          <label class="inline">
-            <input type="radio" name="prefill-source" checked={source === "tex"} onChange={() => setPick("tex")} />
-            AI tailoring résumé (.tex) <span class="muted">· {tailor.fileName}</span>
-          </label>
-          <p class="help">
-            {source === "pdf"
-              ? "Uses the text above, including your edits."
-              : "Uses the text of your .tex résumé as uploaded, before any tailoring."}
-          </p>
-        </fieldset>
-      )}
       <button type="button" class="btn" onClick={() => void run()} disabled={busy}>
-        {busy ? "Reading résumé…" : "Prefill Profile with résumé"}
+        {busy ? "Reading résumé…" : "Prefill Profile using extracted résumé"}
       </button>
       {err && <p class="err">{err}</p>}
       {diff && (
