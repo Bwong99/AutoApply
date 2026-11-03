@@ -217,6 +217,19 @@ export function TailorUpload() {
             Uploaded instead when tailoring fails or there’s no job description to tailor to. Without one, the
             untailored PDF of your .tex is used.
           </p>
+          {!tailor.fallback && (
+            <p>
+              <button
+                type="button"
+                class="btn small"
+                onClick={() =>
+                  void downloadDoc("tailor-pdf", tailor.fileName.replace(/\.tex$/i, ".pdf"), "application/pdf")
+                }
+              >
+                Download untailored fallback PDF
+              </button>
+            </p>
+          )}
           {tailor.fallback && (
             <p>
               <strong>{tailor.fallback.fileName}</strong>{" "}
