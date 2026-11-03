@@ -11,6 +11,7 @@ import { pdfText } from "../pdf";
 import { markSaved, save, store, useProfile, useStored } from "../store";
 
 const MAX_TEX = 1024 * 1024;
+const MAX_PDF = 5 * 1024 * 1024;
 const NAMES = { variants: "Variant select", tailor: "AI tailor", flag: "Flag for me" } as const;
 
 const bytesOf = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
@@ -42,7 +43,8 @@ export function ResumeModes() {
           <strong>AI tailor</strong> uploads your LaTeX résumé (under “Résumé for AI tailoring”) after the AI tailors it
           to each job: it rewords and reorders bullets, entries and sections without touching your template’s layout,
           then it’s compiled to PDF on this computer. Slower (several seconds, while the rest of the form fills) and
-          uses AI tokens. If anything goes wrong, the untailored PDF made when you uploaded it is used.
+          uses AI tokens. If anything goes wrong or there’s no job to tailor it to, your fallback PDF is used, or the
+          untailored PDF made when you uploaded the .tex if you didn’t upload one.
         </li>
         <li>
           <strong>Flag for me</strong> (autofill only) leaves résumé uploads for you to do.
@@ -69,6 +71,7 @@ export function TailorUpload() {
   const [profile, update] = useProfile();
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [fallbackErr, setFallbackErr] = useState("");
   const used = s?.resumeUpload === "tailor" || y?.resumeUpload === "tailor";
 
   const upload = async (file: File) => {
@@ -89,7 +92,15 @@ export function TailorUpload() {
       if (!r.pdf) return setErrors(compileErrors(r.log));
       await store.setDoc("tailor-tex", toBase64(new TextEncoder().encode(src)));
       await store.setDoc("tailor-pdf", r.pdf);
-      await save({ tailorResume: { fileName: file.name, size: file.size, uploadedAt: Date.now(), pages: r.pages } });
+      await save({
+        tailorResume: {
+          fileName: file.name,
+          size: file.size,
+          uploadedAt: Date.now(),
+          pages: r.pages,
+          fallback: tailor?.fallback ?? null,
+        },
+      });
       // With no PDF résumé, its text is the AI's résumé context too.
       if (profile && !profile.resumeText.trim()) {
         const text = await pdfText(bytesOf(r.pdf).buffer).catch(() => "");
@@ -114,7 +125,30 @@ export function TailorUpload() {
   const remove = async () => {
     await store.removeDoc("tailor-tex");
     await store.removeDoc("tailor-pdf");
+    await store.removeDoc("tailor-fallback-pdf");
     await save({ tailorResume: null });
+    markSaved();
+  };
+
+  const uploadFallback = async (file: File) => {
+    setFallbackErr("");
+    if (!tailor) return;
+    if (!/\.pdf$/i.test(file.name)) return setFallbackErr("Upload a PDF file.");
+    if (file.size > MAX_PDF) return setFallbackErr("The PDF must be 5 MB or smaller.");
+    try {
+      await store.setDoc("tailor-fallback-pdf", toBase64(new Uint8Array(await file.arrayBuffer())));
+      await save({
+        tailorResume: { ...tailor, fallback: { fileName: file.name, size: file.size, uploadedAt: Date.now() } },
+      });
+    } catch (e) {
+      setFallbackErr(`Could not save the file: ${(e as Error).message}`);
+    }
+  };
+
+  const removeFallback = async () => {
+    if (!tailor) return;
+    await store.removeDoc("tailor-fallback-pdf");
+    await save({ tailorResume: { ...tailor, fallback: null } });
     markSaved();
   };
 
@@ -169,6 +203,45 @@ export function TailorUpload() {
             ))}
           </ul>
         </div>
+      )}
+      {tailor && (
+        <>
+          <h3>Fallback PDF (optional)</h3>
+          <p class="help">
+            Uploaded instead when tailoring fails or there’s no job description to tailor to. Without one, the
+            untailored PDF of your .tex is used.
+          </p>
+          {tailor.fallback && (
+            <p>
+              <strong>{tailor.fallback.fileName}</strong>{" "}
+              <span class="muted">
+                ({Math.round(tailor.fallback.size / 1024)} KB · uploaded{" "}
+                {new Date(tailor.fallback.uploadedAt).toLocaleDateString()})
+              </span>{" "}
+              <button type="button" class="btn small danger" onClick={() => void removeFallback()}>
+                Remove fallback
+              </button>
+            </p>
+          )}
+          <label class="inline-form">
+            <span>{tailor.fallback ? "Replace with another PDF" : "Upload a PDF (max 5 MB)"}</span>
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              aria-label="Fallback PDF résumé"
+              onChange={(e) => {
+                const f = e.currentTarget.files?.[0];
+                if (f) void uploadFallback(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+          {fallbackErr && (
+            <p class="err" role="alert">
+              {fallbackErr}
+            </p>
+          )}
+        </>
       )}
     </div>
   );

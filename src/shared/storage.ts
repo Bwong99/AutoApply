@@ -141,9 +141,16 @@ export const LOCAL_SCHEMAS = {
   /**
    * The LaTeX résumé for AI tailoring: its source in doc:tailor-tex and its untailored PDF (the fallback) in
    * doc:tailor-pdf. Not a document: never a variant, never offered for other uploads. null: none uploaded.
+   * `fallback`: an optional PDF the user uploaded (doc:tailor-fallback-pdf), used in place of the untailored PDF.
    */
   tailorResume: z
-    .object({ fileName: z.string(), size: z.number(), uploadedAt: z.number(), pages: z.number().catch(1) })
+    .object({
+      fileName: z.string(),
+      size: z.number(),
+      uploadedAt: z.number(),
+      pages: z.number().catch(1),
+      fallback: z.object({ fileName: z.string(), size: z.number(), uploadedAt: z.number() }).nullable().catch(null),
+    })
     .nullable()
     .catch(null),
   /** Résumé document id → its extracted text, for matching résumé variants to jobs (options keeps it in sync). */

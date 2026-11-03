@@ -185,3 +185,36 @@ test("tailor: no résumé for the chosen mode stops the fill before anything is 
   );
   await expect(page.locator("#fn")).toHaveValue("");
 });
+
+test("tailor: an uploaded fallback PDF is used instead of the untailored one when tailoring fails", async ({
+  page,
+  sw,
+  mock,
+}) => {
+  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false } });
+  await uploadTex(page, sw, "jake.tex", JAKE);
+  await expect.poll(() => storage(sw, "tailorResume"), { timeout: 30_000 }).toBeTruthy();
+  const pdf = Buffer.from("%PDF-1.4\n% my fallback\n%%EOF\n");
+  await page
+    .getByLabel("Fallback PDF résumé")
+    .setInputFiles({ name: "mine.pdf", mimeType: "application/pdf", buffer: pdf });
+  await expect
+    .poll(async () => (await storage<{ fallback: { fileName: string } | null }>(sw, "tailorResume")).fallback?.fileName)
+    .toBe("mine.pdf");
+  // Replacing the .tex keeps the fallback.
+  await uploadTex(page, sw, "jake2.tex", JAKE);
+  await expect
+    .poll(async () => (await storage<{ fileName: string }>(sw, "tailorResume")).fileName, { timeout: 30_000 })
+    .toBe("jake2.tex");
+  expect((await storage<{ fallback: { fileName: string } | null }>(sw, "tailorResume")).fallback?.fileName).toBe(
+    "mine.pdf",
+  );
+  mock.tailorOps = () => ({ edits: [{ id: "S2.E1.B1", text: "\newfancything{x}" }], add: [], remove: [], order: [] });
+
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 30_000 });
+  expect(await uploadedBase64(page)).toBe(pdf.toString("base64"));
+  await expect(page.locator("autoapply-root .panel .notice")).toContainText("Untailored résumé used");
+});

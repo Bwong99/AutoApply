@@ -128,10 +128,14 @@ const pdfMeta = (id: string, fileName: string, base64: string): DocumentMeta => 
   uploadedAt: Date.now(),
 });
 
-/** A tailored résumé's PDF, or the untailored fallback, for GET_DOCUMENT. */
+/** The user's fallback PDF if they uploaded one, else the untailored PDF compiled from the .tex. */
+const fallbackPdf = async (store: Store) =>
+  (await store.getDoc("tailor-fallback-pdf")) ?? (await store.getDoc("tailor-pdf"));
+
+/** A tailored résumé's PDF, or the fallback, for GET_DOCUMENT. */
 export async function tailoredDoc(store: Store, id: string): Promise<{ meta: DocumentMeta; base64: string } | null> {
   if (id !== FALLBACK) return session.get(`tailordoc:${id}`);
-  const [base64, profile] = await Promise.all([store.getDoc("tailor-pdf"), store.get("profile")]);
+  const [base64, profile] = await Promise.all([fallbackPdf(store), store.get("profile")]);
   return base64 ? { meta: pdfMeta(FALLBACK, resumeName(profile), base64), base64 } : null;
 }
 
@@ -150,7 +154,7 @@ export async function tailoredResume(
     store.get("settings"),
     store.get("profile"),
   ]);
-  const untailored = await store.getDoc("tailor-pdf");
+  const untailored = await fallbackPdf(store);
   if (!info || !tex || !untailored) return { error: "No LaTeX résumé is uploaded" };
   const key = await digest(
     tex,
