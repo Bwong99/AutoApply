@@ -20,7 +20,7 @@ import { KeyPool } from "./gemini/keyPool";
 import { defaultModel, updateCatalog, visibleModels } from "./gemini/models";
 import { VALIDATION_PROMPT } from "./gemini/prompts";
 import { VALIDATION_SCHEMA, ValidationZ } from "./gemini/schemas";
-import { getJobContext, getJobPay, setJobContext, setJobPay } from "./jobContext";
+import { adoptPosting, getJobContext, getJobPay, setJobContext, setJobPay } from "./jobContext";
 import { mapFields, type ServiceCtx } from "./services/mapFields";
 import { chooseOptions } from "./services/chooseOptions";
 import { draftEssays } from "./services/draftEssays";
@@ -248,6 +248,14 @@ const pruneClosedTabs = () => chrome.tabs.query({}).then((tabs) => session.prune
 const sendToTab = (tabId: number, msg: Message, frameId?: number) =>
   chrome.tabs.sendMessage(tabId, msg, frameId === undefined ? {} : { frameId }).catch(() => undefined);
 
+/** Keeps the posting of the tab that opened `tab`, if it has none yet. Never reads a site the user excluded. */
+async function borrowPosting(tab: chrome.tabs.Tab) {
+  if (tab.id === undefined || tab.openerTabId === undefined || isExcluded(hostOf(tab.url))) return;
+  const opener = await chrome.tabs.get(tab.openerTabId).catch(() => null);
+  if (!opener?.url || isExcluded(hostOf(opener.url))) return;
+  await adoptPosting(tab.id, (await sendToTab(tab.openerTabId, { type: "READ_POSTING" }, 0)) ?? null);
+}
+
 function entryCounts(p: Profile): EntryCounts {
   const { links } = p.personal;
   return {
@@ -330,10 +338,17 @@ const handlers: Handlers = {
       const prev = await getJobContext(tab.id);
       if (prev?.location) ctx = { ...ctx, location: prev.location };
     }
+    // A page of the user's own without a description, whose address didn't say "job" when it opened.
+    if (tab && !job && !ctx.text && !sender.frameId) await borrowPosting(tab);
     // A YOLO frame's driver is the page's top frame; it has no tab.
     if (tab?.id !== undefined)
       await setJobContext(tab.id, ctx, sender.frameId && sender.tab ? (tab.url ?? "") : undefined);
     void pruneClosedTabs().catch(() => undefined);
+    return { ok: true };
+  },
+
+  async BORROW_POSTING(_, sender) {
+    if (sender.tab && !(await yoloJob(sender))) await borrowPosting(sender.tab);
     return { ok: true };
   },
 

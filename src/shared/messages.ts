@@ -76,6 +76,8 @@ export type Message =
   | { type: "GET_DOCUMENT"; id: string }
   | { type: "GET_DOC_JOB"; id: string }
   | { type: "SET_JOB_CONTEXT"; ctx: JobContext }
+  /** A job page opened in a new tab: keep the posting of the tab that opened it, while that tab still shows it. */
+  | { type: "BORROW_POSTING" }
   /** Which résumé variant to upload for the tab's job. */
   | { type: "PICK_RESUME" }
   /** `passive`: read on page load, outside a fill. */
@@ -130,6 +132,7 @@ export type Message =
   | { type: "TRIGGER_FILL"; force: boolean; rerun?: boolean }
   | { type: "FOCUS_FIELD"; frameId: number; fieldId: string }
   | { type: "TOGGLE_OVERLAY" }
+  | { type: "READ_POSTING" }
   // popup → B
   | { type: "TAB_STATUS"; tabId: number }
   // O → B
@@ -159,6 +162,8 @@ export interface Responses {
   GET_DOCUMENT: { meta: DocumentMeta; base64: string } | null;
   GET_DOC_JOB: JobBrief | null;
   SET_JOB_CONTEXT: Ok;
+  BORROW_POSTING: Ok;
+  READ_POSTING: JobContext | null;
   PICK_RESUME: { id: string | null };
   SET_JOB_PAY: Ok;
   MAP_FIELDS: { decisions: Decision[]; usedModel: string } | Err;

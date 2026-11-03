@@ -17,9 +17,21 @@ export async function setJobContext(tabId: number, ctx: JobContext, pageUrl?: st
   // A page without a description (e.g. step 2 of an application) keeps the earlier description.
   if (!ctx.text && prev?.text) {
     if (prev.embedded) await session.setJobContext(tabId, { ...ctx, text: prev.text });
+    // Borrowed from a job board, which names itself as the company: the employer's site knows better.
+    else if (prev.borrowed && new URL(ctx.url).host !== new URL(prev.url).host)
+      await session.setJobContext(tabId, { ...ctx, text: prev.text, location: ctx.location || prev.location });
     return;
   }
   await session.setJobContext(tabId, ctx);
+}
+
+/**
+ * The posting of the tab that opened this one, for an application with no description of its own (a job board's
+ * "Apply" opening the employer's form in a new tab). Pinned to this tab, as the job board moves on to other jobs.
+ */
+export async function adoptPosting(tabId: number, posting: JobContext | null): Promise<void> {
+  if (posting?.text && !(await session.getJobContext(tabId))?.text)
+    await session.setJobContext(tabId, { ...posting, borrowed: true });
 }
 
 export async function getJobContext(tabId: number): Promise<JobContext | null> {
