@@ -1,4 +1,4 @@
-// §10.9 "Extract from résumé": proposes values only for empty fields; user ticks what to keep. The source is the
+// §10.9 "Prefill Profile with résumé": proposes values only for empty fields; user ticks what to keep. The source is the
 // résumé text (primary PDF's, with the user's edits) or the AI tailoring .tex résumé's untailored PDF.
 import { useState } from "preact/hooks";
 import { isErr, send } from "../../shared/messages";
@@ -86,7 +86,7 @@ export function Prefill() {
         </fieldset>
       )}
       <button type="button" class="btn" onClick={() => void run()} disabled={busy}>
-        {busy ? "Reading résumé…" : "Extract from résumé"}
+        {busy ? "Reading résumé…" : "Prefill Profile with résumé"}
       </button>
       {err && <p class="err">{err}</p>}
       {diff && (
