@@ -88,6 +88,30 @@ export function leaves(obj: unknown, prefix = ""): [string, unknown][] {
   return [[prefix, obj]];
 }
 
+// Fields that identify a list entry, so Prefill can tell a résumé entry the profile already has from a new one.
+const ENTRY_KEY: Record<string, string[]> = {
+  "personal.links.other": ["url"],
+  education: ["school", "degree"],
+  experience: ["company", "title"],
+  projects: ["name"],
+  "skills.languages": ["language"],
+  "skills.certifications": ["name"],
+};
+const norm = (v: unknown) =>
+  String(v ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+
+/** Entries of `found` (the list at `path`) that `have` lacks: strings by value, objects by ENTRY_KEY (else every field). */
+export function newEntries(path: string, have: unknown[], found: unknown[]): unknown[] {
+  const key = (x: unknown) =>
+    x && typeof x === "object"
+      ? (ENTRY_KEY[path] ?? Object.keys(x)).map((k) => norm((x as Record<string, unknown>)[k])).join("|")
+      : norm(x);
+  const seen = new Set(have.map(key));
+  return found.filter((x) => !isEmpty(x) && !seen.has(key(x)) && !!seen.add(key(x)));
+}
+
 /** §8.1 completeness: personal.*, each work-auth entry, first education entry, preferences.*. */
 export function completeness(p: Profile): number {
   const items = [

@@ -2,7 +2,7 @@
 // editable résumé text (Documents → Résumé text), including the user's edits.
 import { useState } from "preact/hooks";
 import { isErr, send } from "../../shared/messages";
-import { getPath, isEmpty, leaves, setPath, useProfile } from "../store";
+import { getPath, isEmpty, leaves, newEntries, setPath, useProfile } from "../store";
 
 const show = (v: unknown) =>
   Array.isArray(v)
@@ -32,14 +32,24 @@ export function Prefill() {
     const r = await send({ type: "PARSE_RESUME", text });
     setBusy(false);
     if (isErr(r)) return setErr(r.error.message);
-    const items = leaves(r.proposed)
-      .filter(([path, v]) => !isEmpty(v) && isEmpty(getPath(profile, path)))
-      .map(([path, value]) => ({ path, value, on: true }));
+    // Lists (projects, experience, skills…) propose only the entries the profile lacks, even when it already has some.
+    const items = leaves(r.proposed).flatMap(([path, v]) => {
+      const have = getPath(profile, path);
+      const value = Array.isArray(v) && Array.isArray(have) ? newEntries(path, have, v) : v;
+      return !isEmpty(value) && (Array.isArray(value) || isEmpty(have)) ? [{ path, value, on: true }] : [];
+    });
     setDiff(items);
   };
 
   const apply = () => {
-    update((p) => diff!.filter((d) => d.on).forEach((d) => setPath(p, d.path, d.value)));
+    update((p) =>
+      diff!
+        .filter((d) => d.on)
+        .forEach((d) => {
+          const have = getPath(p, d.path);
+          setPath(p, d.path, Array.isArray(d.value) && Array.isArray(have) ? [...have, ...d.value] : d.value);
+        }),
+    );
     setDiff(null);
   };
 
@@ -68,7 +78,8 @@ export function Prefill() {
                         setDiff(next);
                       }}
                     />{" "}
-                    <span class="mono">{d.path}</span> → {show(d.value)}
+                    <span class="mono">{d.path}</span> → {isEmpty(getPath(profile, d.path)) ? "" : "add "}
+                    {show(d.value)}
                   </label>
                 </li>
               ))}
