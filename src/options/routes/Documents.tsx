@@ -3,7 +3,7 @@ import { toBase64 } from "../../shared/base64";
 import type { DocumentMeta } from "../../shared/types";
 import { TextInput } from "../components/controls";
 import { Prefill } from "../components/Prefill";
-import { ResumeModes, TailorPrompt, TailorUpload } from "../components/ResumeTailoring";
+import { downloadDoc, ResumeModes, TailorPrompt, TailorUpload } from "../components/ResumeTailoring";
 import { pdfText } from "../pdf";
 import { markSaved, save, store, useProfile, useStored } from "../store";
 
@@ -208,7 +208,14 @@ export function Documents() {
                     <span class="muted">PDF résumés only</span>
                   )}
                 </td>
-                <td>
+                <td class="doc-actions">
+                  <button
+                    type="button"
+                    class="btn small"
+                    onClick={() => void downloadDoc(d.id, d.fileName, d.mimeType)}
+                  >
+                    Download
+                  </button>
                   <button type="button" class="btn small danger" onClick={() => void remove(d.id)}>
                     Delete
                   </button>

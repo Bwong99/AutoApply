@@ -16,6 +16,15 @@ const NAMES = { variants: "Variant select", tailor: "AI tailor", flag: "Flag for
 
 const bytesOf = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
+/** Saves a stored document to the user's computer under `name`. */
+export async function downloadDoc(id: string, name: string, type: string) {
+  const b64 = await store.getDoc(id);
+  if (!b64) return;
+  const url = URL.createObjectURL(new Blob([bytesOf(b64)], { type }));
+  Object.assign(document.createElement("a"), { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** Which upload mode autofill and YOLO use, what each does, and what's missing for them. */
 export function ResumeModes() {
   const s = useStored("settings");
@@ -113,15 +122,6 @@ export function TailorUpload() {
     }
   };
 
-  const download = async () => {
-    const b64 = await store.getDoc("tailor-pdf");
-    if (!b64) return;
-    const url = URL.createObjectURL(new Blob([bytesOf(b64)], { type: "application/pdf" }));
-    const name = (tailor?.fileName ?? "resume.tex").replace(/\.tex$/i, ".pdf");
-    Object.assign(document.createElement("a"), { href: url, download: name }).click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
   const remove = async () => {
     await store.removeDoc("tailor-tex");
     await store.removeDoc("tailor-pdf");
@@ -169,12 +169,18 @@ export function TailorUpload() {
             ({Math.round(tailor.size / 1024)} KB · {tailor.pages} page{tailor.pages === 1 ? "" : "s"} · uploaded{" "}
             {new Date(tailor.uploadedAt).toLocaleDateString()})
           </span>{" "}
-          <button type="button" class="btn small" onClick={() => void download()}>
-            Download untailored PDF
-          </button>
-          <button type="button" class="btn small danger" onClick={() => void remove()}>
-            Remove
-          </button>
+          <span class="doc-actions">
+            <button
+              type="button"
+              class="btn small"
+              onClick={() => void downloadDoc("tailor-tex", tailor.fileName, "application/x-tex")}
+            >
+              Download
+            </button>
+            <button type="button" class="btn small danger" onClick={() => void remove()}>
+              Delete
+            </button>
+          </span>
         </p>
       )}
       <label class="inline-form">
@@ -218,9 +224,18 @@ export function TailorUpload() {
                 ({Math.round(tailor.fallback.size / 1024)} KB · uploaded{" "}
                 {new Date(tailor.fallback.uploadedAt).toLocaleDateString()})
               </span>{" "}
-              <button type="button" class="btn small danger" onClick={() => void removeFallback()}>
-                Remove fallback
-              </button>
+              <span class="doc-actions">
+                <button
+                  type="button"
+                  class="btn small"
+                  onClick={() => void downloadDoc("tailor-fallback-pdf", tailor.fallback!.fileName, "application/pdf")}
+                >
+                  Download
+                </button>
+                <button type="button" class="btn small danger" onClick={() => void removeFallback()}>
+                  Delete
+                </button>
+              </span>
             </p>
           )}
           <label class="inline-form">
