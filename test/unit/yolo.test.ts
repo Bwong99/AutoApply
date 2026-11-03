@@ -2,7 +2,14 @@ import { readFile } from "node:fs/promises";
 import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { installChromeMock } from "./chromeMock";
 import { altKey, applyUrl, jobKey } from "../../src/background/yolo/jobKey";
-import { parseFeed, parseGlassdoor, parseIndeed, parseLinkedIn } from "../../src/background/yolo/sources";
+import {
+  jobrightApply,
+  parseFeed,
+  parseGlassdoor,
+  parseIndeed,
+  parseJobright,
+  parseLinkedIn,
+} from "../../src/background/yolo/sources";
 import { boardOf, findOnEmployerBoard, jobLinks, sameTitle, workdayPosted } from "../../src/background/yolo/careers";
 import { locationMatches, rejectReason, titleMatches } from "../../src/background/yolo/filter";
 import { loadPlaces, PLACES_FILE } from "../../src/background/yolo/places";
@@ -15,7 +22,7 @@ import { mapFields } from "../../src/background/services/mapFields";
 import type { Gemini } from "../../src/background/gemini/client";
 import { defaultSettings } from "../../src/shared/settings";
 import { emptyProfile } from "../../src/shared/profileSchema";
-import { defaultYolo, type Application, type Listing } from "../../src/shared/yolo";
+import { defaultYolo, YoloSchema, type Application, type Listing } from "../../src/shared/yolo";
 import type { FieldDescriptor } from "../../src/shared/types";
 
 beforeAll(() => loadPlaces(() => readFile(`public/${PLACES_FILE}`, "utf8")));
@@ -202,6 +209,49 @@ describe("sources", () => {
         easyApply: true,
       },
     ]);
+  });
+
+  it("reads Jobright's README table, dating rows and marking remote ones", () => {
+    const md = `| Company | Job Title | Location | Work Model | Date Posted |
+| ----- | --------- |  --------- | ---- | ------- |
+| **[PACCAR](http://www.paccar.com/)** | **[Software Developer Intern](https://jobright.ai/jobs/info/6ae9500573d24ab055c56acf?utm_campaign=1079&utm_source=git)** | Denton, TX, United States | On Site | Nov 02 |
+| ↳ | **[Design Engineer Intern](https://jobright.ai/jobs/info/6ae9492e43826864b0fb8921?utm_source=git)** | Toronto, ON, Canada | Remote | Dec 30 |`;
+    const now = Date.UTC(2026, 10, 3, 12);
+    const out = parseJobright(md, now);
+    expect(out.map((l) => [l.company, l.title, l.location, l.url])).toEqual([
+      [
+        "PACCAR",
+        "Software Developer Intern",
+        "Denton, TX, United States",
+        "https://jobright.ai/jobs/info/6ae9500573d24ab055c56acf",
+      ],
+      [
+        "PACCAR",
+        "Design Engineer Intern",
+        "Remote - Toronto, ON, Canada",
+        "https://jobright.ai/jobs/info/6ae9492e43826864b0fb8921",
+      ],
+    ]);
+    expect(new Date(out[0].postedAt!).getFullYear()).toBe(2026);
+    expect(new Date(out[1].postedAt!).getFullYear()).toBe(2025);
+  });
+
+  it("reads the employer's posting off a Jobright page, never a LinkedIn or Jobright link", () => {
+    const page = (job: object) =>
+      `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { dataSource: { jobResult: job } } } })}</script>`;
+    expect(jobrightApply(page({ applyLink: "https://jobs.lever.co/co/1" }))).toBe("https://jobs.lever.co/co/1");
+    expect(jobrightApply(page({ originalUrl: "https://co.wd5.myworkdayjobs.com/x/job/1" }))).toBe(
+      "https://co.wd5.myworkdayjobs.com/x/job/1",
+    );
+    expect(jobrightApply(page({ jobTitle: "signed out" }))).toBeNull();
+    expect(jobrightApply(page({ applyLink: "https://www.linkedin.com/jobs/view/1" }))).toBeNull();
+    expect(jobrightApply(page({ applyLink: "https://jobs.lever.co/co/1", isDeleted: true }))).toBeNull();
+    // Live shapes: a job that's gone, and a rate-limited page; a bot check has no page data.
+    const empty = (p: object) =>
+      `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { dataSource: null, ...p } } })}</script>`;
+    expect(jobrightApply(empty({}))).toBeNull();
+    expect(jobrightApply(empty({ detailLoadFailed: true }))).toBeUndefined();
+    expect(jobrightApply("<title>Security check | Jobright</title>")).toBeUndefined();
   });
 });
 
@@ -610,6 +660,86 @@ describe("discovery", () => {
     expect(asked).toEqual([["Software Engineer Intern", "Software Engineer Intern (PhD)"]]);
     expect(n).toBe(1);
   });
+
+  it("applies to a Jobright job on the employer's posting: Jobright's link, else the ATS, else skipped", async () => {
+    const md = ["aa01", "bb02", "cc03"]
+      .map(
+        (id, i) =>
+          `| **[${["Lyft", "Acme", "Nobody"][i]}](x)** | **[Software Engineer Intern](https://jobright.ai/jobs/info/${id})** | Toronto, ON, Canada | On Site | Nov 02 |`,
+      )
+      .join("\n");
+    const page = (job: object) =>
+      `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { dataSource: { jobResult: job } } } })}</script>`;
+    const creds: (RequestCredentials | undefined)[] = [];
+    const f = async (url: string, init?: RequestInit) => {
+      if (url.includes("raw.githubusercontent.com/jobright-ai/2026-Software-Engineer-Internship/"))
+        return new Response(md);
+      if (url.includes("jobright.ai/jobs/info/")) creds.push(init?.credentials);
+      if (url.endsWith("aa01")) return new Response(page({ applyLink: "https://jobs.lever.co/lyft/1" }));
+      if (url.includes("jobright.ai/jobs/info/")) return new Response(page({}));
+      if (url === "https://api.lever.co/v0/postings/acme?mode=json")
+        return new Response(
+          JSON.stringify([
+            {
+              text: "Software Engineer Intern",
+              hostedUrl: "https://jobs.lever.co/acme/2",
+              categories: { location: "Toronto" },
+            },
+          ]),
+        );
+      return new Response("", { status: 404 });
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      feeds: [],
+      boards: [],
+      jobright: ["2026-Software-Engineer-Internship"],
+    };
+    expect(await discover({ yolo: y, fetch: f, now: Date.UTC(2026, 10, 3) })).toBe(2);
+    const { yoloQueue } = (await chrome.storage.local.get("yoloQueue")) as {
+      yoloQueue: { url: string; source: string }[];
+    };
+    expect(yoloQueue.map((i) => [i.url, i.source])).toEqual([
+      ["https://jobs.lever.co/lyft/1", "jobright"],
+      ["https://jobs.lever.co/acme/2", "jobright"],
+    ]);
+    expect(creds).toEqual(["include", "include", "include"]);
+  });
+
+  it("leaves Jobright jobs for the next cycle while Jobright rate-limits, without asking it again", async () => {
+    const md = ["aa01", "bb02"]
+      .map(
+        (id, i) =>
+          `| **[Co${i}](x)** | **[Software Engineer Intern](https://jobright.ai/jobs/info/${id})** | Toronto, ON, Canada | On Site | Nov 02 |`,
+      )
+      .join("\n");
+    let limited = true;
+    let pages = 0;
+    const f = async (url: string) => {
+      if (url.includes("raw.githubusercontent.com")) return new Response(md);
+      if (!url.includes("jobright.ai/jobs/info/")) return new Response("", { status: 404 });
+      pages++;
+      const data = limited ? null : { jobResult: { applyLink: `https://jobs.lever.co/co/${url.slice(-4)}` } };
+      return new Response(
+        `<script id="__NEXT_DATA__">${JSON.stringify({ props: { pageProps: { dataSource: data, detailLoadFailed: limited } } })}</script>`,
+      );
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      feeds: [],
+      boards: [],
+      jobright: ["2026-Software-Engineer-Internship"],
+    };
+    const now = Date.UTC(2026, 10, 3);
+    expect(await discover({ yolo: y, fetch: f, now })).toBe(0);
+    expect(pages).toBe(1);
+    limited = false;
+    expect(await discover({ yolo: y, fetch: f, now })).toBe(2);
+  });
 });
 
 describe("queue order", () => {
@@ -634,6 +764,8 @@ describe("queue order", () => {
     // Unlisted sources (Indeed, Glassdoor) go last.
     expect(order({ queueBySource: true, sourceOrder: ["feeds", "linkedin", "careers"] })).toEqual([1, 3, 4, 2]);
     expect(order({ queueSort: "oldest" }, [...jobs, { source: "indeed", postedAt: RETRY, addedAt: 5 }])[0]).toBe(RETRY);
+    // An order saved before a source existed gains it at the end.
+    expect(YoloSchema.parse({ sourceOrder: ["feeds", "careers"] }).sourceOrder.slice(-1)).toEqual(["jobright"]);
   });
 });
 

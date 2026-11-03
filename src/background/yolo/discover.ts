@@ -1,10 +1,8 @@
 // One discovery cycle: read every source, keep the new postings that fit the user, queue them for applying.
 import { createStorage } from "../../shared/storage";
 import {
-  BOARDS,
   SOURCE_GROUPS,
   type Application,
-  type Board,
   type Listing,
   type QueueItem,
   type QueueSort,
@@ -19,10 +17,13 @@ import {
   glassdoorSearch,
   indeedHost,
   indeedSearch,
+  jobrightApply,
+  jobrightList,
   linkedinSearch,
   parseFeed,
   parseGlassdoor,
   parseIndeed,
+  parseJobright,
   parseLinkedIn,
   type Link,
 } from "./sources";
@@ -56,7 +57,11 @@ export const RETRY = Number.MAX_SAFE_INTEGER;
 // careerSite's sources: its ATS APIs' names, or "careers" for a rendered page.
 const CAREERS = new Set(["careers", "greenhouse", "lever", "ashby", "smartrecruiters", "workday"]);
 const groupOf = (source: string): SourceGroup =>
-  (BOARDS as readonly string[]).includes(source) ? (source as Board) : CAREERS.has(source) ? "careers" : "feeds";
+  (SOURCE_GROUPS as readonly string[]).includes(source)
+    ? (source as SourceGroup)
+    : CAREERS.has(source)
+      ? "careers"
+      : "feeds";
 
 type Ranked = Pick<Listing, "source" | "postedAt"> & { addedAt?: number };
 
@@ -108,8 +113,8 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     }
   };
 
-  for (const url of y.feeds)
-    await safely(async () => {
+  const readFeed = (url: string, parse: (body: string) => Listing[]) =>
+    safely(async () => {
       // Conditional: GitHub answers 304 while the file is unchanged (most polls), so only changes are downloaded.
       const c = s.feedCache[url];
       const r = await d.fetch(url, {
@@ -120,8 +125,10 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       });
       if (r.status === 304 || !r.ok) return [];
       s.feedCache[url] = { etag: r.headers.get("etag") ?? "", modified: r.headers.get("last-modified") ?? "" };
-      return parseFeed(await r.text(), sourceName(url));
+      return parse(await r.text());
     });
+  for (const url of y.feeds) await readFeed(url, (body) => parseFeed(body, sourceName(url)));
+  for (const repo of y.jobright) await readFeed(jobrightList(repo), (body) => parseJobright(body, now));
 
   const days = y.postedWithinDays;
   for (const q of y.queries)
@@ -172,6 +179,7 @@ export async function discover(d: DiscoverDeps): Promise<number> {
 
   const boards = new Map<string, Listing[] | null>();
   const items: QueueItem[] = [];
+  let jobrightDown = false;
   for (const [i, l] of batch.entries()) {
     const key = jobKey(l.url);
     const alt = altKey(l.company, l.title);
@@ -184,6 +192,25 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       const own = await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
       if (own) url = own;
       else if (l.source === "linkedin") continue;
+    }
+    // Jobright's page names the employer's posting to a signed-in user (their cookies); otherwise look on its ATS.
+    if (l.source === "jobright") {
+      const page = jobrightDown
+        ? undefined
+        : await d
+            .fetch(l.url, { credentials: "include" })
+            .then(async (r) => (r.status === 404 ? null : r.ok ? jobrightApply(await r.text()) : undefined))
+            .catch(() => undefined);
+      // Rate-limited or unreachable: left unseen for the next cycle, and Jobright left alone for this one.
+      if (page === undefined) {
+        jobrightDown = true;
+        delete seen[key];
+        delete seen[alt];
+        continue;
+      }
+      const own = page ?? (await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null));
+      if (!own) continue;
+      url = own;
     }
     const k = jobKey(url);
     if (k !== key && (seen[k] || applied(s.applications, k, alt, y.reapplyManual))) continue;

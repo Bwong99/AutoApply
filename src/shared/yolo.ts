@@ -12,8 +12,47 @@ export const SIMPLIFY_FEED =
 export const BOARDS = ["linkedin", "indeed", "glassdoor"] as const;
 export type Board = (typeof BOARDS)[number];
 
+/** Jobright's public GitHub job lists (github.com/jobright-ai), by repository; each holds its last 7 days' postings. */
+// shortcut: named for the 2026 season; add the next season's repos when Jobright starts them.
+export const JOBRIGHT_LISTS = [
+  "Software-Engineer-Internship",
+  "Software-Engineer-New-Grad",
+  "Engineer-Internship",
+  "Engineering-New-Grad",
+  "Data-Analysis-Internship",
+  "Data-Analysis-New-Grad",
+  "Product-Management-Internship",
+  "Product-Management-New-Grad",
+  "Business-Analyst-Internship",
+  "Business-Analyst-New-Grad",
+  "Design-Internship",
+  "Design-New-Grad",
+  "Consultant-Internship",
+  "Consultant-New-Grad",
+  "Marketing-Internship",
+  "Marketing-New-Grad",
+  "Sales-Internship",
+  "Sales-New-Grad",
+  "Account-Internship",
+  "Account-New-Grad",
+  "Management-Internship",
+  "Management-New-Grad",
+  "HR-Internship",
+  "HR-New-Grad",
+  "Legal-Internship",
+  "Legal-New-Grad",
+  "Public-Sector-Internship",
+  "Public-Sector-New-Grad",
+  "Education-Internship",
+  "Education-New-Grad",
+  "Support-Internship",
+  "Support-New-Grad",
+  "Art-Internship",
+  "Art-New-Grad",
+].map((c) => `2026-${c}`);
+
 /** Where a queued job was found, as the queue order ranks it. */
-export const SOURCE_GROUPS = ["careers", "feeds", ...BOARDS] as const;
+export const SOURCE_GROUPS = ["careers", "feeds", ...BOARDS, "jobright"] as const;
 export type SourceGroup = (typeof SOURCE_GROUPS)[number];
 /** How queued jobs are ordered (within a source, when sources are ranked). */
 export const QUEUE_SORTS = ["newest", "oldest", "foundFirst", "foundLast", "random"] as const;
@@ -37,11 +76,17 @@ const base = z.object({
   aiRelevanceCheck: b(true),
   boards: z.array(z.enum(BOARDS)).catch(["linkedin", "indeed", "glassdoor"]),
   feeds: strs([SIMPLIFY_FEED]),
+  /** JOBRIGHT_LISTS read; none = Jobright off. */
+  jobright: strs(),
   careerSites: strs(),
   queueSort: z.enum(QUEUE_SORTS).catch("newest"),
   /** Ranks jobs by `sourceOrder` before `queueSort`. */
   queueBySource: b(false),
-  sourceOrder: z.array(z.enum(SOURCE_GROUPS)).catch([...SOURCE_GROUPS]),
+  // Groups added since the order was saved go last, so they can be moved.
+  sourceOrder: z
+    .array(z.enum(SOURCE_GROUPS))
+    .catch([...SOURCE_GROUPS])
+    .transform((o) => [...o, ...SOURCE_GROUPS.filter((g) => !o.includes(g))]),
   email: z.string().catch(""),
   gmailClientId: z.string().catch(""),
   /** The OAuth client's secret: Google's token endpoint asks a Web application client for it (yolo/gmail.ts). */

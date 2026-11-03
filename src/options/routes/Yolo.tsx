@@ -1,10 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
-import { NumberInput, SelectInput, TagInput, TextInput, Toggle } from "../components/controls";
+import { Field, NumberInput, SelectInput, TagInput, TextInput, Toggle } from "../components/controls";
 import { save, useStored } from "../store";
 import { isErr, send, type Responses } from "../../shared/messages";
 import { formatDateTime } from "../../shared/time";
 import {
   BOARDS,
+  JOBRIGHT_LISTS,
   MAX_BATCH_APPLICATIONS,
   type Board,
   type QueueSort,
@@ -17,6 +18,7 @@ const SOURCE_NAMES: Record<SourceGroup, string> = {
   careers: "Company career sites",
   feeds: "GitHub job lists",
   ...BOARD_NAMES,
+  jobright: "Jobright",
 };
 const SORT_NAMES: [QueueSort, string][] = [
   ["newest", "Newest posted first"],
@@ -216,10 +218,10 @@ export function Yolo() {
     <section class="yolo">
       <h1>YOLO Mode</h1>
       <p class="intro">
-        While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself: it creates site
-        accounts when needed, fills every field (with its best guess where your profile has no answer), and submits. It
-        works in a hidden page, so nothing opens on screen. Everything it does is listed under Applications, with the
-        answers it guessed. Turn it on or off from the toolbar popup.
+        While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself:
+        it creates site accounts when needed, fills every field (with its best guess where your profile has no answer),
+        and submits. It works in a hidden page, so nothing opens on screen. Everything it does is listed under
+        Applications, with the answers it guessed. Turn it on or off from the toolbar popup.
       </p>
       <h2>Schedule</h2>
       <div class="form">
@@ -289,7 +291,28 @@ export function Yolo() {
               onChange={(on) => set({ boards: on ? [...y.boards, b] : y.boards.filter((x) => x !== b) })}
             />
           ))}
+          <Toggle
+            label="Jobright"
+            help="Reads Jobright's daily job lists by category, not your queries. Jobright shows where to apply only when you're signed in to jobright.ai in this browser; otherwise YOLO looks for the job on the company's Greenhouse, Ashby or Lever board and skips it if it isn't there."
+            checked={y.jobright.length > 0}
+            onChange={(on) => set({ jobright: on ? [JOBRIGHT_LISTS[0]] : [] })}
+          />
         </div>
+        {y.jobright.length > 0 && (
+          <Field label="Jobright lists" help="The categories read. Each lists the last 7 days' postings.">
+            {() => (
+              <div class="diff">
+                {JOBRIGHT_LISTS.map((c) => (
+                  <Toggle
+                    label={c.replace(/^\d+-/, "").replace(/-/g, " ")}
+                    checked={y.jobright.includes(c)}
+                    onChange={(on) => set({ jobright: on ? [...y.jobright, c] : y.jobright.filter((x) => x !== c) })}
+                  />
+                ))}
+              </div>
+            )}
+          </Field>
+        )}
         <TagInput
           label="GitHub job lists"
           help="Raw URLs of a listings.json (SimplifyJobs format) or a README with a job table."
