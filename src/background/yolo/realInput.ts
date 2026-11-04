@@ -24,7 +24,7 @@ const cdp = (tabId: number, method: string, params?: Record<string, unknown>) =>
 function attach(tabId: number): Promise<Session> {
   let s = sessions.get(tabId);
   if (!s) {
-    // Read only now: a worker that predates the permission's grant has no chrome.debugger to listen on at startup.
+    // Read only now, so a worker that never uses real input never registers these.
     if (!listening) {
       listening = true;
       chrome.debugger.onDetach.addListener(({ tabId: id }, reason) => {
@@ -104,9 +104,9 @@ async function perform(tabId: number, s: Session, op: RealOp) {
   }
 }
 
-/** Performs `op` in the tab for real. False when it can't: no permission, or the user cancelled the debugging bar. */
+/** Performs `op` in the tab for real. False when it can't: no debugger, or the user cancelled the debugging bar. */
 export async function realInput(tabId: number, op: RealOp): Promise<boolean> {
-  // Without the permission the namespace is missing; granted after this worker started, it waits for the next one.
+  // The namespace reads undefined in a dead extension context.
   if (!chrome.debugger || refused.has(tabId)) return false;
   try {
     const s = await attach(tabId);

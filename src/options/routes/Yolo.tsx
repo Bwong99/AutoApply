@@ -234,35 +234,18 @@ const REAL_CHOICES: [YoloConfig["realInput"], string, string][] = [
 ];
 
 function RealInput(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) {
-  const [granted, setGranted] = useState(true);
-  useEffect(() => void chrome.permissions.contains({ permissions: ["debugger"] }).then(setGranted), []);
-  // Inside the gesture: Chrome only asks for a permission from a user’s click or choice.
-  const ask = async () =>
-    setGranted(await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false));
   return (
     <Field
       label="Real input on bot-checked pages"
-      help="Only on pages a bot check grades (an invisible CAPTCHA or bot-detection service), and only in a tab (never the hidden frame). AutoApply drives Chrome’s debugger there, so the check sees a person’s events, not a script’s. While it does, Chrome shows “AutoApply started debugging this browser” on every window; it closes 3 s after the last click or key. Pressing Cancel on that bar stops it for that job (script input from then on). Needs Chrome’s debugger permission, asked once."
+      help="Only on pages a bot check grades (an invisible CAPTCHA or bot-detection service), and only in a tab (never the hidden frame). AutoApply drives Chrome’s debugger there, so the check sees a person’s events, not a script’s. While it does, Chrome shows “AutoApply started debugging this browser” on every window; it closes 3 s after the last click or key. Pressing Cancel on that bar stops it for that job (script input from then on)."
       extra={
-        <>
-          <ul class="help">
-            {REAL_CHOICES.map(([, name, text]) => (
-              <li>
-                <b>{name}:</b> {text}
-              </li>
-            ))}
-          </ul>
-          {props.y.realInput !== "off" && !granted && (
-            <p class="row">
-              <button type="button" class="btn" onClick={ask}>
-                Allow debugger access
-              </button>{" "}
-              <span class="err" role="status">
-                Not allowed yet: YOLO uses script input until it is.
-              </span>
-            </p>
-          )}
-        </>
+        <ul class="help">
+          {REAL_CHOICES.map(([, name, text]) => (
+            <li>
+              <b>{name}:</b> {text}
+            </li>
+          ))}
+        </ul>
       }
     >
       {(id) => (
@@ -272,7 +255,6 @@ function RealInput(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void
           onChange={(e) => {
             const realInput = e.currentTarget.value as YoloConfig["realInput"];
             props.set({ realInput });
-            if (realInput !== "off" && !granted) void ask();
           }}
         >
           {REAL_CHOICES.map(([v, name]) => (

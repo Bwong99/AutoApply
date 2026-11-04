@@ -102,7 +102,7 @@ const base = z.object({
   tabFallback: b(true),
   /**
    * On pages a bot check grades, in a tab: which of the run's input goes through Chrome's debugger as a person's
-   * (trusted) events. Needs the optional "debugger" permission; without it, script input as before.
+   * (trusted) events; any failure falls back to script input.
    */
   realInput: z.enum(REAL_INPUT).catch("off"),
   /** Required cover-letter uploads always get one written; this extends it to optional ones. */

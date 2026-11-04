@@ -204,7 +204,7 @@ export interface Responses {
     company: string;
     title: string;
     visible: boolean;
-    /** Real input for pages a bot check grades: "off" in the hidden frame, or without the debugger permission. */
+    /** Real input for pages a bot check grades: "off" in the hidden frame, or without chrome.debugger. */
     realInput: (typeof REAL_INPUT)[number];
     /** The posting the run went past straight to its form (Lever's /apply): read for its description and pay. */
     posting?: string;
@@ -213,7 +213,7 @@ export interface Responses {
   /** `needs`: a `stop` the user can finish (flagged as automated, or the application was already sent). */
   YOLO_STEP: { kind: StepKind; stop?: string; refused?: boolean; needs?: boolean };
   YOLO_RESULT: Ok;
-  /** `ok` false: not done (no permission, the user cancelled the debugging bar): the caller uses script input. */
+  /** `ok` false: not done (no debugger, the user cancelled the debugging bar): the caller uses script input. */
   REAL_INPUT: { ok: boolean };
   YOLO_ANSWERS: Ok;
   YOLO_CREDENTIAL: { email: string; password: string; created: boolean } | null;

@@ -42,10 +42,11 @@ export default defineManifest({
     "tabGroups",
     "notifications",
     "identity",
+    // Real clicks and keys for YOLO on bot-checked pages (background/yolo/realInput.ts). Chrome refuses it as optional.
+    "debugger",
   ],
   // Claude through the user's own Claude Code (background/claude/bridge.ts); asked for only when chosen.
-  // Real clicks and keys for YOLO on bot-checked pages (background/yolo/realInput.ts); asked for only when chosen.
-  optional_permissions: ["nativeMessaging", "debugger"],
+  optional_permissions: ["nativeMessaging"],
   host_permissions: ["<all_urls>"],
   // The bundled pdfLaTeX (public/latex) is WebAssembly, for AI résumé tailoring. Only the extension's own code runs.
   content_security_policy: { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'" },
