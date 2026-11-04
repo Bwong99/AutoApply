@@ -588,6 +588,20 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(fields().map((h) => h.desc.label)).toEqual(["Email Address"]);
   });
 
+  it("skips optional honeypots hidden by their box alone, never a required field", () => {
+    setBody(`<form><label>Name <input name="n"></label>
+      <label>Website <input id="z" name="website"></label>
+      <div id="w" style="overflow-x:hidden;overflow-y:hidden"><label>Fax <input id="c" name="fax"></label></div>
+      <label>Company URL <input id="r" name="url" required></label></form>`);
+    const box = (el: Element, left: number, top: number, width: number, height: number) =>
+      (el.getBoundingClientRect = () =>
+        ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height }) as DOMRect);
+    box(document.getElementById("z")!, 0, 0, 1, 0); // Workday's beecatcher box: 1 × 0
+    box(document.getElementById("w")!, 0, 0, 100, 0); // a height-0 wrapper clips its input away
+    box(document.getElementById("r")!, -500, 0, 100, 20); // left of the page, but required
+    expect(fields().map((h) => h.desc.label)).toEqual(["Name", "Company URL"]);
+  });
+
   it("reports prefilled fields and keeps stable ids across rescans", () => {
     setBody(`<label>Name <input value="Ada"></label><label>Email <input></label>`);
     const state = newScanState();

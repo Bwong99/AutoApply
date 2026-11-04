@@ -9,7 +9,8 @@ import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
-import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
+import { captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
+import { IN_HOST } from "./frame";
 import {
   alertText,
   findApply,
@@ -58,6 +59,15 @@ const RE_UPLOAD_WAY = /^(from (device|(my )?computer)|upload (a |your )?(cv|resu
 const RE_EASY_APPLY = /easily apply|easy apply|indeed apply|apply with (indeed|linkedin|glassdoor)/i;
 /** The page's own timers run unthrottled while this is set (pageTimers.ts): a run waits on them between steps. */
 const busy = (on: boolean) => document.dispatchEvent(new Event(on ? "autoapply-fill-start" : "autoapply-fill-end"));
+
+/**
+ * Holds a final Submit until the page has been open about as long as a person filling it would take: 3 s a field,
+ * 20–90 s. A plain timer: nothing runs meanwhile, and it keeps no service worker awake.
+ */
+async function dwell(fields: number) {
+  const ms = Math.min(90_000, Math.max(20_000, fields * 3000)) - performance.now();
+  if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+}
 
 /** Loaded, then no DOM change for 800 ms (or 8 s at most): single-page apps render their next step after load. */
 async function settle(maxMs = 8000) {
@@ -249,8 +259,12 @@ export async function drive(deps: DriverDeps) {
                 .map((g) => `${g.q} = ${g.a}`)
                 .join("\n")}`,
             );
+          // A score check loaded during the fill: the step is classified again, so the hidden frame hands it to a tab.
+          if (!next && IN_HOST && !facts.scored && scoreCheck()) continue;
           // Invisible CAPTCHAs score the page as it submits: it gets its own built-ins back first (pageTimers.ts).
           if (!next) busy(false);
+          // They weigh time on the page too: a form sent seconds after it loaded reads as a bot's.
+          if (!next && scoreCheck()) await dwell(facts.fields);
           press(b);
           if (!(await changed(before, 20_000))) continue;
           const errors = validationErrors();

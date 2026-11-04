@@ -33,6 +33,8 @@ export interface PageFacts {
   codeInput: boolean;
   /** A visible CAPTCHA challenge. */
   captcha: boolean;
+  /** An invisible bot-score check (reCAPTCHA, hCaptcha, Turnstile) is loaded: it grades what the page submits. */
+  scored: boolean;
   /** An ATS form in an iframe the run could load on its own. */
   embedded: boolean;
   apply: boolean;

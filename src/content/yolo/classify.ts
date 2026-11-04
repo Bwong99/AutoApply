@@ -72,6 +72,12 @@ function challenge(): HTMLIFrameElement | undefined {
 }
 export const captchaShown = () => !!challenge();
 
+/** A score check is loaded, shown or not: an ATS sends its grade with the application and may file a low one as spam. */
+export const scoreCheck = () =>
+  deepQueryAll(
+    'script[src*="/recaptcha/"],iframe[src*="/recaptcha/"],script[src*="hcaptcha.com"],iframe[src*="hcaptcha.com"],script[src*="challenges.cloudflare.com/turnstile"],iframe[src*="challenges.cloudflare.com"]',
+  ).length > 0;
+
 export function embeddedForm(): string | null {
   const f = deepQueryAll("iframe").find((f) => {
     const r = f.getBoundingClientRect();
@@ -102,6 +108,7 @@ export function pageFacts({ fields, requiredFields }: Pick<PageFacts, "fields" |
     passwords: visiblePasswords().length,
     codeInput: !!codeInput(),
     captcha: captchaShown(),
+    scored: scoreCheck(),
     embedded: !!embeddedForm(),
     apply: applyDetails.kind !== "none",
     applyKind: applyDetails.kind,

@@ -130,6 +130,22 @@ describe("YOLO page kinds", () => {
     expect(captchaShown()).toBe(false);
   });
 
+  it("hands a step graded by an invisible score check from the hidden frame to a tab", () => {
+    const form = `<h2>Apply</h2><input><input><input><button type="submit">Submit application</button>`;
+    setBody(`${form}<script src="https://www.google.com/recaptcha/enterprise.js?render=k"></script>`);
+    expect(classify(3, true)).toBe("blocked");
+    expect(classify(3, false)).toBe("form"); // a tab submits as it is
+    setBody(
+      `${form}<iframe src="https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox-invisible"></iframe>`,
+    );
+    expect(classify(3, true)).toBe("blocked");
+    setBody(form);
+    expect(classify(3, true)).toBe("form");
+    // Already sent: never retried, which would apply twice.
+    setBody(`<h1>Thank you for applying!</h1><script src="https://www.recaptcha.net/recaptcha/api.js"></script>`);
+    expect(classify(0, true)).toBe("success");
+  });
+
   it("recognizes DataDome's full-page CAPTCHA frame", () => {
     setBody(`<iframe src="about:blank#https://geo.captcha-delivery.com/captcha/?cid=x"></iframe>`);
     const f = document.querySelector("iframe")!;
