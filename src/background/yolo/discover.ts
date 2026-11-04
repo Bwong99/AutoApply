@@ -32,6 +32,8 @@ const store = createStorage("background");
 const SEEN_DAYS = 90;
 /** Postings checked by the AI per cycle; the rest wait for the next one. */
 const BATCH = 60;
+/** LinkedIn search pages read per search when `want` asks for more: ~20 fast pages draw a 429 (live, 2026-11-03). */
+const LINKEDIN_PAGES = 10;
 
 export interface DiscoverDeps {
   yolo: Yolo;
@@ -40,6 +42,8 @@ export interface DiscoverDeps {
   scrape?: (url: string) => Promise<Link[]>;
   /** Indexes of the listings the AI judges a match; absent = keep all. */
   relevance?: (items: Listing[]) => Promise<Set<number>>;
+  /** Jobs the batch still has room for: LinkedIn is paged until that many fit. Absent = its first page only. */
+  want?: number;
   now?: number;
 }
 
@@ -130,14 +134,33 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   for (const url of y.feeds) await readFeed(url, (body) => parseFeed(body, sourceName(url)));
   for (const repo of y.jobright) await readFeed(jobrightList(repo), (body) => parseJobright(body, now));
 
+  await loadPlaces();
+  const seen = s.yoloSeen;
+  const queued = new Set(s.yoloQueue.map((i) => i.key));
+  // What the pass below keeps before the AI and employer lookups, so LinkedIn stops paging once there's enough.
+  const fits = (l: Listing, key = jobKey(l.url), alt = altKey(l.company, l.title)) =>
+    !seen[key] &&
+    !seen[alt] &&
+    !queued.has(key) &&
+    !rejectReason(l, y, now) &&
+    !applied(s.applications, key, alt, y.reapplyManual);
+  const linkedin = new Set<string>();
   const days = y.postedWithinDays;
   for (const q of y.queries)
     for (const loc of y.locations.length ? y.locations : [""]) {
       if (y.boards.includes("linkedin"))
-        await safely(async () => {
-          const r = await d.fetch(linkedinSearch(q, loc, days), { credentials: "omit" });
-          return r.ok ? parseLinkedIn(await r.text()) : [];
-        });
+        for (let page = 0; page < (d.want ? LINKEDIN_PAGES : 1); page++) {
+          let more = false;
+          await safely(async () => {
+            const r = await d.fetch(linkedinSearch(q, loc, days, page * 10), { credentials: "omit" });
+            const jobs = r.ok ? parseLinkedIn(await r.text()) : [];
+            for (const l of jobs) if (fits(l)) linkedin.add(jobKey(l.url));
+            // An empty page is the end of the results; a failed one (429) means stop asking.
+            more = jobs.length > 0 && linkedin.size < (d.want ?? 0);
+            return jobs;
+          });
+          if (!more) break;
+        }
       if (y.boards.includes("glassdoor"))
         await safely(async () => {
           const r = await d.fetch(glassdoorSearch(q, loc, days), { credentials: "omit" });
@@ -157,9 +180,6 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   }
 
   // New postings that fit, each looked at once.
-  await loadPlaces();
-  const seen = s.yoloSeen;
-  const queued = new Set(s.yoloQueue.map((i) => i.key));
   const fresh: Listing[] = [];
   const keys = new Set<string>();
   for (const l of found) {

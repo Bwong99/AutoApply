@@ -121,21 +121,38 @@ async function schedule() {
 }
 
 let cycling: Promise<void> | null = null;
+let toppingUp = false;
+/** The batch (its `batchAt`) whose last discovery found nothing new: no top-up until the next batch. */
+let dryBatch = 0;
 /**
  * One batch: discovery, then applying to up to `batchSize` jobs. A run in the host keeps it busy, so rendered sources
- * wait for the next batch; a run still going from the last batch counts toward this one.
+ * wait for the next batch; a run still going from the last batch counts toward this one. `topUp`: more discovery for
+ * the current batch, its queue having run dry.
  */
-function cycle(): Promise<void> {
+function cycle(topUp = false): Promise<void> {
+  // A batch's own check waits out a top-up instead of being skipped for it, so its `batchAt` still starts a new batch.
+  const again = () => cycle();
+  if (cycling && toppingUp && !topUp) return cycling.then(again, again);
   return (cycling ??= (async () => {
+    toppingUp = topUp;
+    let batchAt = 0;
+    let added = 0;
     try {
       if (!yolo.enabled || !yolo.queries.length) return;
-      await setState({ batchAt: Date.now(), pauseReason: "" });
-      const busy = !!(await getRun());
-      await discover({
+      if (!topUp) await setState({ batchAt: Date.now(), pauseReason: "" });
+      const [busy, state, queue, apps] = await Promise.all([
+        getRun(),
+        store.get("yoloState"),
+        store.get("yoloQueue"),
+        store.get("applications"),
+      ]);
+      batchAt = state.batchAt;
+      added = await discover({
         yolo,
         fetch: (url, init) => fetch(url, init),
         scrape: busy ? undefined : scrape,
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
+        want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
       });
       await setState({ lastCheckAt: Date.now() });
     } catch (e) {
@@ -143,8 +160,21 @@ function cycle(): Promise<void> {
     } finally {
       cycling = null;
     }
+    // Failed or found nothing: topping up again would repeat it.
+    if (batchAt && !added) dryBatch = batchAt;
     await pump();
   })());
+}
+
+/** The queue ran dry with the batch short of `batchSize`: finds more now rather than at the next batch. */
+async function topUp(): Promise<boolean> {
+  const [state, next] = await Promise.all([store.get("yoloState"), chrome.alarms.get(CHECK)]);
+  // Not when the next batch, which discovers anyway, is due within minutes (or YOLO was just turned on).
+  if (!next || next.scheduledTime - Date.now() < 5 * 60e3) return false;
+  if (cycling || !yolo.queries.length || state.batchAt === dryBatch || state.pausedUntil > Date.now()) return false;
+  if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) return false;
+  void cycle(true);
+  return true;
 }
 
 async function relevance(items: Listing[]): Promise<Set<number>> {
@@ -196,7 +226,7 @@ async function pump() {
   try {
     if (!yolo.enabled || (await getRun())) return;
     const queue = await store.get("yoloQueue");
-    if (!queue.length) return void (await closeFrame().catch(() => undefined));
+    if (!queue.length) return void ((await topUp()) || (await closeFrame().catch(() => undefined)));
     const state = await store.get("yoloState");
     if (state.pausedUntil > Date.now()) return;
     if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) {

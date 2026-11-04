@@ -610,6 +610,40 @@ describe("discovery", () => {
     expect(seenHeaders[1]).toEqual({ "if-none-match": '"v1"' });
   });
 
+  it("pages LinkedIn only while the batch wants more fitting postings, stopping at a failed page", async () => {
+    const card = (id: number, title = "Software Engineer Intern") =>
+      `<li data-entity-urn="urn:li:jobPosting:${id}"><h3 class="base-search-card__title">${title}</h3>
+      <h4 class="base-search-card__subtitle">Acme</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+    const pages: Record<number, string> = {
+      0: card(1) + card(9, "Mechanical Intern"),
+      10: card(1) + card(2),
+      20: card(3),
+    };
+    const run = async (want: number | undefined, fail = Infinity) => {
+      installChromeMock();
+      const starts: number[] = [];
+      const f = async (url: string) => {
+        if (!url.includes("linkedin")) return new Response("", { status: 404 });
+        const start = Number(new URL(url).searchParams.get("start"));
+        starts.push(start);
+        return start >= fail ? new Response("", { status: 429 }) : new Response(pages[start] ?? "");
+      };
+      const y = {
+        ...defaultYolo(),
+        queries: ["Software Engineer Intern"],
+        locations: ["Canada"],
+        boards: ["linkedin" as const],
+      };
+      await discover({ yolo: y, fetch: f, want });
+      return starts;
+    };
+    expect(await run(undefined)).toEqual([0]);
+    expect(await run(0)).toEqual([0]);
+    expect(await run(2)).toEqual([0, 10]);
+    expect(await run(50)).toEqual([0, 10, 20, 30]);
+    expect(await run(50, 10)).toEqual([0, 10]);
+  });
+
   it("queues one application for a job's copies across requisitions and sources", async () => {
     const rows = ["J000704364", "J000704365"].map((id) => ({
       company_name: "Aptiv",
