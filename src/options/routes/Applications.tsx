@@ -12,9 +12,10 @@ const STATUS: Record<Application["status"], string> = {
   skipped: "Skipped",
 };
 
-/** Saves a debug log's tailored .tex or cover letter text. */
-function download(f: { name: string; text: string }) {
-  const url = URL.createObjectURL(new Blob([f.text], { type: "text/plain" }));
+/** Saves a file a debug log kept: the PDF uploaded, or text in older logs. */
+function download(f: { name: string; base64?: string; text?: string }) {
+  const data = f.base64 ? Uint8Array.from(atob(f.base64), (c) => c.charCodeAt(0)) : (f.text ?? "");
+  const url = URL.createObjectURL(new Blob([data], { type: f.base64 ? "application/pdf" : "text/plain" }));
   Object.assign(document.createElement("a"), { href: url, download: f.name }).click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -98,7 +99,7 @@ export function Applications() {
                         Download
                       </button>
                     </summary>
-                    <pre class="mono">{f.text}</pre>
+                    {f.text && <pre class="mono">{f.text}</pre>}
                   </details>
                 ))}
               </>

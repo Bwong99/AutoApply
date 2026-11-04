@@ -122,8 +122,10 @@ export const LOCAL_SCHEMAS = {
     z.object({
       at: z.number(),
       text: z.string(),
-      /** The tailored résumé's .tex and the generated cover letter's text the run uploaded. */
-      files: z.array(z.object({ name: z.string(), text: z.string() })).optional(),
+      /** The tailored résumé and generated cover letter the run uploaded; `text` in logs from before PDFs were kept. */
+      files: z
+        .array(z.object({ name: z.string(), base64: z.string().optional(), text: z.string().optional() }))
+        .optional(),
     }),
   ),
   /** Job keys already looked at → when first seen. */

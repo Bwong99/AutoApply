@@ -18,6 +18,7 @@ import {
 import { RELEVANCE_PROMPT } from "../gemini/prompts";
 import { RELEVANCE_SCHEMA, RelevanceZ } from "../gemini/schemas";
 import { draftEssays } from "../services/draftEssays";
+import { FALLBACK, tailoredDoc } from "../services/tailorResume";
 import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
@@ -335,19 +336,19 @@ async function logRun(run: Run, r: YoloResult, limit: number) {
   await store.set({ yoloLogs: [...(await store.get("yoloLogs")), entry].slice(-limit) });
 }
 
-type LogFile = { name: string; text: string };
+type LogFile = { name: string; base64: string };
 
-/** The résumés and cover letters the run uploaded, by name, and the text of those YOLO wrote for the job. */
+/** The résumés and cover letters the run uploaded, by name, and the files YOLO made for the job as uploaded. */
 async function uploaded(run: Run) {
   const docs = await store.get("documentsIndex");
   const up = { resume: [] as string[], letter: [] as string[], files: [] as LogFile[] };
   for (const id of run.uploads ?? []) {
     if (isTailoredDoc(id) || isYoloDoc(id)) {
-      const f = await session.get<LogFile>(`${isYoloDoc(id) ? "yololetter" : "tailortex"}:${id}`);
-      if (f) up.files.push(f);
-      if (isYoloDoc(id)) up.letter.push(`Generated (${f?.name ?? "text no longer kept"})`);
-      // No .tex: the untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
-      else up.resume.push(f ? `Tailored (${f.name})` : "Untailored LaTeX résumé");
+      const d = await (isYoloDoc(id) ? yoloDoc(id) : tailoredDoc(store, id));
+      if (d) up.files.push({ name: d.meta.fileName, base64: d.base64 });
+      if (isYoloDoc(id)) up.letter.push(`Generated (${d?.meta.fileName ?? "file no longer kept"})`);
+      // The untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
+      else up.resume.push(d && id !== FALLBACK ? `Tailored (${d.meta.fileName})` : "Untailored LaTeX résumé");
       continue;
     }
     const d = docs.find((x) => x.id === id);
@@ -696,8 +697,6 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     };
     await Promise.all([
       session.set(`yolodoc:${id}`, { meta, base64 }),
-      // For the debug log: its text, not the PDF.
-      session.set(`yololetter:${id}`, { name: meta.fileName.replace(/\.pdf$/i, ".txt"), text: e.text }),
       // For the overlay: the job as draftEssays gave it to the AI.
       session.set(`docjob:${id}`, jobBrief(job) ?? {}),
     ]);

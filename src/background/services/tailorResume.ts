@@ -99,7 +99,7 @@ export function offscreenCompiler(): { compile: Compile; done: () => Promise<voi
 
 // ---------- the résumé a fill uploads ----------
 type Store = ReturnType<typeof createStorage>;
-const FALLBACK = "tailor-fallback";
+export const FALLBACK = "tailor-fallback";
 const inFlight = new Map<string, Promise<TailoredDoc>>();
 
 export interface TailoredDoc {
@@ -190,8 +190,6 @@ export async function tailoredResume(
         const meta = pdfMeta(id, fileName, r.pdf);
         await Promise.all([
           session.set(`tailordoc:${id}`, { meta, base64: r.pdf }),
-          // For YOLO's debug log: the .tex is ~10x smaller than the PDF.
-          session.set(`tailortex:${id}`, { name: fileName.replace(/\.pdf$/i, ".tex"), text: r.tex }),
           // For the overlay: the job as tailor() gave it to the AI.
           session.set(`docjob:${id}`, { ...jobBrief(job), location: job?.location }),
         ]);

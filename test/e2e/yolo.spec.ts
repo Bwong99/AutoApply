@@ -116,12 +116,12 @@ test("waits out a rate limit on a drafted cover letter instead of handing the jo
       : null;
   await queue(sw, `${BASE}yolo-cover-letter.html`);
   await outcome(sw).toBe("submitted");
-  // The debug log names what was uploaded and keeps the letter's text.
-  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  // The debug log names what was uploaded and keeps the letter's PDF.
+  const log = (await storage<{ text: string; files?: { name: string; base64: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
   expect(log.text).toContain("Résumé: None");
-  expect(log.text).toMatch(/Cover letter: Generated \(\w+_Cover_Letter\.txt\)/);
-  expect(log.files).toEqual([{ name: expect.stringMatching(/_Cover_Letter\.txt$/), text: expect.any(String) }]);
-  expect(log.files![0].text.length).toBeGreaterThan(0);
+  expect(log.text).toMatch(/Cover letter: Generated \(\w+_Cover_Letter\.pdf\)/);
+  expect(log.files).toEqual([{ name: expect.stringMatching(/_Cover_Letter\.pdf$/), base64: expect.any(String) }]);
+  expect(atob(log.files![0].base64)).toMatch(/^%PDF/);
 });
 
 test("asks for pay from the posting's range after Apply leads to another page", async ({ sw, page }) => {
@@ -353,12 +353,12 @@ test("AI tailor: uploads the résumé tailored for the job, notes it on the appl
   const [a] = await storage<Application[]>(sw, "applications");
   expect(a.notes).toEqual([expect.stringMatching(/^Résumé tailored: \d+ changes? for this job$/)]);
   expect(mock.calls_("tailor")).toHaveLength(1);
-  // The debug log keeps the tailored .tex, not the PDF.
-  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
-  expect(log.text).toMatch(/Résumé: Tailored \(\w+_Resume\.tex\)/);
+  // The debug log keeps the tailored PDF that was uploaded.
+  const log = (await storage<{ text: string; files?: { name: string; base64: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  expect(log.text).toMatch(/Résumé: Tailored \(\w+_Resume\.pdf\)/);
   expect(log.text).toContain("Cover letter: None");
   expect(log.files).toHaveLength(1);
-  expect(log.files![0].text).toContain("\\documentclass");
+  expect(atob(log.files![0].base64)).toMatch(/^%PDF/);
   await expect.poll(() => sw.evaluate(() => chrome.offscreen.hasDocument())).toBe(false);
 });
 
