@@ -22,6 +22,7 @@ import { FALLBACK, tailoredDoc } from "../services/tailorResume";
 import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
+import { realInput, realInputReady } from "./realInput";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, inQueueOrder, RETRY } from "./discover";
 import {
@@ -588,6 +589,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       company: run.item.company,
       title: run.item.title,
       visible: run.host === "visible",
+      realInput: run.host !== "frame" && realInputReady() ? yolo.realInput : "off",
       ...(skipped ? { posting: run.item.url } : {}),
     };
   },
@@ -641,6 +643,17 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       // user's to finish, never a failure.
       ...(stop ? { stop, needs: kind === "flagged" || !!run.confirming } : {}),
     };
+  },
+
+  async REAL_INPUT({ op }, sender) {
+    const run = await getRun();
+    const tabId = sender.tab?.id;
+    const want = op.kind === "type" ? "typing" : "clicks";
+    // Only the run's own tab, its top frame (whose viewport the points are in), and only what the setting allows.
+    if (!fromRun(run, sender) || run.host === "frame" || tabId === undefined || sender.frameId !== 0)
+      return { ok: false };
+    if (yolo.realInput !== want && yolo.realInput !== "both") return { ok: false };
+    return { ok: await realInput(tabId, op) };
   },
 
   async YOLO_RESULT({ result }, sender) {

@@ -7,6 +7,7 @@ const classify = (fields: number, hidden = false, requiredFields = 0) =>
   kindOf(pageFacts({ fields, requiredFields }), hidden);
 import { findApply, findNext, findSubmit, validationErrors } from "../../src/content/yolo/nav";
 import { handleAuth, siteKey } from "../../src/content/yolo/auth";
+import { realFor, setGraded, setRealMode } from "../../src/content/yolo/real";
 
 beforeAll(stubLayout);
 
@@ -144,6 +145,30 @@ describe("YOLO page kinds", () => {
     // Already sent: never retried, which would apply twice.
     setBody(`<h1>Thank you for applying!</h1><script src="https://www.recaptcha.net/recaptcha/api.js"></script>`);
     expect(classify(0, true)).toBe("success");
+  });
+
+  it("hands a page whose bot-detection service set its cookie from the hidden frame to a tab", () => {
+    setBody(`<h2>Apply</h2><input><input><input><button type="submit">Submit application</button>`);
+    document.cookie = "_abck=x";
+    expect(classify(3, true)).toBe("blocked");
+    document.cookie = "_abck=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = "_pxhd=x";
+    expect(classify(3, true)).toBe("blocked");
+    document.cookie = "_pxhd=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    expect(classify(3, true)).toBe("form");
+  });
+
+  it("uses real input only as set, and only on a graded page", () => {
+    setRealMode("clicks");
+    setGraded(true);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([true, false]);
+    setRealMode("both");
+    expect([realFor("clicks"), realFor("typing")]).toEqual([true, true]);
+    setGraded(false);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([false, false]);
+    setRealMode("off");
+    setGraded(true);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([false, false]);
   });
 
   it("recognizes DataDome's full-page CAPTCHA frame", () => {

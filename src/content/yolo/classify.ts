@@ -72,8 +72,13 @@ function challenge(): HTMLIFrameElement | undefined {
 }
 export const captchaShown = () => !!challenge();
 
-/** A score check is loaded, shown or not: an ATS sends its grade with the application and may file a low one as spam. */
+/**
+ * A bot check grades the page: a score check is loaded, shown or not (an ATS sends its grade with the application and
+ * may file a low one as spam), or a bot-detection service's sensor set its cookie (Akamai `_abck`, HUMAN `_px*`,
+ * DataDome, Imperva `reese84`, Kasada `KP_UIDz`), which grades the browser behind every request.
+ */
 export const scoreCheck = () =>
+  /(^|;\s*)(_abck|_px\w*|datadome|reese84|KP_UIDz\w*)=/.test(document.cookie) ||
   deepQueryAll(
     'script[src*="/recaptcha/"],iframe[src*="/recaptcha/"],script[src*="hcaptcha.com"],iframe[src*="hcaptcha.com"],script[src*="challenges.cloudflare.com/turnstile"],iframe[src*="challenges.cloudflare.com"]',
   ).length > 0;

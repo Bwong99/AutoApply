@@ -209,6 +209,81 @@ function Gmail(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) 
   );
 }
 
+/** What each choice does, and what it costs. */
+const REAL_CHOICES: [YoloConfig["realInput"], string, string][] = [
+  [
+    "off",
+    "Off",
+    "Script input only. No permission, no debugging bar, fastest. Bot checks can tell script events from a person’s, so graded sites may score the application lower.",
+  ],
+  [
+    "clicks",
+    "Clicks",
+    "Real mouse movement over the form and real Next/Submit clicks. Covers what score checks weigh most (the submit click and the pointer before it) for little cost: the bar shows for about 3–5 seconds per press.",
+  ],
+  [
+    "typing",
+    "Typing",
+    "Real keystrokes into text answers (long answers are pasted in one go, as a person would). Adds about 60 ms per character of short answers, and the bar shows while the page is filled. Clicks stay script-made.",
+  ],
+  [
+    "both",
+    "Both",
+    "Real typing and real clicks: the most human-looking, and the slowest, with the bar showing for the whole fill and submit.",
+  ],
+];
+
+function RealInput(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) {
+  const [granted, setGranted] = useState(true);
+  useEffect(() => void chrome.permissions.contains({ permissions: ["debugger"] }).then(setGranted), []);
+  // Inside the gesture: Chrome only asks for a permission from a user’s click or choice.
+  const ask = async () =>
+    setGranted(await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false));
+  return (
+    <Field
+      label="Real input on bot-checked pages"
+      help="Only on pages a bot check grades (an invisible CAPTCHA or bot-detection service), and only in a tab (never the hidden frame). AutoApply drives Chrome’s debugger there, so the check sees a person’s events, not a script’s. While it does, Chrome shows “AutoApply started debugging this browser” on every window; it closes 3 s after the last click or key. Pressing Cancel on that bar stops it for that job (script input from then on). Needs Chrome’s debugger permission, asked once."
+      extra={
+        <>
+          <ul class="help">
+            {REAL_CHOICES.map(([, name, text]) => (
+              <li>
+                <b>{name}:</b> {text}
+              </li>
+            ))}
+          </ul>
+          {props.y.realInput !== "off" && !granted && (
+            <p class="row">
+              <button type="button" class="btn" onClick={ask}>
+                Allow debugger access
+              </button>{" "}
+              <span class="err" role="status">
+                Not allowed yet: YOLO uses script input until it is.
+              </span>
+            </p>
+          )}
+        </>
+      }
+    >
+      {(id) => (
+        <select
+          id={id}
+          value={props.y.realInput}
+          onChange={(e) => {
+            const realInput = e.currentTarget.value as YoloConfig["realInput"];
+            props.set({ realInput });
+            if (realInput !== "off" && !granted) void ask();
+          }}
+        >
+          {REAL_CHOICES.map(([v, name]) => (
+            <option value={v}>{name}</option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
+
 export function Yolo() {
   const y = useStored("yolo");
   if (!y) return <p>Loading…</p>;
@@ -355,6 +430,7 @@ export function Yolo() {
           checked={y.tabFallback}
           onChange={(tabFallback) => set({ tabFallback })}
         />
+        <RealInput y={y} set={set} />
         <Toggle
           label="Write optional cover letters"
           help="Required cover-letter uploads always get a PDF written for the job when Documents has none. On: optional ones do too."

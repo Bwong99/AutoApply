@@ -6,6 +6,7 @@ import { labelElementFor } from "../scan/labels";
 import { isVisible } from "../scan/visibility";
 import { isPlaceholderOption, nativeOptions } from "../scan/widgets";
 import { blur, dispatching, focus, realClick, setNativeValue, sleep, typeText } from "./events";
+import { realFor, realType } from "../yolo/real";
 import { isOn, readValue, sameValue } from "./verify";
 
 export interface FillResult {
@@ -106,7 +107,8 @@ export async function fillText(h: FieldHandle, raw: string): Promise<FillResult>
   value = fitLength(value, h.desc.maxLength);
   const mode = h.desc.kind === "tel" ? "digits" : "text";
   focus(el);
-  setNativeValue(el, value);
+  // YOLO on a page a bot check grades may type it for real (content/yolo/real.ts).
+  if (!(realFor("typing") && (await realType(el, value)))) setNativeValue(el, value);
   blur(el);
   await sleep(0);
   if (sameValue(value, el.value, mode)) return ok(value);

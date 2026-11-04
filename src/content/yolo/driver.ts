@@ -11,6 +11,7 @@ import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
 import { IN_HOST } from "./frame";
+import { realFor, realPress, setGraded, setRealMode } from "./real";
 import {
   alertText,
   findApply,
@@ -113,6 +114,7 @@ export async function drive(deps: DriverDeps) {
   driving = true;
   const hello = await send({ type: "YOLO_HELLO", url: location.href }).catch(() => null);
   if (!hello) return void (driving = false);
+  setRealMode(hello.realInput);
   const result = (r: YoloResult) => void send({ type: "YOLO_RESULT", result: r }).catch(() => undefined);
   // The fill pipeline marks its own end; the run is still working after it.
   const fill = () => deps.fill().finally(() => busy(true));
@@ -134,6 +136,7 @@ export async function drive(deps: DriverDeps) {
       }
       await settle();
       const facts = pageFacts(deps.fieldStats());
+      setGraded(facts.scored);
       const step = await send({
         type: "YOLO_STEP",
         facts,
@@ -264,8 +267,11 @@ export async function drive(deps: DriverDeps) {
           // Invisible CAPTCHAs score the page as it submits: it gets its own built-ins back first (pageTimers.ts).
           if (!next) busy(false);
           // They weigh time on the page too: a form sent seconds after it loaded reads as a bot's.
-          if (!next && scoreCheck()) await dwell(facts.fields);
-          press(b);
+          // A check the fill loaded counts too (the frame case went back to be classified above).
+          const graded = scoreCheck();
+          setGraded(graded);
+          if (!next && graded) await dwell(facts.fields);
+          if (!(realFor("clicks") && (await realPress(b)))) press(b);
           if (!(await changed(before, 20_000))) continue;
           const errors = validationErrors();
           if (errors.length) {

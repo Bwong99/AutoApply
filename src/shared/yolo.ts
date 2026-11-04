@@ -61,6 +61,8 @@ export type QueueSort = (typeof QUEUE_SORTS)[number];
 /** The most YOLO applies to in one batch, and so the most applications' debug logs worth keeping. */
 export const MAX_BATCH_APPLICATIONS = 500;
 
+export const REAL_INPUT = ["off", "clicks", "typing", "both"] as const;
+
 const base = z.object({
   enabled: b(false),
   /** Minutes between batches: each finds new jobs, then applies to up to `batchSize` of the queue. */
@@ -98,6 +100,11 @@ const base = z.object({
   reapplyManual: b(false),
   warnOnYoloApplied: b(true),
   tabFallback: b(true),
+  /**
+   * On pages a bot check grades, in a tab: which of the run's input goes through Chrome's debugger as a person's
+   * (trusted) events. Needs the optional "debugger" permission; without it, script input as before.
+   */
+  realInput: z.enum(REAL_INPUT).catch("off"),
   /** Required cover-letter uploads always get one written; this extends it to optional ones. */
   optionalCoverLetters: b(false),
   /** Résumé upload fields: the best-fitting résumé variant, or the LaTeX résumé tailored by the AI. Never left blank. */
