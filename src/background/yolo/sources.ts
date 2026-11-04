@@ -190,51 +190,51 @@ export function parseIndeed(links: Link[], host: string): Listing[] {
 export { indeedHost };
 
 // ---------- Jobright ----------
-export const jobrightList = (repo: string) => `https://raw.githubusercontent.com/jobright-ai/${repo}/master/README.md`;
+/**
+ * The signed-in user's Jobright recommendations (jobright.ai/jobs/recommend, filtered by their Jobright preferences):
+ * a cursor, so page 0 starts a fresh list and later pages continue it until one comes back empty. Signed out = 401.
+ */
+export const jobrightFeed = (page: number) =>
+  `https://jobright.ai/swan/recommend/list/jobs?refresh=${page === 0}&sortCondition=0&position=${page * 20}&count=20&syncRerank=false`;
 
-/** Rows read | **[Company](site)** | **[Title](jobright.ai/jobs/info/…)** | Location | Work Model | Nov 02 |; "↳" repeats the company above. */
-export function parseJobright(md: string, now = Date.now()): Listing[] {
-  const out: Listing[] = [];
-  let company = "";
-  for (const line of md.split("\n")) {
-    const cells = line
-      .trim()
-      .replace(/^\||\|$/g, "")
-      .split("|")
-      .map(cellText);
-    const url = /\((https:\/\/jobright\.ai\/jobs\/info\/[0-9a-f]+)/.exec(line)?.[1];
-    if (!url || cells.length < 5) continue;
-    company = cells[0] === "↳" ? company : cells[0];
-    // The table gives month and day only: a date ahead of today is last year's.
-    const year = new Date(now).getFullYear();
-    const at = [year, year - 1].map((y) => Date.parse(`${cells[4]} ${y}`)).find((t) => t <= now + 86400e3);
-    out.push({
-      url,
-      company,
-      title: cells[1],
-      location: /^remote$/i.test(cells[3]) && !/\bremote\b/i.test(cells[2]) ? `Remote - ${cells[2]}` : cells[2],
-      postedAt: at,
-      source: "jobright",
-    });
-  }
-  return out;
+interface JobrightJob {
+  jobResult?: {
+    jobTitle?: string;
+    jobLocation?: string;
+    jobLocations?: string[];
+    workModel?: string;
+    isRemote?: boolean;
+    publishTime?: string;
+    applyLink?: string;
+    isDeleted?: boolean;
+  };
+  companyResult?: { companyName?: string };
 }
 
-/**
- * The employer's posting a Jobright job page links to (Jobright shows it to signed-in visitors only); null when it
- * names none or the job is gone; undefined when the page is unreadable or rate-limited (about 100 pages in 20 s).
- */
-export function jobrightApply(html: string): string | null | undefined {
-  try {
-    const data = /<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
-    const props = JSON.parse(data).props?.pageProps;
-    const job = props?.dataSource?.jobResult;
-    // A job that no longer exists loads the same empty page, minus the flag.
-    if (!job) return props && !props.detailLoadFailed ? null : undefined;
-    const url = job.isDeleted ? "" : job.applyLink || job.originalUrl || "";
-    // LinkedIn shows logged-out visitors no way to the employer; Jobright's own links loop back here.
-    return /^https?:\/\//.test(url) && !/(^|\.)(jobright\.ai|linkedin\.com)$/.test(new URL(url).hostname) ? url : null;
-  } catch {
-    return undefined;
-  }
+/** A feed page's jobList, read as postings on the employer's own site (Jobright gives that link to signed-in users). */
+export function parseJobrightFeed(list: JobrightJob[]): Listing[] {
+  return list.flatMap(({ jobResult: j, companyResult: c }) => {
+    let host: string;
+    try {
+      host = new URL(j?.applyLink ?? "").hostname;
+    } catch {
+      return [];
+    }
+    // LinkedIn shows logged-out visitors no way to the employer; Jobright's own links loop back to it.
+    if (!j?.jobTitle || j.isDeleted || /(^|\.)(jobright\.ai|linkedin\.com)$/.test(host)) return [];
+    const remote = j.isRemote || /^remote$/i.test(j.workModel ?? "");
+    const places = j.jobLocations?.length ? j.jobLocations : [j.jobLocation ?? ""];
+    // publishTime is UTC: "2026-11-03 16:59:05".
+    const at = Date.parse(`${(j.publishTime ?? "").replace(" ", "T")}Z`);
+    return [
+      {
+        url: j.applyLink!,
+        title: j.jobTitle,
+        company: c?.companyName ?? "",
+        location: places.map((p) => (remote && !/\bremote\b/i.test(p) ? `Remote - ${p}` : p)).join("; "),
+        postedAt: Number.isFinite(at) ? at : undefined,
+        source: "jobright",
+      },
+    ];
+  });
 }

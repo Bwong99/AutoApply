@@ -5,7 +5,6 @@ import { isErr, send, type Responses } from "../../shared/messages";
 import { formatDateTime } from "../../shared/time";
 import {
   BOARDS,
-  JOBRIGHT_LISTS,
   MAX_BATCH_APPLICATIONS,
   type Board,
   type QueueSort,
@@ -268,6 +267,7 @@ function RealInput(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void
 
 export function Yolo() {
   const y = useStored("yolo");
+  const state = useStored("yoloState");
   if (!y) return <p>Loading…</p>;
   const set = (patch: Partial<YoloConfig>) => void save({ yolo: { ...y, ...patch } });
   const urls = (v: string[]) => v.filter((u) => /^https?:\/\//i.test(u));
@@ -350,25 +350,15 @@ export function Yolo() {
           ))}
           <Toggle
             label="Jobright"
-            help="Reads Jobright's daily job lists by category, not your queries. Jobright shows where to apply only when you're signed in to jobright.ai in this browser; otherwise YOLO looks for the job on the company's Greenhouse, Ashby or Lever board and skips it if it isn't there."
+            help="Reads your Jobright recommendations (jobright.ai/jobs/recommend), filtered by the roles and places in your Jobright preferences rather than your queries. Needs you signed in to jobright.ai in this browser; the other filters here still apply."
             checked={y.jobright.length > 0}
-            onChange={(on) => set({ jobright: on ? [JOBRIGHT_LISTS[0]] : [] })}
+            onChange={(on) => set({ jobright: on ? ["recommendations"] : [] })}
           />
         </div>
-        {y.jobright.length > 0 && (
-          <Field label="Jobright lists" help="The categories read. Each lists the last 7 days' postings.">
-            {() => (
-              <div class="diff">
-                {JOBRIGHT_LISTS.map((c) => (
-                  <Toggle
-                    label={c.replace(/^\d+-/, "").replace(/-/g, " ")}
-                    checked={y.jobright.includes(c)}
-                    onChange={(on) => set({ jobright: on ? [...y.jobright, c] : y.jobright.filter((x) => x !== c) })}
-                  />
-                ))}
-              </div>
-            )}
-          </Field>
+        {y.jobright.length > 0 && state?.jobrightSignedOut && (
+          <p class="err" role="status">
+            Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
+          </p>
         )}
         <TagInput
           label="GitHub job lists"

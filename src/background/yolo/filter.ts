@@ -50,7 +50,9 @@ export function locationMatches(location: string, wanted: string[], remoteOk: bo
 /** Why a posting is not for this user, or null when it is. */
 export function rejectReason(l: Listing, y: Yolo, now = Date.now()): string | null {
   if (l.easyApply) return "Easy Apply (not supported yet)";
-  if (!y.queries.some((q) => titleMatches(l.title, q))) return "Title doesn't match a search";
+  // Jobright recommends by the roles in the user's Jobright preferences, not by these queries.
+  if (l.source !== "jobright" && !y.queries.some((q) => titleMatches(l.title, q)))
+    return "Title doesn't match a search";
   const t = ` ${words(l.title)} `;
   const bad = y.excludeTitleWords.find((w) => normalize(w) && t.includes(` ${normalize(w)} `));
   if (bad) return `Title has "${bad}"`;

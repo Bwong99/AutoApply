@@ -154,6 +154,7 @@ function cycle(topUp = false): Promise<void> {
         scrape: busy ? undefined : scrape,
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
         want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
+        jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
       });
       await setState({ lastCheckAt: Date.now() });
     } catch (e) {
@@ -509,7 +510,12 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       needsYou: apps.filter((a) => a.status === "needs").length,
       nextCheckAt: alarm?.scheduledTime ?? null,
       running: run?.mode === "apply" ? `${run.item.company} – ${run.item.title}` : null,
-      paused: state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
+      paused: [
+        state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
+        yolo.jobright.length && state.jobrightSignedOut ? "Sign in to jobright.ai for Jobright jobs" : "",
+      ]
+        .filter(Boolean)
+        .join(" · "),
     };
   },
 

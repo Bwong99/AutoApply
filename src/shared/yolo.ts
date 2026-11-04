@@ -12,45 +12,6 @@ export const SIMPLIFY_FEED =
 export const BOARDS = ["linkedin", "indeed", "glassdoor"] as const;
 export type Board = (typeof BOARDS)[number];
 
-/** Jobright's public GitHub job lists (github.com/jobright-ai), by repository; each holds its last 7 days' postings. */
-// shortcut: named for the 2026 season; add the next season's repos when Jobright starts them.
-export const JOBRIGHT_LISTS = [
-  "Software-Engineer-Internship",
-  "Software-Engineer-New-Grad",
-  "Engineer-Internship",
-  "Engineering-New-Grad",
-  "Data-Analysis-Internship",
-  "Data-Analysis-New-Grad",
-  "Product-Management-Internship",
-  "Product-Management-New-Grad",
-  "Business-Analyst-Internship",
-  "Business-Analyst-New-Grad",
-  "Design-Internship",
-  "Design-New-Grad",
-  "Consultant-Internship",
-  "Consultant-New-Grad",
-  "Marketing-Internship",
-  "Marketing-New-Grad",
-  "Sales-Internship",
-  "Sales-New-Grad",
-  "Account-Internship",
-  "Account-New-Grad",
-  "Management-Internship",
-  "Management-New-Grad",
-  "HR-Internship",
-  "HR-New-Grad",
-  "Legal-Internship",
-  "Legal-New-Grad",
-  "Public-Sector-Internship",
-  "Public-Sector-New-Grad",
-  "Education-Internship",
-  "Education-New-Grad",
-  "Support-Internship",
-  "Support-New-Grad",
-  "Art-Internship",
-  "Art-New-Grad",
-].map((c) => `2026-${c}`);
-
 /** Where a queued job was found, as the queue order ranks it. */
 export const SOURCE_GROUPS = ["careers", "feeds", ...BOARDS, "jobright"] as const;
 export type SourceGroup = (typeof SOURCE_GROUPS)[number];
@@ -78,7 +39,7 @@ const base = z.object({
   aiRelevanceCheck: b(true),
   boards: z.array(z.enum(BOARDS)).catch(["linkedin", "indeed", "glassdoor"]),
   feeds: strs([SIMPLIFY_FEED]),
-  /** JOBRIGHT_LISTS read; none = Jobright off. */
+  /** Non-empty = read the signed-in user's Jobright recommendations. Its values are unused (once Jobright's GitHub lists). */
   jobright: strs(),
   careerSites: strs(),
   queueSort: z.enum(QUEUE_SORTS).catch("newest"),
@@ -179,6 +140,8 @@ export const YoloStateSchema = z.object({
   gmailNeedsAuth: b(false),
   /** Gmail last answered as signed in (Connect, or the options page's silent check). */
   gmailConnected: b(false),
+  /** Jobright's feed last answered 401: the user isn't signed in to jobright.ai in this browser. */
+  jobrightSignedOut: b(false),
 });
 export type YoloState = z.infer<typeof YoloStateSchema>;
 
