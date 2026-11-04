@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { installChromeMock } from "./chromeMock";
 import { altKey, applyUrl, jobKey } from "../../src/background/yolo/jobKey";
 import {
@@ -295,6 +295,19 @@ describe("employer boards", () => {
         location: "Kirkland, WA",
         source: "careers",
       },
+    ]);
+    // Recruitee's posting links carry no number.
+    const recruitee = jobLinks(
+      [
+        { href: "https://huaweicanada.recruitee.com/o/intern-engineer-ai", text: "Intern Engineer - AI" },
+        { href: "https://huaweicanada.recruitee.com/o/intern-engineer-ai", text: "Apply" },
+        { href: "https://huaweicanada.recruitee.com/?jobs[search]=intern", text: "Search jobs" },
+      ],
+      "huaweicanada",
+      "https://huaweicanada.recruitee.com/",
+    );
+    expect(recruitee.map((l) => [l.url, l.title])).toEqual([
+      ["https://huaweicanada.recruitee.com/o/intern-engineer-ai", "Intern Engineer - AI"],
     ]);
   });
 
@@ -610,38 +623,94 @@ describe("discovery", () => {
     expect(seenHeaders[1]).toEqual({ "if-none-match": '"v1"' });
   });
 
-  it("pages LinkedIn only while the batch wants more fitting postings, stopping at a failed page", async () => {
-    const card = (id: number, title = "Software Engineer Intern") =>
+  it("pages LinkedIn only while the batch wants more postings on an employer's board, stopping at a failed page", async () => {
+    const card = (id: number, title = `Software Engineer Intern ${id}`, company = "Acme") =>
       `<li data-entity-urn="urn:li:jobPosting:${id}"><h3 class="base-search-card__title">${title}</h3>
-      <h4 class="base-search-card__subtitle">Acme</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+      <h4 class="base-search-card__subtitle">${company}</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+    // Acme posts its jobs on Lever; Nobody's aren't on any board, so they don't count toward the batch.
+    const lever = JSON.stringify(
+      [1, 2, 3].map((n) => ({ text: `Software Engineer Intern ${n}`, hostedUrl: `https://jobs.lever.co/acme/${n}` })),
+    );
     const pages: Record<number, string> = {
       0: card(1) + card(9, "Mechanical Intern"),
-      10: card(1) + card(2),
-      20: card(3),
+      10: card(1) + card(2) + card(7, "Software Engineer Intern", "Nobody"),
+      20: card(8, "Software Engineer Intern", "Nobody"),
+      30: card(3),
     };
-    const run = async (want: number | undefined, fail = Infinity) => {
-      installChromeMock();
+    const gaps: number[] = [];
+    const later = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      ((fn: () => void, ms?: number) => (gaps.push(ms ?? 0), later(fn, 0))) as typeof setTimeout,
+    );
+    onTestFinished(() => void vi.restoreAllMocks());
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      boards: ["linkedin" as const],
+    };
+    const run = async (want: number | undefined, fail = Infinity, fresh = true) => {
+      if (fresh) installChromeMock();
       const starts: number[] = [];
       const f = async (url: string) => {
+        if (url === "https://api.lever.co/v0/postings/acme?mode=json") return new Response(lever);
         if (!url.includes("linkedin")) return new Response("", { status: 404 });
         const start = Number(new URL(url).searchParams.get("start"));
         starts.push(start);
         return start >= fail ? new Response("", { status: 429 }) : new Response(pages[start] ?? "");
       };
-      const y = {
-        ...defaultYolo(),
-        queries: ["Software Engineer Intern"],
-        locations: ["Canada"],
-        boards: ["linkedin" as const],
-      };
-      await discover({ yolo: y, fetch: f, want });
-      return starts;
+      const n = await discover({ yolo: y, fetch: f, want });
+      return [starts, n];
     };
-    expect(await run(undefined)).toEqual([0]);
-    expect(await run(0)).toEqual([0]);
-    expect(await run(2)).toEqual([0, 10]);
-    expect(await run(50)).toEqual([0, 10, 20, 30]);
-    expect(await run(50, 10)).toEqual([0, 10]);
+    expect(await run(undefined)).toEqual([[0], 1]);
+    expect(await run(0)).toEqual([[0], 1]);
+    expect(await run(2)).toEqual([[0, 10], 2]);
+    expect(await run(3)).toEqual([[0, 10, 20, 30], 3]);
+    expect(await run(50)).toEqual([[0, 10, 20, 30, 40], 3]);
+    expect(await run(50, 10)).toEqual([[0, 10], 1]);
+    // LinkedIn is asked a second apart at most.
+    expect(gaps.length).toBeGreaterThan(0);
+    expect(gaps.every((ms) => ms > 0 && ms <= 1000)).toBe(true);
+    // Topping up the same batch reads past the pages already looked at.
+    installChromeMock();
+    expect(await run(1)).toEqual([[0], 1]);
+    expect(await run(1, Infinity, false)).toEqual([[0, 10], 1]);
+    expect(await run(1, Infinity, false)).toEqual([[0, 10, 20, 30], 1]);
+    const { yoloQueue, yoloSeen } = (await chrome.storage.local.get(["yoloQueue", "yoloSeen"])) as {
+      yoloQueue: { url: string }[];
+      yoloSeen: Record<string, number>;
+    };
+    expect(yoloQueue.map((i) => i.url)).toEqual([1, 2, 3].map((n) => `https://jobs.lever.co/acme/${n}`));
+    // Nobody's posting (twice on LinkedIn) was looked up once and isn't again.
+    expect(yoloSeen["linkedin:7"] && yoloSeen["nobody|software engineer intern"]).toBeTruthy();
+  });
+
+  it("leaves LinkedIn postings without an employer posting out of the AI's batch", async () => {
+    const card = (id: number, company: string) =>
+      `<li data-entity-urn="urn:li:jobPosting:${id}"><h3 class="base-search-card__title">Software Engineer Intern</h3>
+      <h4 class="base-search-card__subtitle">${company}</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+    const f = async (url: string) => {
+      if (url.includes("linkedin")) return new Response(card(1, "Acme") + card(2, "Nobody"));
+      if (url === "https://api.lever.co/v0/postings/acme?mode=json")
+        return new Response(
+          JSON.stringify([{ text: "Software Engineer Intern", hostedUrl: "https://jobs.lever.co/acme/1" }]),
+        );
+      return new Response("", { status: 404 });
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      boards: ["linkedin" as const],
+    };
+    const asked: string[][] = [];
+    const n = await discover({
+      yolo: y,
+      fetch: f,
+      relevance: async (items) => (asked.push(items.map((i) => i.company)), new Set(items.keys())),
+    });
+    expect(asked).toEqual([["Acme"]]);
+    expect(n).toBe(1);
   });
 
   it("queues one application for a job's copies across requisitions and sources", async () => {
