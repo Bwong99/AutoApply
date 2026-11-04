@@ -1,5 +1,6 @@
 // §10.8.3 essay drafting.
 import { stripMarkdown, trimToLimits } from "../../shared/essay";
+import { plainDashes, RE_AI_TELL } from "../../shared/injection";
 import type { EssayItem, JobContext, Profile } from "../../shared/types";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { ESSAYS_PROMPT } from "../gemini/prompts";
@@ -51,7 +52,10 @@ export async function draftEssays(
       );
       return batch.map((item) => {
         const e = r.data.essays.find((x) => x.fieldId === item.fieldId);
-        const text = e ? trimToLimits(stripMarkdown(e.text), item) : "";
+        // Em dashes typed as a person does, before the limits are counted.
+        const text = e ? trimToLimits(plainDashes(stripMarkdown(e.text)), item) : "";
+        // A draft that gives itself away as an AI's ("As an AI…") is never sent.
+        if (RE_AI_TELL.test(text)) return { fieldId: item.fieldId, text: null, note: "The draft read as AI-written" };
         return text
           ? { fieldId: item.fieldId, text }
           : { fieldId: item.fieldId, text: null, note: "No draft returned" };

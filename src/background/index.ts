@@ -6,7 +6,8 @@ import { formatTime } from "../shared/time";
 import type { ApiError, EntryCounts, ModelCaps, Profile, Settings, TabStatus } from "../shared/types";
 import { defaultSettings, type AiTask, type ClaudeTask } from "../shared/settings";
 import { createClaude } from "./claude/client";
-import { createGemini, listModels } from "./gemini/client";
+import { createGemini, listModels, type CallSpec } from "./gemini/client";
+import { defangDeep } from "../shared/injection";
 import {
   AllKeysExhaustedError,
   BadRequestError,
@@ -159,6 +160,12 @@ const hostOf = (url?: string) => {
   }
 };
 
+/**
+ * Every AI request, with the page's part (`payload`; the candidate's own data is `context`) cleared of traps for AI:
+ * instructions planted for an AI or bot to catch automated applicants (shared/injection.ts).
+ */
+const untrapped = <T>(spec: CallSpec<T>): CallSpec<T> => ({ ...spec, payload: defangDeep(spec.payload) });
+
 /** What a service calls the AI with; `task` picks Claude's model and effort. */
 async function serviceCtx(signal?: AbortSignal, task: AiTask = "fill"): Promise<ServiceCtx | { error: ApiError }> {
   if (settings.aiProvider === "claude") {
@@ -168,7 +175,7 @@ async function serviceCtx(signal?: AbortSignal, task: AiTask = "fill"): Promise<
     // Claude always thinks, and thinking is serial: small parallel MAP calls finish sooner (15 fields: ~11 s → ~8.5 s).
     const capped = { ...settings, maxFieldsPerRequest: Math.min(settings.maxFieldsPerRequest, CLAUDE_MAP_FIELDS) };
     return {
-      ai: { call: (spec) => claude.call(spec, t) },
+      ai: { call: (spec) => claude.call(untrapped(spec), t) },
       settings: capped,
       model: claudeLabel(t),
       fallback: null,
@@ -178,7 +185,13 @@ async function serviceCtx(signal?: AbortSignal, task: AiTask = "fill"): Promise<
   const { selectedModel, fallbackModel } = await store.getMany(["selectedModel", "fallbackModel"]);
   if (!pool.keys.length) return { error: { kind: "noKey", message: "No API key" } };
   if (!selectedModel) return { error: { kind: "noModel", message: "No model selected" } };
-  return { ai: gemini, settings, model: selectedModel, fallback: fallbackModel, signal };
+  return {
+    ai: { call: (spec, o) => gemini.call(untrapped(spec), o) },
+    settings,
+    model: selectedModel,
+    fallback: fallbackModel,
+    signal,
+  };
 }
 
 async function refreshModels(force: boolean, onlyKey?: string): Promise<Responses["REFRESH_MODELS"]> {
