@@ -354,12 +354,12 @@ export function Yolo() {
             checked={y.jobright.length > 0}
             onChange={(on) => set({ jobright: on ? ["recommendations"] : [] })}
           />
+          {y.jobright.length > 0 && state?.jobrightSignedOut && (
+            <p class="err" role="status">
+              Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
+            </p>
+          )}
         </div>
-        {y.jobright.length > 0 && state?.jobrightSignedOut && (
-          <p class="err" role="status">
-            Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
-          </p>
-        )}
         <TagInput
           label="GitHub job lists"
           help="Raw URLs of a listings.json (SimplifyJobs format) or a README with a job table."
