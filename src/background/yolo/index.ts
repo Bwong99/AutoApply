@@ -36,6 +36,7 @@ import {
 } from "./gmail";
 import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
+import { indeedSearch, JOBRIGHT_PING } from "./sources";
 import { textPdf } from "./pdf";
 import {
   credit,
@@ -136,6 +137,8 @@ function cycle(topUp = false): Promise<void> {
   if (cycling && toppingUp && !topUp) return cycling.then(again, again);
   return (cycling ??= (async () => {
     toppingUp = topUp;
+    // The turn-on check holds the hidden host; waiting it out keeps Indeed and career pages in this batch.
+    await checking;
     let batchAt = 0;
     let added = 0;
     try {
@@ -155,6 +158,7 @@ function cycle(topUp = false): Promise<void> {
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
         want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
         jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
+        indeedBlocked: (blocked) => setState({ indeedBlocked: blocked }),
       });
       await setState({ lastCheckAt: Date.now() });
     } catch (e) {
@@ -166,6 +170,22 @@ function cycle(topUp = false): Promise<void> {
     if (batchAt && !added) dryBatch = batchAt;
     await pump();
   })());
+}
+
+let checking: Promise<void> | null = null;
+/**
+ * At turn-on, whether Jobright and Indeed can be read, so the popup shows it within seconds rather than once the first
+ * batch's discovery reaches them. Discovery keeps both flags current after that.
+ */
+async function checkSources() {
+  if (yolo.jobright.length) {
+    const r = await fetch(JOBRIGHT_PING, { credentials: "include" }).catch(() => null);
+    if (r) await setState({ jobrightSignedOut: r.status === 401 });
+  }
+  if (yolo.boards.includes("indeed") && yolo.queries.length && !(await getRun())) {
+    const links = await scrape(indeedSearch(yolo.queries[0], yolo.locations[0] ?? "", yolo.postedWithinDays));
+    await setState({ indeedBlocked: !links });
+  }
 }
 
 /** The queue ran dry with the batch short of `batchSize`: finds more now rather than at the next batch. */
@@ -510,12 +530,15 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       needsYou: apps.filter((a) => a.status === "needs").length,
       nextCheckAt: alarm?.scheduledTime ?? null,
       running: run?.mode === "apply" ? `${run.item.company} – ${run.item.title}` : null,
-      paused: [
-        state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
-        yolo.jobright.length && state.jobrightSignedOut ? "Sign in to jobright.ai for Jobright jobs" : "",
-      ]
-        .filter(Boolean)
-        .join(" · "),
+      paused: state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
+      warnings: yolo.enabled
+        ? [
+            yolo.jobright.length && state.jobrightSignedOut ? "Jobright: sign in to jobright.ai in this browser" : "",
+            yolo.boards.includes("indeed") && state.indeedBlocked
+              ? "Indeed: showed a bot check, so YOLO can't read it"
+              : "",
+          ].filter(Boolean)
+        : [],
     };
   },
 
@@ -526,6 +549,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     await store.set({ yolo });
     // The new alarm's first firing, 30 s on, starts the first batch.
     await schedule();
+    if (enabled) checking ??= checkSources().finally(() => (checking = null));
     return { ok: true };
   },
 

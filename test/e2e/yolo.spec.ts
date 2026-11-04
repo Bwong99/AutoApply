@@ -382,3 +382,33 @@ test("AI tailor without a LaTeX résumé: YOLO refuses to turn on, and a queued 
     .toMatch(/AI tailor is selected for YOLO, but no LaTeX résumé/);
   expect(await storage<Application[] | undefined>(sw, "applications")).toBeFalsy();
 });
+
+test("shows in red in the popup, right after turn-on, a source YOLO can't read", async ({ context, sw, page }) => {
+  await seed(sw, { caps: true });
+  // Signed out of Jobright. (Indeed's check runs in the hidden page, whose requests Playwright can't route.)
+  await context.route("https://jobright.ai/swan/**", (r) =>
+    r.fulfill({ status: 401, contentType: "application/json", body: '{"success":false,"errorCode":41001}' }),
+  );
+  await sw.evaluate(async () => {
+    const { yolo } = await chrome.storage.local.get("yolo");
+    await chrome.storage.local.set({
+      yolo: {
+        ...(yolo as object),
+        queries: ["x"],
+        feeds: [],
+        careerSites: [],
+        boards: [],
+        jobright: ["recommendations"],
+      },
+    });
+  });
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("switch", { name: "YOLO Mode" }).click();
+  // Well before the first batch, 30 s on.
+  await expect(page.getByRole("alert")).toHaveText(["Jobright: sign in to jobright.ai in this browser"], {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("alert")).toHaveClass(/err/);
+});

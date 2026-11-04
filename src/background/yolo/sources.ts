@@ -1,7 +1,11 @@
 // Job sources: GitHub listing feeds and job boards. Parsed with regexes: a service worker has no DOMParser.
+import { normalize } from "../../shared/normalize";
 import type { Listing } from "../../shared/yolo";
 
-/** A link read from a page rendered in the hidden host; `card` is the text of the result card around it. */
+/**
+ * A link read from a page rendered in the hidden host; `card` is the text of the result card around it. A scrape gives
+ * null instead when the page was a bot check (Cloudflare's "Just a moment…") rather than the page asked for.
+ */
 export interface Link {
   href: string;
   text: string;
@@ -115,8 +119,27 @@ export function parseLinkedIn(html: string): Listing[] {
     });
 }
 
-export const glassdoorSearch = (q: string, loc: string, days: number) =>
-  `https://www.glassdoor.com/Job/jobs.htm?sc.keyword=${enc(q)}&locKeyword=${enc(loc)}&fromAge=${Math.min(days, 30)}`;
+const countryOf = (loc: string) => loc.split(",").pop()?.trim().toLowerCase() ?? "";
+const GLASSDOOR_HOSTS: Record<string, string> = {
+  canada: "www.glassdoor.ca",
+  "united kingdom": "www.glassdoor.co.uk",
+  uk: "www.glassdoor.co.uk",
+  india: "www.glassdoor.co.in",
+  australia: "www.glassdoor.com.au",
+  germany: "www.glassdoor.de",
+};
+
+/**
+ * The search's own page on the country's Glassdoor: `jobs.htm?sc.keyword=…` redirects there and drops `fromAge`, and
+ * another country's site redirects too. Glassdoor ignores the place in either URL (it searches the visitor's country;
+ * live, 2026-11-03), so the location filter does that part.
+ */
+export const glassdoorSearch = (q: string, loc: string, days: number) => {
+  const kw = normalize(q)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `https://${GLASSDOOR_HOSTS[countryOf(loc)] ?? "www.glassdoor.com"}/Job/${kw}-jobs-SRCH_KO0,${kw.length}.htm?fromAge=${Math.min(days, 30)}`;
+};
 
 export function parseGlassdoor(html: string, now = Date.now()): Listing[] {
   const seen = new Set<string>();
@@ -154,10 +177,7 @@ const INDEED_HOSTS: Record<string, string> = {
   australia: "au.indeed.com",
   germany: "de.indeed.com",
 };
-const indeedHost = (loc: string) => {
-  const country = loc.split(",").pop()?.trim().toLowerCase() ?? "";
-  return INDEED_HOSTS[country] ?? "www.indeed.com";
-};
+const indeedHost = (loc: string) => INDEED_HOSTS[countryOf(loc)] ?? "www.indeed.com";
 
 /** Indeed builds its result cards in script, so the search page is rendered in the hidden host. */
 export const indeedSearch = (q: string, loc: string, days: number) =>
@@ -196,6 +216,9 @@ export { indeedHost };
  */
 export const jobrightFeed = (page: number) =>
   `https://jobright.ai/swan/recommend/list/jobs?refresh=${page === 0}&sortCondition=0&position=${page * 20}&count=20&syncRerank=false`;
+
+/** A tiny signed-in-only endpoint (65 B): 200 when signed in, 401 "Cookie not found" when not (live, 2026-11-03). */
+export const JOBRIGHT_PING = "https://jobright.ai/swan/msg/has-unread";
 
 interface JobrightJob {
   jobResult?: {

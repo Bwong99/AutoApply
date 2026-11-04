@@ -75,7 +75,8 @@ export type YoloResult =
   | { status: "submitted"; doneUrl: string; guesses?: Guess[] }
   /** `retryAt`: the AI's quota or usage limit ran out; the job goes back in the queue until then. */
   | { status: "needs" | "failed" | "skipped" | "blocked"; reason: string; guesses?: Guess[]; retryAt?: number }
-  | { status: "scraped"; links: { href: string; text: string }[] };
+  /** `walled`: the page was a bot check (Cloudflare's "Just a moment…"), not the one asked for. */
+  | { status: "scraped"; links: { href: string; text: string }[]; walled?: boolean };
 
 /** Typed message protocol (§17). `C` = content script, `B` = background, `O` = options page. */
 export type Message =

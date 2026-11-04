@@ -170,7 +170,7 @@ export type StorageContext = "background" | "options" | "popup";
 const ALLOW: Record<StorageContext, (key: string) => boolean> = {
   background: () => true,
   options: () => true,
-  popup: (k) => ["settings", "selectedModel", "modelCatalog"].includes(k),
+  popup: (k) => ["settings", "selectedModel", "modelCatalog", "yoloState"].includes(k),
 };
 
 export function createStorage(ctx: StorageContext) {

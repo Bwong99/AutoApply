@@ -128,7 +128,7 @@ const companyOf = (host: string) => {
  */
 export async function careerSite(
   f: Fetcher,
-  scrape: (url: string) => Promise<Link[]>,
+  scrape: (url: string) => Promise<Link[] | null>,
   raw: string,
   query: string,
 ): Promise<Listing[]> {
@@ -136,7 +136,7 @@ export async function careerSite(
   const b = boardOf(url);
   if (b) return (await boardJobs(f, b, b.slug, query)) ?? [];
   const host = new URL(url).hostname;
-  return jobLinks(await scrape(url), companyOf(host), url);
+  return jobLinks((await scrape(url)) ?? [], companyOf(host), url);
 }
 
 const RE_JOB_LINK =

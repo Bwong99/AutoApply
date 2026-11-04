@@ -73,6 +73,15 @@ function challenge(): HTMLIFrameElement | undefined {
 export const captchaShown = () => !!challenge();
 
 /**
+ * The page is a bot check standing in for the one asked for: a challenge, or Cloudflare's interstitial or block page.
+ * Their titles vary ("Just a moment...", "Blocked - Indeed.com"; live, 2026-11-03), but each shows its Ray ID.
+ */
+export const botWall = () =>
+  captchaShown() ||
+  /^(just a moment|security check|attention required|blocked|access denied)\b/i.test(document.title) ||
+  /\bRay ID\b/.test(document.body?.textContent ?? "");
+
+/**
  * A bot check grades the page: a score check is loaded, shown or not (an ATS sends its grade with the application and
  * may file a low one as spam), or a bot-detection service's sensor set its cookie (Akamai `_abck`, HUMAN `_px*`,
  * DataDome, Imperva `reese84`, Kasada `KP_UIDz`), which grades the browser behind every request.

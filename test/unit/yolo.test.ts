@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { installChromeMock } from "./chromeMock";
 import { altKey, applyUrl, jobKey } from "../../src/background/yolo/jobKey";
 import {
+  glassdoorSearch,
   jobrightFeed,
   parseFeed,
   parseGlassdoor,
@@ -831,6 +832,38 @@ describe("discovery", () => {
     expect(asked).toHaveLength(1);
     // Told once per read, for the settings page and popup to warn.
     expect(out).toEqual([false, true]);
+  });
+
+  it("searches the country's own Glassdoor on its search page, which keeps the age filter", () => {
+    expect(glassdoorSearch("Software Intern", "Canada", 14)).toBe(
+      "https://www.glassdoor.ca/Job/software-intern-jobs-SRCH_KO0,15.htm?fromAge=14",
+    );
+    expect(glassdoorSearch("C++ Développeur / Intern", "Austin, TX", 60)).toBe(
+      "https://www.glassdoor.com/Job/c-developpeur-intern-jobs-SRCH_KO0,20.htm?fromAge=30",
+    );
+  });
+
+  it("tells when Indeed shows a bot check instead of results, and reads it when it doesn't", async () => {
+    const card = {
+      href: "https://ca.indeed.com/rc/clk?jk=abc123",
+      text: "Software Intern",
+      card: "Software Intern\nCo\nToronto, ON",
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Intern"],
+      locations: ["Canada"],
+      boards: ["indeed" as const],
+      feeds: [],
+      jobright: [],
+    };
+    const told: boolean[] = [];
+    const f = async () => new Response("", { status: 404 });
+    const run = (links: (typeof card)[] | null) =>
+      discover({ yolo: y, fetch: f, scrape: async () => links, indeedBlocked: (b) => told.push(b) });
+    expect(await run(null)).toBe(0);
+    expect(await run([card])).toBe(1);
+    expect(told).toEqual([true, false]);
   });
 
   it("pages LinkedIn only for what the lists read before it don't supply", async () => {

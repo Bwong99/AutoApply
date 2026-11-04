@@ -359,6 +359,12 @@ export function Yolo() {
               Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
             </p>
           )}
+          {y.boards.includes("indeed") && state?.indeedBlocked && (
+            <p class="err" role="status">
+              Indeed showed a bot check instead of results at the last check, so it added no jobs. YOLO doesn't solve
+              these; using indeed.com yourself in this browser may clear it before the next batch.
+            </p>
+          )}
         </div>
         <TagInput
           label="GitHub job lists"

@@ -9,7 +9,7 @@ import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
-import { captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
+import { botWall, captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
 import { IN_HOST } from "./frame";
 import { realFor, realPress, setGraded, setRealMode } from "./real";
 import {
@@ -88,17 +88,23 @@ async function changed(before: string, ms: number): Promise<boolean> {
   return !!(await waitFor(() => snapshot() !== before || validationErrors().length > 0 || captchaShown(), ms));
 }
 
+/**
+ * The result card around a link: its nearest ancestor with text beyond the link's own. A long title is never its own
+ * card, which lost company and location for Indeed titles past 60 characters (live, 2026-11-04).
+ */
+export function cardText(a: HTMLElement): string {
+  const min = Math.max(60, (a.innerText ?? "").length + 20);
+  let n: HTMLElement | null = a;
+  for (let i = 0; i < 6 && n; i++, n = n.parentElement)
+    if ((n.innerText ?? "").length > min) return n.innerText.slice(0, 600);
+  return a.innerText;
+}
+
 function scrapeLinks() {
-  const card = (a: HTMLElement) => {
-    let n: HTMLElement | null = a;
-    for (let i = 0; i < 6 && n; i++, n = n.parentElement)
-      if ((n.innerText ?? "").length > 60) return n.innerText.slice(0, 600);
-    return a.innerText;
-  };
   return (deepQueryAll("a[href]") as HTMLAnchorElement[])
     .filter((a) => /^https?:/.test(a.href) && isVisible(a))
     .slice(0, 800)
-    .map((a) => ({ href: a.href, text: collapse(a.innerText || a.textContent || ""), card: card(a) }));
+    .map((a) => ({ href: a.href, text: collapse(a.innerText || a.textContent || ""), card: cardText(a) }));
 }
 
 let driving = false;
@@ -123,7 +129,7 @@ export async function drive(deps: DriverDeps) {
     if (hello.mode === "scrape") {
       await settle();
       await sleep(1500); // result lists often render after the page goes quiet
-      return result({ status: "scraped", links: scrapeLinks() });
+      return result({ status: "scraped", links: scrapeLinks(), walled: botWall() });
     }
     if (hello.posting) await deps.readPosting(hello.posting);
     let refills = 0;

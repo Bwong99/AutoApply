@@ -41,7 +41,7 @@ export interface DiscoverDeps {
   yolo: Yolo;
   fetch: Fetcher;
   /** Renders a page in the hidden host and reads its links; absent while an application is running there. */
-  scrape?: (url: string) => Promise<Link[]>;
+  scrape?: (url: string) => Promise<Link[] | null>;
   /** Indexes of the listings the AI judges a match; absent = keep all. */
   relevance?: (items: Listing[]) => Promise<Set<number>>;
   /**
@@ -51,6 +51,8 @@ export interface DiscoverDeps {
   want?: number;
   /** Told whether Jobright's feed answered as signed out, each time it's read. */
   jobrightSignedOut?: (out: boolean) => unknown;
+  /** Told whether Indeed's search showed a bot check instead of results, each time it's read. */
+  indeedBlocked?: (blocked: boolean) => unknown;
   now?: number;
 }
 
@@ -204,7 +206,12 @@ export async function discover(d: DiscoverDeps): Promise<number> {
           return r.ok ? parseGlassdoor(await r.text(), now) : [];
         });
       if (y.boards.includes("indeed") && d.scrape)
-        await safely(async () => parseIndeed(await d.scrape!(indeedSearch(q, loc, days)), indeedHost(loc)));
+        await safely(async () => {
+          // Cloudflare guards Indeed's search; YOLO never solves a bot check, it tells the user instead.
+          const links = await d.scrape!(indeedSearch(q, loc, days));
+          await d.indeedBlocked?.(!links);
+          return parseIndeed(links ?? [], indeedHost(loc));
+        });
     }
 
   for (const url of y.careerSites) {
