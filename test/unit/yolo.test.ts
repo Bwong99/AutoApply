@@ -7,6 +7,7 @@ import {
   jobrightFeed,
   parseFeed,
   parseGlassdoor,
+  indeedSignedOut,
   parseIndeed,
   parseJobrightFeed,
   parseLinkedIn,
@@ -176,41 +177,84 @@ describe("sources", () => {
     expect(out[1].easyApply).toBe(true);
   });
 
-  it("reads Indeed result cards from a rendered page's links", () => {
-    const out = parseIndeed(
-      [
-        {
-          href: "https://ca.indeed.com/rc/clk?jk=abc123&from=serp",
-          text: "Software Developer Intern",
-          card: "Software Developer Intern\nShopify\nToronto, ON\n$30 an hour",
-        },
-        {
-          href: "https://ca.indeed.com/rc/clk?jk=def456",
-          text: "QA Intern",
-          card: "QA Intern\nAcme\nRemote\nEasily apply",
-        },
-        { href: "https://ca.indeed.com/about", text: "About" },
-      ],
-      "ca.indeed.com",
-    );
-    expect(out).toEqual([
+  it("reads Indeed's result cards from the job-card data its search page embeds", () => {
+    const cards = [
+      {
+        jobkey: "abc123",
+        displayTitle: "Software Developer Intern",
+        company: "Shopify",
+        formattedLocation: "Toronto, ON",
+        pubDate: Date.UTC(2026, 10, 3),
+        indeedApplyEnabled: false,
+        snippet: '<ul><li>Build {things}; "ship" them</li></ul>',
+      },
+      {
+        jobkey: "def456",
+        title: "QA Intern",
+        truncatedCompany: "Acme &amp; Co",
+        formattedLocation: "Remote",
+        indeedApplyEnabled: true,
+      },
+      {
+        jobkey: "aaa111",
+        displayTitle: "Data Intern",
+        company: "Beta",
+        formattedLocation: "Ontario",
+        remoteLocation: true,
+        pubDate: 1762000000,
+      },
+      { jobkey: "abc123", displayTitle: "Software Developer Intern", company: "Shopify" },
+      { jobkey: "bbb222", displayTitle: "Old", company: "Gone", expired: true },
+      { displayTitle: "No key" },
+    ];
+    const page = `<html><head><title>Software Intern Jobs | Indeed</title></head><body><script>
+window.mosaic.providerData["mosaic-provider-jobcards"]=${JSON.stringify({ metaData: { mosaicProviderJobCardsModel: { results: cards } } })};
+window.mosaic.providerData["mosaic-provider-other"]={"a":"}"};</script></body></html>`;
+    expect(parseIndeed(page, "ca.indeed.com")).toEqual([
       {
         url: "https://ca.indeed.com/viewjob?jk=abc123",
         title: "Software Developer Intern",
         company: "Shopify",
         location: "Toronto, ON",
+        postedAt: Date.UTC(2026, 10, 3),
         source: "indeed",
         easyApply: undefined,
       },
       {
         url: "https://ca.indeed.com/viewjob?jk=def456",
         title: "QA Intern",
-        company: "Acme",
+        company: "Acme & Co",
         location: "Remote",
+        postedAt: undefined,
         source: "indeed",
         easyApply: true,
       },
+      {
+        url: "https://ca.indeed.com/viewjob?jk=aaa111",
+        title: "Data Intern",
+        company: "Beta",
+        location: "Remote - Ontario",
+        // Seconds, not ms: left out rather than read as 1970.
+        postedAt: undefined,
+        source: "indeed",
+        easyApply: undefined,
+      },
     ]);
+    // A bot check, live shapes: Cloudflare's interstitial, and Indeed's block page.
+    expect(parseIndeed("<title>Just a moment...</title>", "www.indeed.com")).toBeNull();
+    expect(parseIndeed("<title>Security Check - Indeed.com</title>", "www.indeed.com")).toBeNull();
+    expect(parseIndeed("<h1>Request Blocked</h1><p>Your Ray ID is a551aa1e</p>", "www.indeed.com")).toBeNull();
+    // A page without cards that isn't a bot check reads as no results.
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(parseIndeed("<title>Indeed</title><p>No jobs</p>", "www.indeed.com")).toEqual([]);
+    expect(parseIndeed("", "www.indeed.com")).toEqual([]);
+  });
+
+  it("tells Indeed's sign-in page from the account page it guards", () => {
+    expect(indeedSignedOut("https://secure.indeed.com/auth?hl=en&continue=%2Fsettings%2Faccount")).toBe(true);
+    expect(indeedSignedOut("https://secure.indeed.com/account/login?continue=x")).toBe(true);
+    expect(indeedSignedOut("https://secure.indeed.com/settings/account")).toBe(false);
+    expect(indeedSignedOut("")).toBe(false);
   });
 
   it("reads Jobright's recommendations as employer postings, never a LinkedIn or Jobright link", () => {
@@ -881,12 +925,17 @@ describe("discovery", () => {
     );
   });
 
-  it("tells when Indeed shows a bot check instead of results, and reads it when it doesn't", async () => {
-    const card = {
-      href: "https://ca.indeed.com/rc/clk?jk=abc123",
-      text: "Software Intern",
-      card: "Software Intern\nCo\nToronto, ON",
-    };
+  it("searches Indeed as the signed-in user, in a tab when Cloudflare checks the fetch, and tells what stood in", async () => {
+    const page = (jk: string) =>
+      `<script>window.mosaic.providerData["mosaic-provider-jobcards"]=${JSON.stringify({
+        metaData: {
+          mosaicProviderJobCardsModel: {
+            results: [
+              { jobkey: jk, displayTitle: "Software Intern", company: `Co ${jk}`, formattedLocation: "Toronto, ON" },
+            ],
+          },
+        },
+      })};</script>`;
     const y = {
       ...defaultYolo(),
       queries: ["Software Intern"],
@@ -895,13 +944,64 @@ describe("discovery", () => {
       feeds: [],
       jobright: [],
     };
-    const told: boolean[] = [];
-    const f = async () => new Response("", { status: 404 });
-    const run = (links: (typeof card)[] | null) =>
-      discover({ yolo: y, fetch: f, scrape: async () => links, indeedBlocked: (b) => told.push(b) });
-    expect(await run(null)).toBe(0);
-    expect(await run([card])).toBe(1);
-    expect(told).toEqual([true, false]);
+    let signedIn = true;
+    let search: () => Response = () => new Response(page("a1"));
+    const asked: [string, string | undefined, RequestCredentials | undefined][] = [];
+    const f = async (url: string, init?: RequestInit) => {
+      // Indeed's own requests: an employer-board lookup per posting follows, as for every board.
+      if (url.includes("indeed.com/")) asked.push([url.replace(/\?.*/, ""), init?.method, init?.credentials]);
+      if (url === "https://secure.indeed.com/settings/account") {
+        const r = new Response("");
+        Object.defineProperty(r, "url", {
+          value: signedIn ? url : "https://secure.indeed.com/auth?hl=en&continue=%2Fsettings%2Faccount",
+        });
+        return r;
+      }
+      if (url.startsWith("https://ca.indeed.com/jobs?")) return search();
+      return new Response("", { status: 404 });
+    };
+    const tabbed: string[] = [];
+    let tab: string | null = null;
+    const signedOut: boolean[] = [];
+    const blocked: boolean[] = [];
+    const run = () =>
+      discover({
+        yolo: y,
+        fetch: f,
+        indeedTab: async (url) => (tabbed.push(url), tab),
+        indeedSignedOut: (o) => signedOut.push(o),
+        indeedBlocked: (b) => blocked.push(b),
+      });
+
+    // Signed in, the fetch passes: no tab, and the user's cookies go with both requests.
+    expect(await run()).toBe(1);
+    expect(asked).toEqual([
+      ["https://secure.indeed.com/settings/account", "HEAD", "include"],
+      ["https://ca.indeed.com/jobs", undefined, "include"],
+    ]);
+    expect(tabbed).toEqual([]);
+
+    // Cloudflare checks the fetch: the search is rendered in a tab, which reads it.
+    installChromeMock();
+    search = () => new Response("<title>Just a moment...</title>", { status: 403 });
+    tab = page("b2").replace(/^<script>|<\/script>$/g, "");
+    expect(await run()).toBe(1);
+    expect(tabbed).toEqual(["https://ca.indeed.com/jobs?q=Software%20Intern&l=Canada&fromage=14&sort=date"]);
+
+    // Checked both ways: nothing, and the user told.
+    installChromeMock();
+    tab = null;
+    expect(await run()).toBe(0);
+
+    // Signed out: Indeed isn't searched at all.
+    installChromeMock();
+    signedIn = false;
+    asked.length = 0;
+    expect(await run()).toBe(0);
+    expect(asked).toEqual([["https://secure.indeed.com/settings/account", "HEAD", "include"]]);
+
+    expect(signedOut).toEqual([false, false, false, true]);
+    expect(blocked).toEqual([false, false, true]);
   });
 
   it("pages LinkedIn only for what the lists read before it don't supply", async () => {

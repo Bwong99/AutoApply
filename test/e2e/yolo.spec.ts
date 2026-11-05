@@ -385,9 +385,14 @@ test("AI tailor without a LaTeX résumé: YOLO refuses to turn on, and a queued 
 
 test("shows in red in the popup, right after turn-on, a source YOLO can't read", async ({ context, sw, page }) => {
   await seed(sw, { caps: true });
-  // Signed out of Jobright. (Indeed's check runs in the hidden page, whose requests Playwright can't route.)
+  // Signed out of Jobright and of Indeed (whose account page sends signed-out visitors to /auth).
   await context.route("https://jobright.ai/swan/**", (r) =>
     r.fulfill({ status: 401, contentType: "application/json", body: '{"success":false,"errorCode":41001}' }),
+  );
+  await context.route("https://secure.indeed.com/**", (r) =>
+    new URL(r.request().url()).pathname === "/settings/account"
+      ? r.fulfill({ status: 302, headers: { location: "/auth?hl=en&continue=%2Fsettings%2Faccount" } })
+      : r.fulfill({ status: 200, contentType: "text/html", body: "<title>Sign in | Indeed</title>" }),
   );
   await sw.evaluate(async () => {
     const { yolo } = await chrome.storage.local.get("yolo");
@@ -397,7 +402,7 @@ test("shows in red in the popup, right after turn-on, a source YOLO can't read",
         queries: ["x"],
         feeds: [],
         careerSites: [],
-        boards: [],
+        boards: ["indeed"],
         jobright: ["recommendations"],
       },
     });
@@ -407,8 +412,53 @@ test("shows in red in the popup, right after turn-on, a source YOLO can't read",
   await expect(page.getByRole("alert")).toHaveCount(0);
   await page.getByRole("switch", { name: "YOLO Mode" }).click();
   // Well before the first batch, 30 s on.
-  await expect(page.getByRole("alert")).toHaveText(["Jobright: sign in to jobright.ai in this browser"], {
-    timeout: 10_000,
+  await expect(page.getByRole("alert")).toHaveText(
+    ["Jobright: sign in to jobright.ai in this browser", "Indeed: sign in to indeed.com in this browser"],
+    { timeout: 10_000 },
+  );
+  await expect(page.getByRole("alert")).toHaveClass([/err/, /err/]);
+  // And under each source's toggle in settings.
+  await page.goto(`chrome-extension://${id}/src/options/index.html#/yolo`);
+  await expect(page.getByRole("status").filter({ hasText: "answered as signed out" })).toHaveText([
+    /^Indeed answered as signed out at the last check/,
+    /^Jobright answered as signed out at the last check/,
+  ]);
+});
+
+test("warns under a source's toggle in settings as soon as it's turned on, YOLO off", async ({ context, sw, page }) => {
+  await seed(sw, { caps: true });
+  const asked: string[] = [];
+  await context.route("https://jobright.ai/swan/**", (r) => {
+    asked.push(r.request().url());
+    return r.fulfill({ status: 401, contentType: "application/json", body: '{"success":false,"errorCode":41001}' });
   });
-  await expect(page.getByRole("alert")).toHaveClass(/err/);
+  await context.route("https://secure.indeed.com/**", (r) => {
+    asked.push(`${r.request().method()} ${r.request().url()}`);
+    return new URL(r.request().url()).pathname === "/settings/account"
+      ? r.fulfill({ status: 302, headers: { location: "/auth?hl=en&continue=%2Fsettings%2Faccount" } })
+      : r.fulfill({ status: 200, contentType: "text/html", body: "<title>Sign in | Indeed</title>" });
+  });
+  await sw.evaluate(async () => {
+    const { yolo } = await chrome.storage.local.get("yolo");
+    await chrome.storage.local.set({ yolo: { ...(yolo as object), queries: ["x"], boards: [], jobright: [] } });
+  });
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/options/index.html#/yolo`);
+  const notes = page.getByRole("status").filter({ hasText: "answered as signed out" });
+  await expect(notes).toHaveCount(0);
+
+  await page.getByLabel("Indeed", { exact: true }).check();
+  await expect(notes).toHaveText([/^Indeed answered as signed out at the last check/]);
+  await page.getByLabel("Jobright", { exact: true }).check();
+  await expect(notes).toHaveText([
+    /^Indeed answered as signed out at the last check/,
+    /^Jobright answered as signed out at the last check/,
+  ]);
+  // Only the sign-in checks, one per source turned on: no search, and YOLO stays off.
+  expect(asked).toEqual([
+    // (The redirect to /auth is followed past Playwright's routing.)
+    "HEAD https://secure.indeed.com/settings/account",
+    "https://jobright.ai/swan/msg/has-unread",
+  ]);
+  expect((await storage<{ enabled?: boolean }>(sw, "yolo")).enabled).toBeFalsy();
 });

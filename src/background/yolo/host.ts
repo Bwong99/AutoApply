@@ -48,3 +48,23 @@ export async function openTab(url: string, visible: boolean): Promise<number> {
 }
 
 export const closeTab = (id: number) => chrome.tabs.remove(id).catch(() => undefined);
+
+/**
+ * Renders `url` in an inactive tab in the collapsed AutoApply group, as a first-party page with the user's session,
+ * window and headers (so a bot check can pass by itself), and returns the first non-null answer of `read` in its page,
+ * asked each second; null after `timeoutMs`. Outside YOLO's run: no driver, and the tab is closed either way.
+ */
+export async function readInTab<T>(url: string, read: () => T | null, timeoutMs = 30_000): Promise<T | null> {
+  const tabId = await openTab(url, false);
+  try {
+    for (const end = Date.now() + timeoutMs; Date.now() < end;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      // Fails while the page navigates (a passed check reloads it); asked again a second later.
+      const [hit] = await chrome.scripting.executeScript({ target: { tabId }, func: read }).catch(() => []);
+      if (hit?.result != null) return hit.result as T;
+    }
+    return null;
+  } finally {
+    await closeTab(tabId);
+  }
+}

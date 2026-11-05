@@ -142,6 +142,8 @@ export const YoloStateSchema = z.object({
   gmailConnected: b(false),
   /** Jobright's feed last answered 401: the user isn't signed in to jobright.ai in this browser. */
   jobrightSignedOut: b(false),
+  /** Indeed's account page last sent the user to sign in: they aren't signed in to indeed.com in this browser. */
+  indeedSignedOut: b(false),
   /** Indeed's search last showed a bot check (Cloudflare) instead of results. */
   indeedBlocked: b(false),
 });

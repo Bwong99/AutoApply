@@ -24,7 +24,7 @@ import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
 import { realInput, realInputReady } from "./realInput";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
-import { applied, discover, inQueueOrder, RETRY } from "./discover";
+import { applied, discover, indeedSignedOutNow, inQueueOrder, readIndeed, RETRY } from "./discover";
 import {
   checkGmail,
   connectGmail,
@@ -34,9 +34,9 @@ import {
   waitForEmail,
   waitForFeedCode,
 } from "./gmail";
-import { closeFrame } from "./host";
+import { closeFrame, readInTab } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
-import { indeedSearch, JOBRIGHT_PING } from "./sources";
+import { indeedCardsInPage, JOBRIGHT_PING } from "./sources";
 import { letterText, textPdf } from "./pdf";
 import {
   credit,
@@ -122,6 +122,11 @@ async function schedule() {
     });
 }
 
+/** Bound: a detached `fetch` called as a method throws "Illegal invocation". */
+const fetcher = (url: string, init?: RequestInit) => fetch(url, init);
+/** An Indeed search Cloudflare checked the fetch of, rendered in a background tab instead. */
+const indeedTab = (url: string) => readInTab(url, indeedCardsInPage);
+
 let cycling: Promise<void> | null = null;
 let toppingUp = false;
 /** The batch (its `batchAt`) whose last discovery found nothing new: no top-up until the next batch. */
@@ -153,11 +158,13 @@ function cycle(topUp = false): Promise<void> {
       batchAt = state.batchAt;
       added = await discover({
         yolo,
-        fetch: (url, init) => fetch(url, init),
+        fetch: fetcher,
         scrape: busy ? undefined : scrape,
+        indeedTab,
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
         want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
         jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
+        indeedSignedOut: (out) => setState({ indeedSignedOut: out }),
         indeedBlocked: (blocked) => setState({ indeedBlocked: blocked }),
       });
       await setState({ lastCheckAt: Date.now() });
@@ -174,18 +181,35 @@ function cycle(topUp = false): Promise<void> {
 
 let checking: Promise<void> | null = null;
 /**
- * At turn-on, whether Jobright and Indeed can be read, so the popup shows it within seconds rather than once the first
- * batch's discovery reaches them. Discovery keeps both flags current after that.
+ * At turn-on, whether Jobright and Indeed can be read (each signed in, and Indeed's search not bot-checked), so the
+ * popup shows it within seconds rather than once the first batch's discovery reaches them. Discovery keeps the flags
+ * current after that.
  */
 async function checkSources() {
-  if (yolo.jobright.length) {
-    const r = await fetch(JOBRIGHT_PING, { credentials: "include" }).catch(() => null);
-    if (r) await setState({ jobrightSignedOut: r.status === 401 });
+  const indeedOut = await checkSignIns({ jobright: yolo.jobright.length > 0, indeed: yolo.boards.includes("indeed") });
+  // Signed in: whether its search is bot-checked, read as discovery reads it.
+  if (indeedOut === false && yolo.queries.length) {
+    const q = [yolo.queries[0], yolo.locations[0] ?? "", yolo.postedWithinDays] as const;
+    const list = await readIndeed({ fetch: fetcher, indeedTab }, ...q).catch(() => undefined);
+    if (list !== undefined) await setState({ indeedBlocked: !list });
   }
-  if (yolo.boards.includes("indeed") && yolo.queries.length && !(await getRun())) {
-    const links = await scrape(indeedSearch(yolo.queries[0], yolo.locations[0] ?? "", yolo.postedWithinDays));
-    await setState({ indeedBlocked: !links });
-  }
+}
+
+/**
+ * Whether the user is signed in to the sources asked for (one tiny request each), recorded for the popup and settings
+ * to warn. Returns Indeed's answer: null if it wasn't asked or couldn't be.
+ */
+async function checkSignIns(which: { jobright: boolean; indeed: boolean }): Promise<boolean | null> {
+  const [jobright, indeed] = await Promise.all([
+    which.jobright ? fetch(JOBRIGHT_PING, { credentials: "include" }).catch(() => null) : null,
+    which.indeed ? indeedSignedOutNow(fetcher) : null,
+  ]);
+  // One write: state is read and written whole.
+  const patch: Partial<YoloState> = {};
+  if (jobright) patch.jobrightSignedOut = jobright.status === 401;
+  if (indeed !== null) patch.indeedSignedOut = indeed;
+  if (Object.keys(patch).length) await setState(patch);
+  return indeed;
 }
 
 /** The queue ran dry with the batch short of `batchSize`: finds more now rather than at the next batch. */
@@ -534,7 +558,11 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       warnings: yolo.enabled
         ? [
             yolo.jobright.length && state.jobrightSignedOut ? "Jobright: sign in to jobright.ai in this browser" : "",
-            yolo.boards.includes("indeed") && state.indeedBlocked
+            yolo.boards.includes("indeed") && state.indeedSignedOut
+              ? "Indeed: sign in to indeed.com in this browser"
+              : "",
+            // Signed out, Indeed isn't searched, so an older bot check says nothing current.
+            yolo.boards.includes("indeed") && !state.indeedSignedOut && state.indeedBlocked
               ? "Indeed: showed a bot check, so YOLO can't read it"
               : "",
           ].filter(Boolean)
@@ -826,13 +854,21 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
 
 export function initYolo(d: YoloDeps) {
   deps = d;
+  let loaded = false;
   const ready = store.get("yolo").then(async (y) => {
     yolo = y;
+    loaded = true;
     await recoverLost();
   });
   store.onChange(["yolo"], (c) => {
     const prev = yolo;
     yolo = c.yolo ?? yolo;
+    // A sign-in source just turned on (YOLO on or off): its settings note shows now, not at the next turn-on or batch.
+    // Before the settings load, `prev` is the defaults, so every source that's on is checked.
+    const turnedOn = (on: (y: Yolo) => boolean) => on(yolo) && (!loaded || !on(prev));
+    const jobright = turnedOn((y) => y.jobright.length > 0);
+    const indeed = turnedOn((y) => y.boards.includes("indeed"));
+    if (jobright || indeed) void checkSignIns({ jobright, indeed });
     // New searches: re-read the feeds in full at the next check, not only what changed since the last one.
     const search = (y: Yolo) => JSON.stringify([y.queries, y.locations, y.remoteOk, y.excludeTitleWords, y.feeds]);
     if (search(prev) !== search(yolo)) void store.set({ feedCache: {} });

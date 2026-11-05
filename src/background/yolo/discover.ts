@@ -15,6 +15,7 @@ import { altKey, jobKey } from "./jobKey";
 import { loadPlaces } from "./places";
 import {
   glassdoorSearch,
+  INDEED_ACCOUNT,
   indeedHost,
   indeedSearch,
   jobrightFeed,
@@ -24,6 +25,7 @@ import {
   parseIndeed,
   parseJobrightFeed,
   parseLinkedIn,
+  indeedSignedOut,
   type Link,
 } from "./sources";
 
@@ -51,6 +53,13 @@ export interface DiscoverDeps {
   want?: number;
   /** Told whether Jobright's feed answered as signed out, each time it's read. */
   jobrightSignedOut?: (out: boolean) => unknown;
+  /**
+   * Renders an Indeed search in a tab with the user's session, for when Cloudflare checks the fetch: what
+   * `indeedCardsInPage` read there, or null if a bot check still stood in. Absent = the fetch only.
+   */
+  indeedTab?: (url: string) => Promise<string | null>;
+  /** Told whether Indeed answered as signed out, each time discovery asks (Indeed is skipped while it is). */
+  indeedSignedOut?: (out: boolean) => unknown;
   /** Told whether Indeed's search showed a bot check instead of results, each time it's read. */
   indeedBlocked?: (blocked: boolean) => unknown;
   now?: number;
@@ -106,6 +115,31 @@ export function inQueueOrder<T extends Ranked>(items: T[], y: Yolo, now = Date.n
       (y.queueBySource ? rank(a) - rank(b) : 0) ||
       within[y.queueSort](a, b),
   );
+}
+
+/** Whether Indeed answers the user as signed out (its account page sends them to sign in); null = it couldn't be asked. */
+export async function indeedSignedOutNow(fetch: Fetcher): Promise<boolean | null> {
+  const r = await fetch(INDEED_ACCOUNT, { method: "HEAD", credentials: "include" }).catch(() => null);
+  return r ? indeedSignedOut(r.url) : null;
+}
+
+/**
+ * One Indeed search, read as the signed-in user: fetched with their cookies, and when Cloudflare checks the fetch,
+ * rendered in a tab instead (whose passed check also lets the next fetch through). null = a bot check stood in both ways.
+ */
+export async function readIndeed(
+  d: Pick<DiscoverDeps, "fetch" | "indeedTab">,
+  q: string,
+  loc: string,
+  days: number,
+): Promise<Listing[] | null> {
+  const url = indeedSearch(q, loc, days);
+  const host = indeedHost(loc);
+  const r = await d.fetch(url, { credentials: "include" });
+  const list = r.ok ? parseIndeed(await r.text(), host) : null;
+  if (list || !d.indeedTab) return list;
+  const page = await d.indeedTab(url);
+  return page === null ? null : (parseIndeed(page, host) ?? []);
 }
 
 const sourceName = (url: string) => {
@@ -175,6 +209,13 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   // What the lists read above already supply, a posting counted once across them.
   const ahead = new Set(found.filter((l) => fits(l)).map((l) => altKey(l.company, l.title))).size;
   const days = y.postedWithinDays;
+  // Indeed is searched only as the signed-in user: signed out, it's skipped and the user told.
+  let indeed = false;
+  if (y.boards.includes("indeed")) {
+    const out = await indeedSignedOutNow(d.fetch);
+    if (out !== null) await d.indeedSignedOut?.(out);
+    indeed = out === false;
+  }
   for (const q of y.queries)
     for (const loc of y.locations.length ? y.locations : [""]) {
       if (y.boards.includes("linkedin"))
@@ -205,12 +246,14 @@ export async function discover(d: DiscoverDeps): Promise<number> {
           const r = await d.fetch(glassdoorSearch(q, loc, days), { credentials: "omit" });
           return r.ok ? parseGlassdoor(await r.text(), now) : [];
         });
-      if (y.boards.includes("indeed") && d.scrape)
+      if (indeed)
         await safely(async () => {
           // Cloudflare guards Indeed's search; YOLO never solves a bot check, it tells the user instead.
-          const links = await d.scrape!(indeedSearch(q, loc, days));
-          await d.indeedBlocked?.(!links);
-          return parseIndeed(links ?? [], indeedHost(loc));
+          const list = await readIndeed(d, q, loc, days);
+          await d.indeedBlocked?.(!list);
+          // Blocked both ways: the searches after it would be too, each one a tab.
+          if (!list) indeed = false;
+          return list ?? [];
         });
     }
 

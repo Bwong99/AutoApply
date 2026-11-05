@@ -337,16 +337,30 @@ export function Yolo() {
       <div class="form">
         <div>
           {BOARDS.map((b) => (
-            <Toggle
-              label={BOARD_NAMES[b]}
-              help={
-                b === "indeed"
-                  ? "Indeed loads its results with scripts, so they're read from a hidden browser page. Slower than the other sources."
-                  : undefined
-              }
-              checked={y.boards.includes(b)}
-              onChange={(on) => set({ boards: on ? [...y.boards, b] : y.boards.filter((x) => x !== b) })}
-            />
+            <>
+              <Toggle
+                label={BOARD_NAMES[b]}
+                help={
+                  b === "indeed"
+                    ? "Searches Indeed as you, so it needs you signed in to indeed.com in this browser. When Indeed asks for a bot check, that search opens in a background tab in the collapsed AutoApply group for a few seconds."
+                    : undefined
+                }
+                checked={y.boards.includes(b)}
+                onChange={(on) => set({ boards: on ? [...y.boards, b] : y.boards.filter((x) => x !== b) })}
+              />
+              {b === "indeed" && y.boards.includes("indeed") && state?.indeedSignedOut && (
+                <p class="err" role="status">
+                  Indeed answered as signed out at the last check. Sign in to indeed.com in this browser to get its
+                  jobs.
+                </p>
+              )}
+              {b === "indeed" && y.boards.includes("indeed") && !state?.indeedSignedOut && state?.indeedBlocked && (
+                <p class="err" role="status">
+                  Indeed showed a bot check instead of results at the last check, so it added no jobs. YOLO doesn't
+                  solve these; using indeed.com yourself in this browser may clear it before the next batch.
+                </p>
+              )}
+            </>
           ))}
           <Toggle
             label="Jobright"
@@ -357,12 +371,6 @@ export function Yolo() {
           {y.jobright.length > 0 && state?.jobrightSignedOut && (
             <p class="err" role="status">
               Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
-            </p>
-          )}
-          {y.boards.includes("indeed") && state?.indeedBlocked && (
-            <p class="err" role="status">
-              Indeed showed a bot check instead of results at the last check, so it added no jobs. YOLO doesn't solve
-              these; using indeed.com yourself in this browser may clear it before the next batch.
             </p>
           )}
         </div>
