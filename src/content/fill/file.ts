@@ -34,16 +34,20 @@ function deepText(n: Node): string {
   return [...(sr ? [sr] : []), ...n.childNodes].map(deepText).join(" ");
 }
 
-function uploadedIn(h: FieldHandle, name: string): boolean {
+const RE_UPLOADED = /uploaded|attached|✓/i;
+
+/** `before`: the box's text before the upload; a word like "uploaded" there already ("Files uploaded must be PDFs") proves nothing. */
+function uploadedIn(h: FieldHandle, name: string, before?: string): boolean {
   const input = fileInputIn(h.el) ?? fileInputIn(h.container);
   if (input?.files?.[0]?.name === name) return true;
   const text = collapse(deepText(h.container));
-  return normalize(text).includes(normalize(name)) || /uploaded|attached|✓/i.test(text);
+  return normalize(text).includes(normalize(name)) || (RE_UPLOADED.test(text) && !RE_UPLOADED.test(before ?? ""));
 }
 
 export async function fillFile(h: FieldHandle, meta: DocumentMeta, base64: string): Promise<FillResult> {
   if ((fileInputIn(h.el) ?? fileInputIn(h.container))?.files?.[0]?.name === meta.fileName)
     return { outcome: "ok", shown: meta.fileName };
+  const before = collapse(deepText(h.container));
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const file = new File([bytes], meta.fileName, { type: meta.mimeType });
   const dt = new DataTransfer();
@@ -66,12 +70,12 @@ export async function fillFile(h: FieldHandle, meta: DocumentMeta, base64: strin
     const btn = [...h.container.querySelectorAll<HTMLElement>("button,[role=button]")].find(
       (b) => RE_UPLOAD_BUTTON.test(b.textContent ?? "") && !isForbiddenClick(b),
     );
-    if (btn && !uploadedIn(h, meta.fileName)) {
+    if (btn && !uploadedIn(h, meta.fileName, before)) {
       input = clickForPicker(btn) ?? (await waitFor(() => fileInputIn(h.container), 500));
       if (input) setInput(input);
     }
   }
-  const ok = await waitFor(() => uploadedIn(h, meta.fileName), 3000);
+  const ok = await waitFor(() => uploadedIn(h, meta.fileName, before), 3000);
   return ok ? { outcome: "ok", shown: meta.fileName } : { outcome: "flag", note: "Upload the file manually" };
 }
 

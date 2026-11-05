@@ -842,3 +842,16 @@ describe("typeText", () => {
     expect([cur.value, popup.value]).toEqual(["U", "BC"]);
   });
 });
+
+describe("showsWord", () => {
+  it("reads a short answer as picked only when the box shows it as a word", async () => {
+    const { showsWord } = await import("../../src/content/fill/dropdown");
+    expect(showsWord("No", "No")).toBe(true);
+    expect(showsWord("No ×", "No")).toBe(true);
+    expect(showsWord("NoRemove", "No")).toBe(true);
+    expect(showsWord("Not applicable", "No")).toBe(false);
+    expect(showsWord("None", "No")).toBe(false);
+    expect(showsWord("Yes, I am", "Yes")).toBe(true);
+    expect(showsWord("Canada (+1)", "+1")).toBe(true);
+  });
+});
