@@ -173,7 +173,7 @@ function backdrop(el: Element): number[] | null {
  * Styled so no one sees it: tiny, transparent, the color of its background, zero-size or off the page. Not text a
  * collapsed "Show more" box clips, which a person can open.
  */
-function stealthy(el: Element, root: Element): boolean {
+export function stealthy(el: Element, root: Element): boolean {
   const cs = getComputedStyle(el);
   if (parseFloat(cs.fontSize) < 4) return true;
   const [r, g, b, a = 1] = channels(cs.color);

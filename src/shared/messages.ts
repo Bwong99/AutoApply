@@ -1,3 +1,4 @@
+import type { ReviewField, ReviewResult } from "./review";
 import type {
   ApiError,
   Choice,
@@ -131,6 +132,8 @@ export type Message =
   | { type: "YOLO_REVEAL"; site: string }
   | { type: "YOLO_DELETE_ACCOUNT"; site: string }
   | { type: "CHOOSE_OPTIONS"; items: ChooseItem[]; groupId: string }
+  /** The AI review of a filled page (content/review): the page as text and the fields found on it. */
+  | { type: "REVIEW_FORM"; page: string; fields: ReviewField[]; groupId: string; yolo?: boolean }
   | { type: "DRAFT_ESSAYS"; items: EssayItem[]; groupId: string }
   | { type: "SAVE_LEARNED_ANSWER"; answer: LearnedAnswerInput }
   | { type: "LEARNED_USED"; ids: string[] }
@@ -180,6 +183,7 @@ export interface Responses {
   SET_JOB_PAY: Ok;
   MAP_FIELDS: { decisions: Decision[]; usedModel: string } | Err;
   CHOOSE_OPTIONS: { choices: Choice[] } | Err;
+  REVIEW_FORM: ReviewResult | Err;
   DRAFT_ESSAYS: { essays: { fieldId: string; text: string | null; note?: string }[] } | Err;
   SAVE_LEARNED_ANSWER: Ok;
   LEARNED_USED: Ok;

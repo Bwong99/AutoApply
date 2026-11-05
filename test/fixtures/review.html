@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Apply – Platform Co-op | Acme Robotics</title>
+    <script src="common.js"></script>
+    <style>
+      .row {
+        margin: 12px 0;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 12px;
+        border: 1px solid #888;
+        cursor: pointer;
+      }
+      .pill.on {
+        background: #335;
+        color: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Platform Co-op</h1>
+    <p>Build robot fleet software in Vancouver.</p>
+    <form id="apply">
+      <div class="row"><label for="fn">First name *</label><input id="fn" name="first_name" required /></div>
+      <div class="row"><label for="ln">Last name *</label><input id="ln" name="last_name" required /></div>
+      <div class="row"><label for="em">Email *</label><input id="em" name="email" type="email" required /></div>
+      <!-- Choices the scan can't see: spans with a click handler, and a question without "?". -->
+      <div class="row">
+        <div class="q">Are you legally authorized to work in Canada *</div>
+        <div>
+          <span class="pill" tabindex="0" data-v="Yes">Yes</span> <span class="pill" tabindex="0" data-v="No">No</span>
+        </div>
+        <input type="hidden" id="auth" name="authorized" />
+      </div>
+    </form>
+    <p id="status"></p>
+    <script>
+      // A site parser: once the email is in, it rewrites the last name (a wrong value only the review can catch).
+      document.getElementById("em").addEventListener("change", () => {
+        document.getElementById("ln").value = "Parsed-Surname";
+      });
+      for (const p of document.querySelectorAll(".pill"))
+        p.addEventListener("click", () => {
+          for (const q of document.querySelectorAll(".pill")) q.classList.toggle("on", q === p);
+          document.getElementById("auth").value = p.dataset.v;
+          document.getElementById("status").textContent = `authorized: ${p.dataset.v}`;
+        });
+    </script>
+  </body>
+</html>

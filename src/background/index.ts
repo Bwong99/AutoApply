@@ -23,6 +23,7 @@ import { VALIDATION_PROMPT } from "./gemini/prompts";
 import { VALIDATION_SCHEMA, ValidationZ } from "./gemini/schemas";
 import { adoptPosting, getJobContext, getJobPay, setJobContext, setJobPay } from "./jobContext";
 import { mapFields, type ServiceCtx } from "./services/mapFields";
+import { reviewForm } from "./services/reviewForm";
 import { chooseOptions } from "./services/chooseOptions";
 import { draftEssays } from "./services/draftEssays";
 import { parseResume } from "./services/parseResume";
@@ -37,6 +38,7 @@ import {
   yoloDoc,
   yoloHandlers,
   yoloJob,
+  yoloAlive,
   yoloNote,
   yoloOverrides,
   yoloUpload,
@@ -182,14 +184,19 @@ async function serviceCtx(signal?: AbortSignal, task: AiTask = "fill"): Promise<
       signal,
     };
   }
-  const { selectedModel, fallbackModel } = await store.getMany(["selectedModel", "fallbackModel"]);
+  const { selectedModel, fallbackModel, reviewModel } = await store.getMany([
+    "selectedModel",
+    "fallbackModel",
+    "reviewModel",
+  ]);
   if (!pool.keys.length) return { error: { kind: "noKey", message: "No API key" } };
   if (!selectedModel) return { error: { kind: "noModel", message: "No model selected" } };
   return {
     ai: { call: (spec, o) => gemini.call(untrapped(spec), o) },
     settings,
-    model: selectedModel,
-    fallback: fallbackModel,
+    // The review's own model when one is set; the selected one is its fallback.
+    model: (task === "review" && reviewModel) || selectedModel,
+    fallback: task === "review" && reviewModel && reviewModel !== selectedModel ? selectedModel : fallbackModel,
     signal,
   };
 }
@@ -411,6 +418,51 @@ const handlers: Handlers = {
     if ("error" in r) return { error: { kind: "other", message: r.error } };
     await yoloNote(sender, r.tailored ? `Résumé tailored: ${r.note}` : `Untailored résumé uploaded: ${r.note}`);
     return { meta: r.meta, tailored: r.tailored, note: r.note };
+  },
+
+  async REVIEW_FORM({ page, fields, groupId, yolo }, sender) {
+    const ctx = await serviceCtx(groupSignal(sender, groupId), "review");
+    if ("error" in ctx) return ctx;
+    const s = await store.getMany(["profile", "documentsIndex"]);
+    const tab = await runTab(sender);
+    const job = tab?.id !== undefined ? await getJobContext(tab.id) : null;
+    const pays = tab ? await getJobPay(tab) : [];
+    const y = yolo ? await yoloOverrides(sender) : null;
+    const profile = y ? { ...s.profile, personal: { ...s.profile.personal, email: y.email } } : s.profile;
+    // A long review keeps a YOLO run's step alive: it is progress, not a stuck page.
+    const alive = y ? setInterval(() => void yoloAlive(sender), 60_000) : undefined;
+    if (y) await yoloAlive(sender);
+    const merged = { ...settings, ...(y?.settings ?? {}) };
+    const r = await reviewForm(ctx, {
+      page,
+      fields,
+      profile,
+      documents: s.documentsIndex.map(({ id, label, kind }) => ({ id, label, kind })),
+      job,
+      pays,
+      yolo: !!y,
+      consents: {
+        required: merged.autoAcceptAcknowledgements ? "accept" : "ask",
+        optional: merged.optionalConsents,
+      },
+    }).finally(() => clearInterval(alive));
+    if (y) {
+      await yoloAlive(sender);
+      // What the review changed, with the application (Applications), so a corrected or found answer is visible.
+      const q = (id: string) => fields.find((f) => f.id === id)?.question.slice(0, 60) ?? id;
+      const fixed = r.fixes.filter((f) => f.verdict !== "needs_user" && f.answer !== undefined);
+      if (fixed.length)
+        await yoloNote(
+          sender,
+          `Review corrected: ${fixed.map((f) => `${q(f.fieldId)} → "${f.answer!.slice(0, 60)}"`).join("; ")}`,
+        );
+      if (r.missed.length)
+        await yoloNote(
+          sender,
+          `Review found fields the scan missed: ${r.missed.map((m) => m.question.slice(0, 60)).join("; ")}`,
+        );
+    }
+    return { ...r, usedModel: (await modelName(r.usedModel)) ?? r.usedModel };
   },
 
   async CHOOSE_OPTIONS({ items, groupId }, sender) {

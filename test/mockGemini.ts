@@ -5,7 +5,7 @@ import { normalize } from "../src/shared/normalize";
 
 type Json = Record<string, unknown>;
 export type CallKind =
-  "list" | "validate" | "map" | "audit" | "choose" | "essay" | "resume" | "guess" | "relevance" | "tailor";
+  "list" | "validate" | "map" | "audit" | "choose" | "essay" | "resume" | "guess" | "relevance" | "tailor" | "review";
 export interface Call {
   kind: CallKind;
   key: string;
@@ -179,6 +179,46 @@ export class MockGemini {
   /** The résumé tailor's edit operations; by default, the first bullet group reversed and its first bullet reworded. */
   tailorOps: ((payload: Json) => Json) | null = null;
 
+  /**
+   * The AI review: every field "ok", except the profile's names and email shown wrong ("wrong" with the profile's),
+   * and Yes/No pills or boxes the scan missed under a question the decision table answers ("missed").
+   */
+  review(payload: Json): Json {
+    const want: [RegExp, string][] = [
+      [/^first name/i, "Ada"],
+      [/^last name/i, "Lovelace"],
+      [/^e-?mail/i, "ada@example.com"],
+    ];
+    const fields = (payload.fields as { id: string; question: string; shown: string; locked?: boolean }[]).map((f) => {
+      const w = !f.locked && want.find(([re]) => re.test(f.question));
+      return w && f.shown !== w[1]
+        ? { fieldId: f.id, verdict: f.shown ? "wrong" : "fill", answer: w[1], reason: "Profile", sources: ["personal"] }
+        : { fieldId: f.id, verdict: "ok", sources: [] };
+    });
+    const missed: Json[] = [];
+    const lines = String(payload.page).split("\n");
+    lines.forEach((line, i) => {
+      const pills = [...line.matchAll(/\[(c\d+) clickable "(Yes|No)"\]/g)];
+      const boxes = [...line.matchAll(/\[(c\d+) [a-z]+ unscanned[^\]]*\]/g)];
+      const question = (line.replace(/\[[^\]]*\]/g, "").trim() || lines[i - 1] || "").replace(/^#\s*/, "");
+      if (pills.length >= 2) {
+        const d = decide({ id: "x", kind: "radio_group", label: question, options: ["0: Yes", "1: No"] });
+        const answer = d.action === "fill" ? ["Yes", "No"][(d.optionIndexes as number[])[0]] : null;
+        missed.push({
+          refs: pills.map((p) => p[1]),
+          question,
+          kind: "radio_group",
+          required: true,
+          answer,
+          sources: [],
+        });
+      } else
+        for (const b of boxes)
+          missed.push({ refs: [b[1]], question, kind: "text", required: false, answer: null, sources: [] });
+    });
+    return { fields, missed, reveal: [] };
+  }
+
   fail(key: string, ...f: Failure[]) {
     (this.failures[key] ??= []).push(...f);
   }
@@ -231,7 +271,9 @@ export class MockGemini {
                   ? "relevance"
                   : system.startsWith("You tailor")
                     ? "tailor"
-                    : "resume";
+                    : system.startsWith("You review")
+                      ? "review"
+                      : "resume";
     const payload = kind === "resume" ? { text } : (JSON.parse(text) as Json);
     const call = { kind, key, model, payload };
     const gc = body.generationConfig as Json;
@@ -290,6 +332,7 @@ export class MockGemini {
       };
       return send(200, reply(ops), call);
     }
+    if (kind === "review") return send(200, reply(this.review(payload)), call);
     if (kind === "relevance")
       return send(200, reply({ keep: (payload.jobs as { i: number }[]).map((j) => j.i) }), call);
     if (kind === "essay")

@@ -318,7 +318,7 @@ export function jobCountry(location: string): string | undefined {
  * job country, a U.S. visa it names: Clever's "require sponsorship for employment visa status (e.g. H-1B visa
  * status)?" got "No" for a U.S. job whose page gave no parseable location.
  */
-function workCountry(label: string, home: string, job: string | undefined): string | undefined {
+export function workCountry(label: string, home: string, job: string | undefined): string | undefined {
   if (!isWorkAuth(label)) return undefined;
   const own = canonicalCountry(home) ?? normalize(home);
   // National Bank's "authorized to work in Canada if the position is located in Canada OR … in the USA if the position
@@ -346,7 +346,7 @@ const SITES: [RegExp, string[]][] = [
  * A link for a field that names one site, pointing elsewhere: Replit's "Replit Profile URL" got the GitHub URL and
  * the audit let it through. Fields that also take any site ("LinkedIn, personal website or blog") are left alone.
  */
-function wrongSiteLink(label: string, answer: string, sources: string[] = []): boolean {
+export function wrongSiteLink(label: string, answer: string, sources: string[] = []): boolean {
   if (/website|portfolio|blog|personal|other|\bor\b/i.test(label)) return false;
   const named = SITES.filter(([re]) => re.test(label));
   const onSite = (x: string) => named.some(([, hosts]) => hosts.some((h) => x.includes(h)));
@@ -430,7 +430,7 @@ function currentStatusDecision(
  * An AI answer of "None"/"No" to a sponsorship question for a country where the profile needs sponsorship (no entry,
  * or one requiring it). Notion's "will you require any of the below sponsorship? J1 / F1 / None / Other" got "None".
  */
-function deniesNeededSponsorship(
+export function deniesNeededSponsorship(
   f: FieldDescriptor,
   answer: string,
   country: string | undefined,
@@ -1748,7 +1748,7 @@ const SEASONS: [RegExp, number[]][] = [
  * against it: the model miscounts numeric lists, and Plaid's end year got "2025". Corrected to the right option, or
  * flagged when the list lacks it (Plaid's years stop at 2027).
  */
-function citedDateCheck(f: FieldDescriptor, d: Decision, profile: Profile): Decision {
+export function citedDateCheck(f: FieldDescriptor, d: Decision, profile: Profile): Decision {
   const i = d.optionIndexes?.[0];
   if (d.action !== "fill" || !f.options || i === undefined || d.optionIndexes!.length !== 1) return d;
   const dates = (d.sources ?? []).flatMap((s) => {

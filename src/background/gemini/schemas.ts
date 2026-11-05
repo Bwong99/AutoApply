@@ -186,3 +186,107 @@ export const TailorZ = z.object({
   order: z.array(z.object({ group: z.string(), items: z.array(z.string()) })).catch([]),
   cut: z.array(z.string()).catch([]),
 });
+
+// The AI review of a filled page (services/reviewForm.ts).
+const KINDS = [
+  "text",
+  "textarea",
+  "email",
+  "tel",
+  "url",
+  "number",
+  "date",
+  "month",
+  "select",
+  "multiselect",
+  "radio_group",
+  "checkbox_group",
+  "checkbox",
+  "dropdown",
+  "typeahead",
+  "file",
+  "contenteditable",
+] as const;
+export const VERDICTS = ["ok", "wrong", "fill", "relabel", "leave_blank", "needs_user"] as const;
+const REVIEW_FIELD_PROPS = {
+  fieldId: { type: "STRING" },
+  verdict: { type: "STRING", enum: [...VERDICTS] },
+  reason: nullableStr,
+  question: nullableStr,
+  answer: nullableStr,
+  sources: { type: "ARRAY", items: { type: "STRING" } },
+};
+const MISSED_PROPS = {
+  refs: { type: "ARRAY", items: { type: "STRING" } },
+  question: { type: "STRING" },
+  kind: { type: "STRING", enum: [...KINDS] },
+  required: { type: "BOOLEAN" },
+  reason: nullableStr,
+  answer: nullableStr,
+  sources: { type: "ARRAY", items: { type: "STRING" } },
+};
+export const REVIEW_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    fields: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: REVIEW_FIELD_PROPS,
+        propertyOrdering: Object.keys(REVIEW_FIELD_PROPS),
+        required: ["fieldId", "verdict"],
+      },
+    },
+    missed: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: MISSED_PROPS,
+        propertyOrdering: Object.keys(MISSED_PROPS),
+        required: ["refs", "question", "kind", "required"],
+      },
+    },
+    reveal: { type: "ARRAY", items: { type: "STRING" } },
+  },
+  propertyOrdering: ["fields", "missed", "reveal"],
+  required: ["fields", "missed", "reveal"],
+};
+const str = z
+  .string()
+  .nullish()
+  .transform((v) => v ?? undefined);
+export const ReviewZ = z.object({
+  fields: z
+    .array(
+      z.object({
+        fieldId: z.string(),
+        verdict: z.enum(VERDICTS),
+        reason: str,
+        question: str,
+        answer: z
+          .string()
+          .nullish()
+          .transform((v) => (v === undefined ? undefined : v)),
+        sources: z.array(z.string()).catch([]),
+      }),
+    )
+    .catch([]),
+  missed: z
+    .array(
+      z.object({
+        refs: z.array(z.string()),
+        question: z.string(),
+        kind: z.enum(KINDS).catch("text"),
+        required: z.boolean().catch(false),
+        reason: str,
+        answer: z
+          .string()
+          .nullish()
+          .transform((v) => v ?? null),
+        sources: z.array(z.string()).catch([]),
+      }),
+    )
+    .catch([]),
+  reveal: z.array(z.string()).catch([]),
+});
+export type ReviewReply = z.infer<typeof ReviewZ>;

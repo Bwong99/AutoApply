@@ -106,13 +106,19 @@ export interface ClaudeModel {
   description: string;
 }
 
-export type ThinkingCap = { kind: "level"; value: "minimal" | "low" } | { kind: "budget"; value: 0 } | { kind: "none" };
+export type ThinkingCap =
+  | { kind: "level"; value: "minimal" | "low" | "high" }
+  /** 0 turns thinking off; -1 lets the model decide how much (2.5 models). */
+  | { kind: "budget"; value: 0 | -1 }
+  | { kind: "none" };
 
 export interface ModelCaps {
   thinking: ThinkingCap;
   schema: "responseSchema" | "promptOnly";
   verifiedAt: number;
   essayThinking?: ThinkingCap;
+  /** The AI review's deeper thinking (reviewThinking), or the model's own tier when it refused that. */
+  reviewThinking?: ThinkingCap;
 }
 
 /** A pay range read from a job posting; `currency` is "" for a bare "$". */
@@ -171,6 +177,8 @@ export interface FrameStatus {
   counts: StatusCounts;
   needsYou: NeedsYouItem[];
   running: boolean;
+  /** The AI review is reading this frame's page. */
+  reviewing?: boolean;
   error?: string;
   /** Résumés and cover letters this frame's fill uploaded, for the overlay to preview. */
   uploads?: UploadedDoc[];

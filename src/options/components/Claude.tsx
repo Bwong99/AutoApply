@@ -188,6 +188,11 @@ const TASKS: [AiTask, string, string][] = [
   ],
   ["write", "Essays & cover letters", "Drafted essay answers and tailored cover letter PDFs."],
   ["resume", "Résumé import", "Reading your résumé into the profile (Prefill)."],
+  [
+    "review",
+    "Answer review & YOLO navigation",
+    "The AI review of each filled page (Behavior → Review every fill with AI), and YOLO's next step on pages it can't read. Accuracy matters most here: the strongest model and effort you have.",
+  ],
 ];
 
 export function ClaudeModels() {

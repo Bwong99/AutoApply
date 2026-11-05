@@ -7,8 +7,8 @@ import { ApplicationSchema, QueueItemSchema, VaultEntrySchema, YoloSchema, YoloS
 export const SCHEMA_VERSION = 1;
 
 const ThinkingSchema = z.union([
-  z.object({ kind: z.literal("level"), value: z.enum(["minimal", "low"]) }),
-  z.object({ kind: z.literal("budget"), value: z.literal(0) }),
+  z.object({ kind: z.literal("level"), value: z.enum(["minimal", "low", "high"]) }),
+  z.object({ kind: z.literal("budget"), value: z.union([z.literal(0), z.literal(-1)]) }),
   z.object({ kind: z.literal("none") }),
 ]);
 
@@ -87,6 +87,7 @@ export const ModelCapsSchema = z.object({
   schema: z.enum(["responseSchema", "promptOnly"]),
   verifiedAt: z.number(),
   essayThinking: ThinkingSchema.optional(),
+  reviewThinking: ThinkingSchema.optional(),
 });
 
 /** Every chrome.storage.local key and its schema. All reads are validated. */
@@ -101,6 +102,8 @@ export const LOCAL_SCHEMAS = {
   modelListFetchedAt: z.number().catch(0),
   selectedModel: z.string().nullable().catch(null),
   fallbackModel: z.string().nullable().catch(null),
+  /** The model the AI review and YOLO's navigator use (Gemini); null: the selected model. */
+  reviewModel: z.string().nullable().catch(null),
   modelCapabilities: rec(ModelCapsSchema),
   /** Claude Code answered a Test connection and hasn't failed setup since (background/claude). */
   claudeReady: z.boolean().catch(false),

@@ -14,7 +14,15 @@ const claudeTask = z
     effort: z.enum(["", "low", "medium", "high", "xhigh", "max"]).catch(""),
   })
   .catch({ model: "", effort: "" });
-const claudeTasks = z.object({ fill: claudeTask, write: claudeTask, resume: claudeTask });
+const claudeTasks = z.object({
+  fill: claudeTask,
+  write: claudeTask,
+  resume: claudeTask,
+  /** The AI review of each filled page and YOLO's navigator: the strongest model, thinking hardest (accuracy first). */
+  review: z
+    .object({ model: z.string().regex(CLAUDE_ARG), effort: z.enum(["", "low", "medium", "high", "xhigh", "max"]) })
+    .catch({ model: "opus", effort: "high" }),
+});
 
 const TAILOR_PROMPT_MAY = `You may:
 - Reword bullets to use the job's own terms for skills and tools the résumé already shows. Keep each bullet's meaning, tense and voice, and its length within about 15%.
@@ -87,6 +95,13 @@ const base = z.object({
   requestTimeoutMs: n(25000, 1000, 120000),
   maxConcurrentRequests: n(4, 1, 16),
   debugLogging: b(false),
+  /**
+   * After each fill, an AI reads the page as shown and checks every answer against the profile: it corrects wrong
+   * ones, fills what the scan missed, and flags the rest (content/review). YOLO always reviews while this is on.
+   */
+  reviewFills: b(true),
+  /** How long one review (or YOLO navigator) call may take: these think longer than a fill's calls. */
+  reviewTimeoutMs: n(180000, 10000, 600000),
   /** How many YOLO applications' debug logs are kept. */
   debugLogLimit: n(100, 1, MAX_BATCH_APPLICATIONS),
 });
