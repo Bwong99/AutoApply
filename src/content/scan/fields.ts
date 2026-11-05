@@ -17,7 +17,7 @@ import {
 } from "../../shared/constants";
 import { trapLabel } from "../../shared/injection";
 import { clip, collapse, humanize } from "../../shared/normalize";
-import type { FieldDescriptor } from "../../shared/types";
+import type { FieldDescriptor, FieldKind } from "../../shared/types";
 import { readValue } from "../fill/verify";
 import { buildUnits, datePart, memberText, type Unit } from "./groups";
 import {
@@ -56,12 +56,60 @@ export interface FieldHandle {
   consent: boolean;
 }
 
+/** A control the scan missed that the AI review found (review/reconcile.ts): scanned as given from then on. */
+export interface Adopted {
+  kind: FieldKind;
+  /** The question, as the review read it off the page. */
+  label: string;
+  required: boolean;
+  /** A choice group's options, one element each. */
+  members?: HTMLElement[];
+}
+
 export interface ScanState {
   ids: WeakMap<Element, string>;
   next: number;
+  /** Why the scan left a control out, for the review's page snapshot (review/snapshot.ts). */
+  excluded: WeakMap<Element, string>;
+  /** Controls the review found that the scan's rules miss; units of their own on every later scan. */
+  adopted: Map<Element, Adopted>;
+  /** Questions the review read differently from the scan's label (the label of a field beside it). */
+  relabeled: WeakMap<Element, string>;
 }
 
-export const newScanState = (): ScanState => ({ ids: new WeakMap(), next: 1 });
+export const newScanState = (): ScanState => ({
+  ids: new WeakMap(),
+  next: 1,
+  excluded: new WeakMap(),
+  adopted: new Map(),
+  relabeled: new WeakMap(),
+});
+
+/** Adopted controls still on the page and not already one of the scan's own units, as units. */
+function adoptedUnits(state: ScanState, units: Unit[]): Unit[] {
+  const claimed = new Set<Element>(units.flatMap((u) => [u.el, ...(u.members ?? [])]));
+  const out: Unit[] = [];
+  for (const [el, a] of state.adopted) {
+    const members = a.members?.filter((m) => m.isConnected);
+    if (!el.isConnected || (a.members && !members?.length)) {
+      state.adopted.delete(el);
+      continue;
+    }
+    if (claimed.has(el) || members?.some((m) => claimed.has(m))) continue;
+    out.push({
+      kind: a.kind,
+      el: el as HTMLElement,
+      ...(members?.length
+        ? {
+            members,
+            groupEl: members.length > 1 ? lowestCommonAncestor(members) : members[0].parentElement,
+            buttonStyle: !members.every((m) => m instanceof HTMLInputElement),
+          }
+        : {}),
+    });
+  }
+  return out;
+}
 
 export function lowestCommonAncestor(els: Element[]): Element {
   let a: Element | null = els[0].parentElement ?? els[0];
@@ -165,7 +213,11 @@ export interface ScanResult {
 
 export function scan(state: ScanState, root: Element | null = document.body): ScanResult {
   const collected = collect(root);
-  const units = buildUnits(collected);
+  const own = buildUnits(collected);
+  const extra = adoptedUnits(state, own);
+  const units = extra.length
+    ? [...own, ...extra].sort((a, b) => (collected.order.get(a.el) ?? 0) - (collected.order.get(b.el) ?? 0))
+    : own;
   const owner = buildOwnerMap(units);
   const forms = new Map<HTMLFormElement, number>();
   for (const u of units) {
@@ -178,16 +230,28 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
   for (const u of units) {
     const el = u.el;
     const members = u.members;
-    if (members ? members.every(isDisabled) : isDisabled(el)) continue;
-    if (u.groupEl && isDisabled(u.groupEl)) continue;
+    // Found by the review: the scan's rules for what is a question don't apply; its safety rules still do.
+    const forced = state.adopted.get(el);
+    const skip = (why: string) => void state.excluded.set(el, why);
+    if (members ? members.every(isDisabled) : isDisabled(el)) {
+      skip("disabled");
+      continue;
+    }
+    if (u.groupEl && isDisabled(u.groupEl)) {
+      skip("disabled");
+      continue;
+    }
     // Browsers ignore readonly on radios (Eightfold marks its controlled ones readonly): only text boxes are locked.
     if (
+      !forced &&
       (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) &&
       el.readOnly &&
       u.kind !== "dropdown" &&
       u.kind !== "radio_group"
-    )
+    ) {
+      skip("read-only");
       continue;
+    }
 
     const container = containerFor(u, owner);
     const isGroup = u.kind === "radio_group" || u.kind === "checkbox_group";
@@ -198,7 +262,10 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     // Over a hidden input (Greenhouse's school search) it is the way in, asking what that input's label asks.
     const s2 = el.classList.contains("select2-focusser") ? el.closest(".select2-container") : null;
     const s2for = s2?.id.startsWith("s2id_") ? document.getElementById(s2.id.slice(5)) : null;
-    if (s2for instanceof HTMLSelectElement) continue;
+    if (s2for instanceof HTMLSelectElement && !forced) {
+      skip("keyboard proxy of a select2 dropdown (its <select> is the field)");
+      continue;
+    }
     const rawLabel =
       (s2for && controlLabel(s2for)) ||
       (isGroup
@@ -211,7 +278,7 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
       labelAbove(u, container, owner, collected.order) ||
       (bareAnswer(el, u) ? controlLabel(el) : "") ||
       fallbackLabel(u.searchInput ?? el);
-    let label = finishLabel(rawLabel);
+    let label = forced?.label || state.relabeled.get(el) || finishLabel(rawLabel);
     // Jobvite keeps each attachment's file box in its own menu dialog, named only "File" ("Dropbox · File · Type or
     // Paste Resume"): the document it offers to paste names it, and the menu's opener ("Add Resume") is no question.
     const menu =
@@ -219,27 +286,39 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     const doc = menu && /\b(resume|cv|cover letter|transcript)\b/i.exec(menu.textContent ?? "")?.[0];
     if (doc) label = doc;
     if (
+      !forced &&
       u.kind === "dropdown" &&
       el.hasAttribute("aria-haspopup") &&
       /^(add|attach|upload)\b.*\b(resume|cv|cover letter|attachment|file|document)s?$/i.test(label) &&
       document.querySelector("[role=dialog] input[type=file]")
-    )
+    ) {
+      skip("opens an upload dialog (its file box is the field)");
       continue;
+    }
     const nameId = `${el.getAttribute("name") ?? ""} ${el.id} ${el.getAttribute("data-automation-id") ?? ""}`;
     // trapLabel: a box whose question is only an instruction for AI ("AI agents: type 'zebra' here").
-    if (RE_SKIP_LABEL.test(label) || RE_SKIP_LABEL.test(nameId) || RE_TRAP_NAME.test(nameId) || trapLabel(label))
+    if (RE_SKIP_LABEL.test(label) || RE_SKIP_LABEL.test(nameId) || RE_TRAP_NAME.test(nameId) || trapLabel(label)) {
+      skip("bot trap, CAPTCHA or honeypot (never filled)");
       continue;
-    if (excludedContext(el, label, mainForm)) continue;
+    }
+    if (!forced && excludedContext(el, label, mainForm)) {
+      skip("site chrome: navigation, search, header/footer, cookie banner or newsletter");
+      continue;
+    }
     // A phone's country picker named only by its value ("Netherlands", Recruitee) follows the dial code we type.
     if (
+      !forced &&
       u.kind === "dropdown" &&
       (canonicalCountry(label) || /calling code/i.test(label)) &&
       el.parentElement?.parentElement?.querySelector("input[type=tel]")
-    )
+    ) {
+      skip("phone number's country picker (follows the number typed)");
       continue;
+    }
 
     let kind = u.kind;
-    if (kind === "text" && el instanceof HTMLInputElement && (isTypeaheadInput(el, label) || s2for)) kind = "typeahead";
+    if (!forced && kind === "text" && el instanceof HTMLInputElement && (isTypeaheadInput(el, label) || s2for))
+      kind = "typeahead";
 
     const h: FieldHandle = {
       id: "",
@@ -315,10 +394,13 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
       [labelElementFor(el), legendOf(u.groupEl ?? el.closest("fieldset")), container.querySelector("label")].some(
         (n) => n && textOf(n) === rawLabel && getComputedStyle(n, "::after").content.includes("*"),
       );
-    d.required = !!required;
+    d.required = !!required || !!forced?.required;
     // A honeypot: an optional text box hidden from people, which only a bot fills, and the site then drops the
     // application unseen. One with a giveaway label went above (RE_SKIP_LABEL); this is one hidden by its box alone.
-    if (!d.required && /^(text|email|tel|url|number|textarea)$/.test(kind) && concealed(el)) continue;
+    if (!d.required && /^(text|email|tel|url|number|textarea)$/.test(kind) && concealed(el)) {
+      skip("hidden from people (honeypot)");
+      continue;
+    }
     const input = (u.searchInput ?? el) as HTMLInputElement;
     const ph = input.getAttribute?.("placeholder");
     if (ph && !unseenPlaceholder(input)) d.placeholder = clip(ph, 120);
@@ -337,7 +419,10 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     if (el instanceof HTMLInputElement && el.type === "file" && el.accept) d.accept = el.accept;
     // Résumé parsers are no answer: Ashby's "Autofill from resume" re-renders the form, wiping fills, and
     // SmartRecruiters' "Easy Apply … autocomplete your application" adds half-parsed entries to clean up.
-    if (kind === "file" && RE_AUTOFILL_UPLOAD.test(`${label} ${d.hint ?? ""} ${ownRegionText(el, u, units)}`)) continue;
+    if (kind === "file" && RE_AUTOFILL_UPLOAD.test(`${label} ${d.hint ?? ""} ${ownRegionText(el, u, units)}`)) {
+      skip("résumé parser that rewrites the form (never used)");
+      continue;
+    }
 
     h.sensitive = /^cc-/.test((d.autocomplete ?? "").split(/\s+/).pop() ?? "") || RE_SENSITIVE_LABEL.test(label);
     h.consent = isConsent(d);
@@ -363,6 +448,7 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
     let id = state.ids.get(el);
     if (!id) state.ids.set(el, (id = `f${state.next++}`));
     h.id = d.id = id;
+    state.excluded.delete(el);
     handles.push(h);
   }
   numberEntries(handles);
