@@ -108,6 +108,14 @@ describe("review guards (checkFix)", () => {
     );
   });
 
+  it("leaves a phone country picker that shows only the right dial code", () => {
+    const cc = field({ question: "Country", kind: "dropdown", required: true, shown: "+1" });
+    expect(checkFix(fix({ verdict: "wrong", answer: "Canada +1" }), cc, profile(), true, undefined)).toBeNull();
+    expect(
+      checkFix(fix({ verdict: "wrong", answer: "Canada +1" }), { ...cc, shown: "+44" }, profile(), true, undefined),
+    ).not.toBeNull();
+  });
+
   it("empties only optional fields that hold a value", () => {
     expect(
       checkFix(fix({ verdict: "wrong", answer: "" }), field({ shown: "x" }), profile(), false, undefined),

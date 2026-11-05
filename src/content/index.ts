@@ -1083,7 +1083,9 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
       const tries = (reviewTries.get(h.id) ?? 0) + 1;
       reviewTries.set(h.id, tries);
       if (tries > 2) {
-        setStatus(h, "needs", `The page didn't take the review's answer (${fix.reason || "corrected"})`, suggestion);
+        // YOLO keeps what the field holds: the review never ends a run the first pass would have sent.
+        const left = `The page didn't take the review's answer (${fix.reason || "corrected"})`;
+        setStatus(h, yolo && readValue(h) ? "check" : "needs", left, suggestion);
         continue;
       }
       changed = true;
