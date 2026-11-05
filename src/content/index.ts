@@ -60,7 +60,7 @@ import { labelOf } from "./yolo/nav";
 import { adoption, opForAnswer, RE_POLICY_NOTE, revealable } from "./review/reconcile";
 import { snapshot } from "./review/snapshot";
 import type { ReviewField } from "../shared/review";
-import { clip } from "../shared/normalize";
+import { clip, normalize } from "../shared/normalize";
 
 type Status =
   | "pending"
@@ -1093,6 +1093,10 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         jobs.push(reviewUpload(h, groupId, ctrl, why));
         continue;
       }
+      // A custom list read before the answer it now needs was there (provinces before the country): read it again.
+      const read = harvested.get(h.id);
+      if (h.desc.kind === "dropdown" && read && !read.some((o) => normalize(o) === normalize(fix.answer!)))
+        harvested.delete(h.id);
       const op = opForAnswer(h, fix.answer, h.desc.options ?? harvested.get(h.id));
       if (!op) {
         setStatus(h, "needs", why, suggestion);

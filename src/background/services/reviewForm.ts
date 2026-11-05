@@ -95,8 +95,9 @@ export function checkFix(
   if (deniesNeededSponsorship(d, answer, workCountry(question, home, job), profile.workAuthorization.entries))
     return { ...fix, verdict: "needs_user", answer, reason: "Sponsorship needed in this country" };
   if (wrongSiteLink(question, answer, fix.sources)) return null;
-  // A choice's answer must be one of its options: "British Columbia" for a list of US states is no answer.
-  if (CHOICE.has(f.kind) && f.options?.length) {
+  // A choice's answer must be one of its options: "British Columbia" for a list of US states is no answer. Not a
+  // custom dropdown's: its list was read once and may have changed since (BambooHR's provinces after the country).
+  if (CHOICE.has(f.kind) && f.kind !== "dropdown" && f.options?.length) {
     const parts = answer.split(/\s*\|\s*/).filter(Boolean);
     const listed = parts.every((p) => f.options!.some((o) => normalize(o) === normalize(p)));
     if (!listed)
