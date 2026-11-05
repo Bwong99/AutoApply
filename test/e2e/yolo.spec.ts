@@ -578,3 +578,13 @@ test("warns under a source's toggle in settings as soon as it's turned on, YOLO 
   ]);
   expect((await storage<{ enabled?: boolean }>(sw, "yolo")).enabled).toBeFalsy();
 });
+
+test("the navigator finds an Apply no wording rule reads, and the run goes on to submit", async ({ sw, mock }) => {
+  test.setTimeout(120_000);
+  await seed(sw, { caps: true });
+  await queue(sw, `${BASE}yolo-job-odd-apply.html`);
+  await outcome(sw).toBe("submitted");
+  const [a] = await storage<Application[]>(sw, "applications");
+  expect(a.doneUrl).toContain("yolo-thanks.html");
+  expect(mock.calls_("navigate").length).toBeGreaterThanOrEqual(1);
+});

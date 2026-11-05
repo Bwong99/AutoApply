@@ -23,6 +23,7 @@ import { VALIDATION_PROMPT } from "./gemini/prompts";
 import { VALIDATION_SCHEMA, ValidationZ } from "./gemini/schemas";
 import { adoptPosting, getJobContext, getJobPay, setJobContext, setJobPay } from "./jobContext";
 import { mapFields, type ServiceCtx } from "./services/mapFields";
+import { navigate } from "./services/navigate";
 import { reviewForm } from "./services/reviewForm";
 import { chooseOptions } from "./services/chooseOptions";
 import { draftEssays } from "./services/draftEssays";
@@ -40,6 +41,7 @@ import {
   yoloJob,
   yoloAlive,
   yoloNote,
+  yoloRunInfo,
   yoloOverrides,
   yoloUpload,
 } from "./yolo";
@@ -463,6 +465,25 @@ const handlers: Handlers = {
         );
     }
     return { ...r, usedModel: (await modelName(r.usedModel)) ?? r.usedModel };
+  },
+
+  async NAVIGATE({ page, facts, url, why }, sender) {
+    const run = await yoloRunInfo(sender);
+    if (!run) return { error: { kind: "other", message: "Not a YOLO run" } };
+    const ctx = await serviceCtx(undefined, "review");
+    if ("error" in ctx) return ctx;
+    const alive = setInterval(() => void yoloAlive(sender), 60_000);
+    await yoloAlive(sender);
+    const r = await navigate(ctx, {
+      page,
+      facts,
+      url,
+      why,
+      goal: { company: run.company, title: run.title },
+      history: run.steps,
+    }).finally(() => clearInterval(alive));
+    await yoloAlive(sender);
+    return r;
   },
 
   async CHOOSE_OPTIONS({ items, groupId }, sender) {

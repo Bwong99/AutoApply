@@ -1020,31 +1020,35 @@ async function reviewUpload(h: FieldHandle, groupId: string, ctrl: AbortControll
  * appeared (adopted, revealed or shown by a correction) for a fill pass; "changed": answers were corrected, for
  * another round to check; "none": nothing to do. Fails open: an AI error leaves the fills as they are.
  */
+/** The page as text (./review/snapshot.ts) with the fields shown on it, for the review and YOLO's navigator. */
+function pageSnapshot() {
+  const shown = rescan().filter((h) => h.el.isConnected && (h.desc.kind === "file" || isVisible(h.container ?? h.el)));
+  const owner = new Map<Element, string>();
+  for (const h of shown)
+    for (const e of [h.el, ...(h.members ?? []), h.searchInput, ...(h.sections ?? [])]) if (e) owner.set(e, h.id);
+  const snap = snapshot({
+    fieldOf: (el) => owner.get(el),
+    shown: (id) => {
+      const h = handles.get(id);
+      return h ? readValue(h) : "";
+    },
+    excluded: (el) => scanState.excluded.get(el),
+    unknownState: (id) => {
+      const h = handles.get(id);
+      if (!h || !stateHidden(h)) return undefined;
+      const a = applied.get(id);
+      return a ? opText(a[0]) : "";
+    },
+  });
+  return { shown, owner, snap };
+}
+
 async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none" | "changed" | "fresh"> {
   reviewing = true;
   report();
   try {
     await transitionsEnd();
-    const shown = rescan().filter(
-      (h) => h.el.isConnected && (h.desc.kind === "file" || isVisible(h.container ?? h.el)),
-    );
-    const owner = new Map<Element, string>();
-    for (const h of shown)
-      for (const e of [h.el, ...(h.members ?? []), h.searchInput, ...(h.sections ?? [])]) if (e) owner.set(e, h.id);
-    const snap = snapshot({
-      fieldOf: (el) => owner.get(el),
-      shown: (id) => {
-        const h = handles.get(id);
-        return h ? readValue(h) : "";
-      },
-      excluded: (el) => scanState.excluded.get(el),
-      unknownState: (id) => {
-        const h = handles.get(id);
-        if (!h || !stateHidden(h)) return undefined;
-        const a = applied.get(id);
-        return a ? opText(a[0]) : "";
-      },
-    });
+    const { shown, owner, snap } = pageSnapshot();
     if (!shown.length && !snap.unscanned.length) return "none";
     const r = await send({ type: "REVIEW_FORM", page: snap.text, fields: shown.map(reviewField), groupId, yolo });
     if (ctrl.signal.aborted) return "none";
@@ -1362,6 +1366,12 @@ async function startYolo() {
     },
     fill: yoloFill,
     refill,
+    navigate: async (why, facts) => {
+      const { snap } = pageSnapshot();
+      const r = await send({ type: "NAVIGATE", page: snap.text, facts, url: location.href, why }).catch(() => null);
+      if (!r || isErr(r)) return null;
+      return { reply: r, el: r.ref ? snap.refs.get(r.ref) : undefined };
+    },
     guesses: () => [...guesses.values()],
     email: () => config.profileSnapshotForDeterministic.personal.email,
     answers,

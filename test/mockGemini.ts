@@ -5,7 +5,18 @@ import { normalize } from "../src/shared/normalize";
 
 type Json = Record<string, unknown>;
 export type CallKind =
-  "list" | "validate" | "map" | "audit" | "choose" | "essay" | "resume" | "guess" | "relevance" | "tailor" | "review";
+  | "list"
+  | "validate"
+  | "map"
+  | "audit"
+  | "choose"
+  | "essay"
+  | "resume"
+  | "guess"
+  | "relevance"
+  | "tailor"
+  | "review"
+  | "navigate";
 export interface Call {
   kind: CallKind;
   key: string;
@@ -273,7 +284,9 @@ export class MockGemini {
                     ? "tailor"
                     : system.startsWith("You review")
                       ? "review"
-                      : "resume";
+                      : system.startsWith("You navigate")
+                        ? "navigate"
+                        : "resume";
     const payload = kind === "resume" ? { text } : (JSON.parse(text) as Json);
     const call = { kind, key, model, payload };
     const gc = body.generationConfig as Json;
@@ -333,6 +346,25 @@ export class MockGemini {
       return send(200, reply(ops), call);
     }
     if (kind === "review") return send(200, reply(this.review(payload)), call);
+    // The navigator: the way in a posting words oddly ("Begin your journey"), else no way on.
+    if (kind === "navigate") {
+      const ref = /\[(c\d+) link "Begin your journey[^"]*"/.exec(String(payload.page))?.[1];
+      return send(
+        200,
+        reply(
+          ref
+            ? {
+                state: "posting",
+                action: "click",
+                ref,
+                purpose: "open_application",
+                reason: "The way into the application",
+              }
+            : { state: "other", action: "stop", reason: "No way on" },
+        ),
+        call,
+      );
+    }
     if (kind === "relevance")
       return send(200, reply({ keep: (payload.jobs as { i: number }[]).map((j) => j.i) }), call);
     if (kind === "essay")

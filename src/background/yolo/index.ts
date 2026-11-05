@@ -518,6 +518,13 @@ export async function yoloApplied(url: string): Promise<{ at: number; url: strin
   return a && { at: a.at, url: a.doneUrl || a.url };
 }
 
+/** The job a YOLO run's page applies to and the steps it took, for the navigator; null for other pages. */
+export async function yoloRunInfo(sender: chrome.runtime.MessageSender) {
+  const run = await getRun();
+  if (!fromRun(run, sender)) return null;
+  return { company: run.item.company, title: run.item.title, steps: run.steps };
+}
+
 /**
  * A YOLO run's page is busy on a long AI call (the review of a filled page, the navigator): its step is making
  * progress, so the watchdog's "No progress for 3 minutes" waits.
