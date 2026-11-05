@@ -12,7 +12,7 @@ Each step works on small files instead of raw pages: `run.mjs` writes a compact 
 ## Setup (once)
 
 1. Node 22+, `npm install`, `npx playwright install chromium`, and [Claude Code](https://claude.com/claude-code) (`claude` on PATH, signed in).
-2. In the extension: fill in your profile, add your résumé, add Gemini API keys (the Claude bridge needs a native host, so the harness uses Gemini when your keys are there), and set YOLO's email.
+2. In the extension: fill in your profile, add your résumé, add Gemini API keys or set up Claude (the harness reuses the installed Claude bridge; it uses Gemini when your keys are there unless `AI_PROVIDER=claude`), and set YOLO's email.
 3. Options → Data → Export, and save the file as `autoapply-export.json` at the repo root (gitignored; or point `AA_EXPORT` at it).
 
 ## Run the whole flow
