@@ -17,6 +17,7 @@ State is in `.yolo-sweep/` at the main checkout (gitignored). Your profile comes
 - `node tools/yolo-sweep/fill.mjs <url> [outPrefix]`: manual autofill (YOLO off) on one posting. It stands in for the user: clicks Apply / "I'm interested" until a form shows, presses Fill the way the popup does, waits for the overlay's `Done ·`, then clicks Next and fills each page. Uses the dry build (manual fill doesn't use the YOLO driver).
   Env: `REAL=1` (click the final Submit: applies), `MAXMIN` (fill timeout per page, default 3), `PAGES` (default 6), `EXP=<js file>` (run in every frame at the end), `VERBOSE=1`.
 - `MODE=manual` makes pick.mjs/batch.mjs use fill.mjs and `.yolo-sweep/tested-manual.json`, and skips sign-in ATSs (Workday, Oracle, SuccessFactors, iCIMS, Taleo, Avature) whose forms the manual harness can't reach. `loop.mjs --mode manual` runs the whole flow for manual autofill.
+- `AI_PROVIDER=claude|gemini` picks the provider for any command; Claude works headless through the installed bridge (harness builds request `nativeMessaging`). `AA_EXT=<dir>` runs another build (before/after comparisons).
 - `node tools/yolo-sweep/pick.mjs --per 1 --out list.txt`: varied untested postings (a few per ATS, intern/co-op first).
 - `node tools/yolo-sweep/batch.mjs list.txt <outDir>`: run a list, 3 at a time (`P`); records results in `.yolo-sweep/tested.json`.
 - `node tools/yolo-sweep/loop.mjs`: the whole unattended flow (sweep → triage → one fix session per bug → repeat).
@@ -25,6 +26,7 @@ State is in `.yolo-sweep/` at the main checkout (gitignored). Your profile comes
 
 1. `<out>.report.txt`: RESULT, STEPS, AI ANSWERS, then each page's fields. Row marks:
    `! BLANK*` required and empty · `? empty` optional and empty · `! SUS` disagrees with the profile · `! ERROR` page error text · `profile-ok N` rows matching the profile, collapsed · plain rows: `kind | label = value`.
+   `REVIEW` lists each AI review call's non-ok verdicts and missed questions, and each navigator call (why → step); `NOTES` the application's notes (what the review corrected or found).
    RESULT: `DRY-OK` (dry run reached the final Submit), `SUBMITTED`, `NEEDS`/`FAILED`/`BLOCKED`/`SKIPPED` (with reason), `TIMEOUT`, `ERROR`/`CRASH`.
    Manual reports (fill.mjs) instead have RESULT `FILLED` / `NO-FORM` (no form reached) / `TIMEOUT` (overlay never said Done) / `ERROR` / `SUBMITTED` / `SUBMIT-UNCONFIRMED`, plus `OVERLAY` (its Done line), `NAV` (what the harness clicked) and `BADGES not filled` (the extension's own Needs you / Check / Failed badges, `~ color Field: Label. tooltip`).
 2. Grep, never read whole: `<out>.html` (final DOM), `<out>.snaps.txt` (one JSON dump per page/step), `<out>.log` (SW log, `YOLO FACTS` per step), `<out>.ai.json` (AI requests/responses).
@@ -51,6 +53,7 @@ State is in `.yolo-sweep/` at the main checkout (gitignored). Your profile comes
 ## Fix rules
 
 - Root-cause fix in shared code; grep every caller. No change to any other pre-existing behavior.
+- Prefer fixing the AI review / navigator's inputs, prompts or guards (content/review, background/services/reviewForm.ts, navigate.ts) over new site heuristics when the review already sees the problem.
 - AutoApply Autofill Priorities, in order: accuracy, speed, little background resource use, minimal AI tokens. Decide profile-derivable answers in code, not by prompt tweaks.
 - Unit test in `test/unit` when testable offline; `npm test`, `npx tsc --noEmit`, `npx eslint <files>` pass; re-run the posting and a same-ATS posting that passed.
 - One commit per fix, only its files, Conventional Commits, the configured git author, no Co-Authored-By trailer.
