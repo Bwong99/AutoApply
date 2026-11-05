@@ -232,6 +232,9 @@ export const OPTION_SELECTORS = [
   "li[data-value]",
   ".dropdown-location", // Lever's location suggestions
   '[data-automation-id*="promptOption" i]',
+  // Selects drawn as an ARIA menu (BambooHR's fab-Select: a button opening role=menu items).
+  "[role=menuitemradio]",
+  "[role=menuitem]",
 ].join(",");
 
 // ---------- Deterministic mapping (§13.2, Appendix C.2) ----------
