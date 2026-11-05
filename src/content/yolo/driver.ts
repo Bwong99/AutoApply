@@ -163,7 +163,8 @@ export async function drive(deps: DriverDeps) {
       return "end";
     }
     if (reply.action === "stop") {
-      const status = reply.state === "closed" ? "skipped" : reply.state === "blocked" ? "blocked" : "needs";
+      // A bot check in the hidden frame is retried in a tab; in a tab it is the user's, like a CAPTCHA.
+      const status = reply.state === "closed" ? "skipped" : reply.state === "blocked" && IN_HOST ? "blocked" : "needs";
       result({ status, reason: reply.reason || why, guesses: deps.guesses() });
       return "end";
     }
