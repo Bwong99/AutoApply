@@ -2,11 +2,12 @@
 // (Apply → account → each form page → Submit). A step that loads a new document ends this script there; the new
 // page's driver asks the background where the run stands and carries on.
 import { CAPTCHA_SELF_CLEAR_MS, CAPTCHA_WAIT_MS } from "../../shared/constants";
-import { send, type StepKind, type YoloResult } from "../../shared/messages";
+import { send, type PageFacts, type StepKind, type YoloResult } from "../../shared/messages";
+import type { NavReply } from "../../background/gemini/schemas";
 import { collapse } from "../../shared/normalize";
 import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
-import { deepQueryAll } from "../scan/traverse";
+import { deepQueryAll, HOST_TAG } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { botWall, captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
@@ -51,7 +52,15 @@ export interface DriverDeps {
   posting(): Promise<void>;
   /** The same for a posting the run went past, read from its address. */
   readPosting(url: string): Promise<void>;
+  /** The AI navigator's next step on this page (background/services/navigate.ts), with the control it names. */
+  navigate(why: string, facts: PageFacts): Promise<{ reply: NavReply; el?: HTMLElement } | null>;
 }
+
+/** What the navigator may never press: other sites' sign-ins and Easy Apply, parsers, ways back or out. */
+const RE_NAV_AVOID =
+  /\b(withdraw|delete|remove|sign ?out|log ?out|cancel|unsubscribe|back|previous)\b|save (for later|as (a )?draft|draft)|\b(sign|log) ?(in|up)? with\b|\b(apply|continue|connect) with\b|easy apply|quick apply|autofill|auto-fill|use my last|job alert/i;
+/** Navigator calls per page load: it is the way out of a stuck step, not a loop of its own. */
+const MAX_NAV = 6;
 
 /** A test build (VITE_YOLO_DRY=1) stops before the final submit and reports what it filled; others compile it out. */
 const DRY = import.meta.env.VITE_YOLO_DRY === "1";
@@ -124,6 +133,57 @@ export async function drive(deps: DriverDeps) {
   const result = (r: YoloResult) => void send({ type: "YOLO_RESULT", result: r }).catch(() => undefined);
   // The fill pipeline marks its own end; the run is still working after it.
   const fill = () => deps.fill().finally(() => busy(true));
+  const dryStop = (label: string) =>
+    result({
+      status: "needs",
+      reason: `Dry run before "${label}":\n${Object.values(deps.answers())
+        .map((g) => `${g.q} = ${g.a}`)
+        .join("\n")}`,
+      guesses: deps.guesses(),
+    });
+  let navCalls = 0;
+  /**
+   * When the wording rules are stuck, the navigator reads the page and names the next step, which is checked before
+   * it is pressed. "moved": the page changed; "fill": it has questions to answer first; "end": the run's result is
+   * sent; null: no way on.
+   */
+  const navigateOn = async (
+    why: string,
+    facts: PageFacts,
+    before: string,
+  ): Promise<"moved" | "fill" | "end" | null> => {
+    if (navCalls >= MAX_NAV) return null;
+    navCalls++;
+    const nav = await deps.navigate(why, facts).catch(() => null);
+    if (!nav) return null;
+    const { reply, el } = nav;
+    if (reply.action === "done") {
+      if (reply.state !== "success") return null;
+      result({ status: "submitted", doneUrl: location.href, guesses: deps.guesses() });
+      return "end";
+    }
+    if (reply.action === "stop") {
+      const status = reply.state === "closed" ? "skipped" : reply.state === "blocked" ? "blocked" : "needs";
+      result({ status, reason: reply.reason || why, guesses: deps.guesses() });
+      return "end";
+    }
+    if (reply.action === "fill") return "fill";
+    if (reply.action === "wait") return (await changed(before, 15_000)) ? "moved" : null;
+    if (!el?.isConnected || el.closest(HOST_TAG) || !isVisible(el) || RE_NAV_AVOID.test(labelOf(el))) return null;
+    if (reply.purpose === "final_submit") {
+      if (DRY) {
+        dryStop(labelOf(el));
+        return "end";
+      }
+      // As before any final Submit: the page's own built-ins back, and time on a graded page.
+      busy(false);
+      const graded = scoreCheck();
+      setGraded(graded);
+      if (graded) await dwell(facts.fields);
+    }
+    if (!(realFor("clicks") && (await realPress(el)))) press(el);
+    return (await changed(before, 20_000)) ? "moved" : null;
+  };
   busy(true);
   try {
     if (hello.mode === "scrape") {
@@ -134,6 +194,8 @@ export async function drive(deps: DriverDeps) {
     if (hello.posting) await deps.readPosting(hello.posting);
     let refills = 0;
     let pickedWay = false;
+    /** Presses of Next/Submit in a row that changed nothing. */
+    let idle = 0;
     for (let i = 0; i < 30; i++) {
       // A navigation that never commits (a download, a 204) leaves the page as it was.
       if (leaving) {
@@ -213,7 +275,15 @@ export async function drive(deps: DriverDeps) {
           break;
         }
         case "job": {
-          const b = findApply()!;
+          const b = findApply();
+          // The facts saw an Apply that is gone now, or one no wording rule finds.
+          if (!b) {
+            const n = await navigateOn("No Apply button found on this posting", facts, before);
+            if (n === "end") return;
+            if (n === "fill") await fill();
+            if (n) continue;
+            return result({ status: "failed", reason: "No Apply button", guesses: deps.guesses() });
+          }
           // A job board's own "Apply now" is its Easy Apply; only "Apply on company site" leads to the employer.
           const board = /(^|\.)(indeed|glassdoor|linkedin|ziprecruiter)\./.test(location.hostname);
           if (RE_EASY_APPLY.test(b.innerText) || (board && !/company|employer/i.test(labelOf(b))))
@@ -233,7 +303,12 @@ export async function drive(deps: DriverDeps) {
             );
             if (item) press(item);
           }
-          break;
+          if (!(await changed(before, 20_000))) {
+            const n = await navigateOn(`Pressing "${labelOf(b)}" on the posting changed nothing`, facts, before);
+            if (n === "end") return;
+            if (n === "fill") await fill();
+          }
+          continue;
         }
         case "form": {
           const rep = await fill();
@@ -261,7 +336,13 @@ export async function drive(deps: DriverDeps) {
             press(way);
             continue;
           }
-          if (!b) return result({ status: "failed", reason: "No Next or Submit button", guesses: deps.guesses() });
+          if (!b) {
+            const n = await navigateOn("No Next or Submit button found after filling the page", facts, before);
+            if (n === "end") return;
+            if (n === "fill") await fill();
+            if (n) continue;
+            return result({ status: "failed", reason: "No Next or Submit button", guesses: deps.guesses() });
+          }
           if (DRY && (!next || /submit/i.test(labelOf(b))))
             return needs(
               `Dry run before "${labelOf(b)}":\n${Object.values(deps.answers())
@@ -278,7 +359,17 @@ export async function drive(deps: DriverDeps) {
           setGraded(graded);
           if (!next && graded) await dwell(facts.fields);
           if (!(realFor("clicks") && (await realPress(b)))) press(b);
-          if (!(await changed(before, 20_000))) continue;
+          if (!(await changed(before, 20_000))) {
+            // A press the page ignores twice: something the rules don't see is in the way (a dialog, a hidden step).
+            if (++idle >= 2) {
+              idle = 0;
+              const n = await navigateOn(`Pressing "${labelOf(b)}" changed nothing, twice`, facts, before);
+              if (n === "end") return;
+              if (n === "fill") await fill();
+            }
+            continue;
+          }
+          idle = 0;
           const errors = validationErrors();
           if (errors.length) {
             if (refills++ >= 2) return needs(`Form rejected: ${collapse(errors[0].innerText).slice(0, 80)}`);
@@ -294,6 +385,16 @@ export async function drive(deps: DriverDeps) {
           if (/\b(refresh|reload) the page\b/i.test(pageText())) {
             location.reload();
             return;
+          }
+          {
+            const n = await navigateOn(
+              "The page isn't recognized as a posting, form, account step or confirmation",
+              facts,
+              before,
+            );
+            if (n === "end") return;
+            if (n === "fill") await fill();
+            if (n) continue;
           }
           return result({ status: "failed", reason: "Unrecognized page", guesses: deps.guesses() });
       }

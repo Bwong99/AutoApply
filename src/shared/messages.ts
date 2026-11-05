@@ -1,4 +1,5 @@
 import type { ReviewField, ReviewResult } from "./review";
+import type { NavReply } from "../background/gemini/schemas";
 import type {
   ApiError,
   Choice,
@@ -131,6 +132,8 @@ export type Message =
   | { type: "YOLO_REVEAL"; site: string }
   | { type: "YOLO_DELETE_ACCOUNT"; site: string }
   | { type: "CHOOSE_OPTIONS"; items: ChooseItem[]; groupId: string }
+  /** YOLO's navigator: the next step on a page its wording rules can't read (content/yolo/driver.ts). */
+  | { type: "NAVIGATE"; page: string; facts: PageFacts; url: string; why: string }
   /** The AI review of a filled page (content/review): the page as text and the fields found on it. */
   | { type: "REVIEW_FORM"; page: string; fields: ReviewField[]; groupId: string; yolo?: boolean }
   | { type: "DRAFT_ESSAYS"; items: EssayItem[]; groupId: string }
@@ -183,6 +186,7 @@ export interface Responses {
   MAP_FIELDS: { decisions: Decision[]; usedModel: string } | Err;
   CHOOSE_OPTIONS: { choices: Choice[] } | Err;
   REVIEW_FORM: ReviewResult | Err;
+  NAVIGATE: NavReply | Err;
   DRAFT_ESSAYS: { essays: { fieldId: string; text: string | null; note?: string }[] } | Err;
   SAVE_LEARNED_ANSWER: Ok;
   LEARNED_USED: Ok;
