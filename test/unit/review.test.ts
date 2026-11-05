@@ -102,6 +102,9 @@ describe("review guards (checkFix)", () => {
     expect(checkFix(bc, states, profile(), false, undefined)).toMatchObject({ verdict: "needs_user" });
     // YOLO keeps its guess rather than an answer the list can't take.
     expect(checkFix(bc, states, profile(), true, undefined)).toBeNull();
+    // A custom dropdown's list may have changed since it was read: its answer goes to the page to find.
+    const list = field({ question: "Province", kind: "dropdown", required: true, options: ["Alabama"], shown: "" });
+    expect(checkFix(bc, list, profile(), false, undefined)?.answer).toBe("British Columbia");
     const ways = field({ kind: "checkbox_group", options: ["Email", "SMS", "WhatsApp"], shown: "Email | SMS" });
     expect(checkFix(fix({ verdict: "wrong", answer: "Email" }), ways, profile(), true, undefined)?.answer).toBe(
       "Email",
