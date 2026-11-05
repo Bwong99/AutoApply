@@ -169,7 +169,15 @@ export async function drive(deps: DriverDeps) {
       return "end";
     }
     if (reply.action === "fill") return "fill";
-    if (reply.action === "wait") return (await changed(before, 15_000)) ? "moved" : null;
+    if (reply.action === "wait") {
+      if (await changed(before, 15_000)) return "moved";
+      // A page that stays blank in the hidden frame (Taleo's login) never renders there: a tab may show it.
+      if (IN_HOST && pageText().length < 40) {
+        result({ status: "blocked", reason: "The page stays empty in the hidden page" });
+        return "end";
+      }
+      return null;
+    }
     if (!el?.isConnected || el.closest(HOST_TAG) || !isVisible(el) || RE_NAV_AVOID.test(labelOf(el))) return null;
     if (reply.purpose === "final_submit") {
       if (DRY) {
@@ -183,7 +191,10 @@ export async function drive(deps: DriverDeps) {
       if (graded) await dwell(facts.fields);
     }
     if (!(realFor("clicks") && (await realPress(el)))) press(el);
-    return (await changed(before, 20_000)) ? "moved" : null;
+    // What it pressed may change nothing the step's signature reads (a dialog closing, a notice accepted:
+    // SuccessFactors' privacy notice), so the step is read again either way; MAX_NAV and the loop guard end loops.
+    await changed(before, 8_000);
+    return "moved";
   };
   busy(true);
   try {
@@ -197,6 +208,8 @@ export async function drive(deps: DriverDeps) {
     let pickedWay = false;
     /** Presses of Next/Submit in a row that changed nothing. */
     let idle = 0;
+    /** Steps of this page load read as unknown. */
+    let unknowns = 0;
     for (let i = 0; i < 30; i++) {
       // A navigation that never commits (a download, a 204) leaves the page as it was.
       if (leaving) {
@@ -380,8 +393,9 @@ export async function drive(deps: DriverDeps) {
         }
         default:
           // Still rendering (Oracle's next section takes several seconds), or a page we don't know: give up only once
-          // it stops changing.
-          if (await changed(before, 15_000)) continue;
+          // it stops changing. A second unknown step goes to the navigator even if the page keeps changing (a
+          // carousel or clock), before the loop guard ends the run (Microsoft's sign-in choice).
+          if (++unknowns < 2 && (await changed(before, 15_000))) continue;
           // Workday's "Something went wrong. Please refresh the page and then try again." (the step loop guard caps it)
           if (/\b(refresh|reload) the page\b/i.test(pageText())) {
             location.reload();
