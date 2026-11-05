@@ -1206,3 +1206,29 @@ describe("run watchdog", () => {
     });
   });
 });
+
+describe("embedded steps", () => {
+  it("reads a page with required questions of its own beside an iframe as a form", async () => {
+    const { kindOf } = await import("../../src/background/yolo/classify");
+    const facts = {
+      text: "Enter Your Information Email",
+      title: "Login",
+      path: "/jobs/35297/login",
+      headings: "Enter Your Information",
+      alerts: "",
+      fields: 2,
+      passwords: 0,
+      codeInput: false,
+      captcha: false,
+      scored: false,
+      embedded: true,
+      apply: false,
+      applyKind: "none" as const,
+      applyInForm: false,
+      requiredFields: 1,
+      onward: false,
+    };
+    expect(kindOf(facts, false)).toBe("form");
+    expect(kindOf({ ...facts, requiredFields: 0, fields: 0 }, false)).toBe("embedded");
+  });
+});

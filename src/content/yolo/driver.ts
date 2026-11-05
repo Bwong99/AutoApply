@@ -411,7 +411,12 @@ export async function drive(deps: DriverDeps) {
             if (n === "fill") await fill();
             if (n) continue;
           }
-          return result({ status: "failed", reason: "Unrecognized page", guesses: deps.guesses() });
+          // The hidden frame breaks pages that refuse to be framed (Taleo's "Prevent Frame usage"): a tab may not.
+          return result({
+            status: IN_HOST ? "blocked" : "failed",
+            reason: "Unrecognized page",
+            guesses: deps.guesses(),
+          });
       }
       await changed(before, 20_000);
     }

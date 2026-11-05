@@ -66,7 +66,9 @@ function stepKind(f: PageFacts, hidden: boolean): StepKind {
     RE_SIGNUP.test(f.text)
   )
     return "signin";
-  if (f.fields < 3 && f.embedded) return "embedded";
+  // Not a page asking questions of its own (iCIMS's "Enter Your Information" email step beside an iframe): loading
+  // the frame instead looped back to the posting.
+  if (f.fields < 3 && !f.requiredFields && f.embedded) return "embedded";
   // A posting with a search box or two (Indeed's What / Where) is still a posting. More page chrome can produce
   // several scan-visible controls, so a real navigation link always opens the posting's application. A custom
   // entry CTA can do the same when there are no required application fields; native submits remain form steps so
