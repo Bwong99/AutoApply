@@ -31,7 +31,8 @@ export function opForAnswer(h: FieldHandle, answer: string, options?: string[]):
     const multi = MULTI.has(k) || !!h.desc.multiple;
     const parts = multi ? answer.split(/\s*\|\s*/).filter(Boolean) : [answer];
     const texts = parts.map((p) => options.find((o) => normalize(o) === normalize(p)));
-    if (texts.length && texts.every((t): t is string => !!t)) return { type: "options", texts };
+    // The review's answer is the whole set: a box outside it the page ticked by default comes off.
+    if (texts.length && texts.every((t): t is string => !!t)) return { type: "options", texts, exact: true };
     return { type: "intended", answer };
   }
   if (isFreeText(k) && k !== "typeahead") return { type: "text", value: answer };

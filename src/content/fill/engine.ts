@@ -24,7 +24,8 @@ export type { FillResult };
 
 export type FillOp =
   | { type: "text"; value: string }
-  | { type: "options"; texts: string[] }
+  /** `exact`: these and no others (the review's answer): boxes the page ticked itself are unticked too. */
+  | { type: "options"; texts: string[]; exact?: boolean }
   | { type: "intended"; answer: string; query?: string }
   | { type: "checked"; value: boolean }
   | { type: "file"; documentId: string }
@@ -147,7 +148,8 @@ async function dispatchKind(h: FieldHandle, op: FillOp, deps: EngineDeps): Promi
       const texts = h.desc.options ? textsFor(op, h.desc.options) : await longSelectTexts(h, op, deps);
       if (!texts) return flag(`Suggested: ${answerOf(op)}`);
       if (kind === "radio_group") return fillRadio(h, texts[0]);
-      if (kind === "checkbox_group") return fillCheckboxGroup(h, texts, deps.checkedByUs);
+      if (kind === "checkbox_group")
+        return fillCheckboxGroup(h, texts, deps.checkedByUs, op.type === "options" && !!op.exact);
       return fillSelect(h, kind === "select" ? texts.slice(0, 1) : texts);
     }
     case "dropdown": {

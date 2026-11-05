@@ -855,3 +855,17 @@ describe("showsWord", () => {
     expect(showsWord("Canada (+1)", "+1")).toBe(true);
   });
 });
+
+describe("fillCheckboxGroup exact", () => {
+  it("unticks boxes the page ticked only when the answer is the whole set", async () => {
+    const { fillCheckboxGroup } = await import("../../src/content/fill/native");
+    setBody(`<fieldset><legend>Contact methods</legend>
+      <label><input type="checkbox" name="m" value="e"> Email</label>
+      <label><input type="checkbox" name="m" value="s" checked> SMS</label></fieldset>`);
+    const h = scan(newScanState()).handles[0];
+    await fillCheckboxGroup(h, ["Email"], new Set());
+    expect((h.members as HTMLInputElement[]).map((m) => m.checked)).toEqual([true, true]);
+    await fillCheckboxGroup(h, ["Email"], new Set(), true);
+    expect((h.members as HTMLInputElement[]).map((m) => m.checked)).toEqual([true, false]);
+  });
+});
