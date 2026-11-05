@@ -45,6 +45,7 @@ import {
   getRun,
   overdue,
   resolveScrape,
+  REVIEW_RUN_MS,
   saveRun,
   scrape,
   start,
@@ -443,7 +444,7 @@ async function watchdog(due: number) {
     credit(run, due, now);
     await saveRun(run);
   }
-  const late = overdue(run, now);
+  const late = overdue(run, now, (await store.get("settings")).reviewFills ? REVIEW_RUN_MS : undefined);
   if (late) await finish(run, late);
   // After a worker restart the tab listener is gone: listen again.
   else if (run.host !== "frame") watchTab(run);
@@ -515,6 +516,16 @@ export async function yoloApplied(url: string): Promise<{ at: number; url: strin
     (x) => x.mode === "yolo" && x.status === "submitted" && x.key === key,
   );
   return a && { at: a.at, url: a.doneUrl || a.url };
+}
+
+/**
+ * A YOLO run's page is busy on a long AI call (the review of a filled page, the navigator): its step is making
+ * progress, so the watchdog's "No progress for 3 minutes" waits.
+ */
+export async function yoloAlive(sender: chrome.runtime.MessageSender) {
+  const run = await getRun();
+  if (!fromRun(run, sender)) return;
+  await saveRun({ ...run, stepAt: Date.now() });
 }
 
 /** Adds a note to the run's application record, when `sender` is a YOLO run's page. */

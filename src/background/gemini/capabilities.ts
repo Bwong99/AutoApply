@@ -19,7 +19,7 @@ export function nextThinking(t: ThinkingCap): ThinkingCap | null {
 
 export function thinkingConfig(t: ThinkingCap): Record<string, unknown> | undefined {
   if (t.kind === "level") return { thinkingLevel: t.value };
-  if (t.kind === "budget") return { thinkingBudget: 0 };
+  if (t.kind === "budget") return { thinkingBudget: t.value };
   return undefined;
 }
 
@@ -27,6 +27,17 @@ export function thinkingConfig(t: ThinkingCap): Record<string, unknown> | undefi
 export function essayThinking(caps: ModelCaps): ThinkingCap {
   if (caps.thinking.kind === "level" && caps.thinking.value === "minimal")
     return caps.essayThinking ?? { kind: "level", value: "low" };
+  return caps.thinking;
+}
+
+/**
+ * The AI review and YOLO's navigator think as much as the model allows: accuracy over speed (probed lazily; a model
+ * refusing it keeps its own tier for them).
+ */
+export function reviewThinking(caps: ModelCaps): ThinkingCap {
+  if (caps.reviewThinking) return caps.reviewThinking;
+  if (caps.thinking.kind === "level") return { kind: "level", value: "high" };
+  if (caps.thinking.kind === "budget") return { kind: "budget", value: -1 };
   return caps.thinking;
 }
 

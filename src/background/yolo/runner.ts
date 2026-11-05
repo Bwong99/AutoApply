@@ -46,6 +46,8 @@ export const WATCHDOG = "yolo-watchdog";
 const HELLO_MS = 45_000;
 const STEP_MS = 180_000;
 const RUN_MS = 12 * 60_000;
+/** With the AI review of every page (settings.reviewFills), an application takes several times as long. */
+export const REVIEW_RUN_MS = 45 * 60_000;
 
 export const getRun = () => session.get<Run>(KEY);
 export const saveRun = (r: Run) => session.set(KEY, r);
@@ -119,7 +121,7 @@ export function resolveScrape(run: Run, r: YoloResult) {
 }
 
 /** The run's failure when it is overdue; null while it is on time. */
-export function overdue(run: Run, now = Date.now()): YoloResult | null {
+export function overdue(run: Run, now = Date.now(), limitMs = RUN_MS): YoloResult | null {
   const blocked = run.host === "frame" ? "blocked" : "failed";
   if (!run.helloAt && now - run.startedAt > HELLO_MS) return { status: blocked, reason: "The page didn't load" };
   // A visible tab waits on the user: a CAPTCHA step gets the driver's whole wait, and the run no time limit.
@@ -129,7 +131,8 @@ export function overdue(run: Run, now = Date.now()): YoloResult | null {
   const wait = captcha ? CAPTCHA_WAIT_MS : run.steps.at(-1)?.startsWith("verify|") ? EMAIL_WAIT_MS : 0;
   if (now - run.stepAt > wait + STEP_MS)
     return { status: "failed", reason: captcha ? "The CAPTCHA wasn't solved" : "No progress for 3 minutes" };
-  if (!visible && now - run.startedAt > RUN_MS) return { status: "failed", reason: "Took over 12 minutes" };
+  if (!visible && now - run.startedAt > limitMs)
+    return { status: "failed", reason: `Took over ${Math.round(limitMs / 60_000)} minutes` };
   return null;
 }
 

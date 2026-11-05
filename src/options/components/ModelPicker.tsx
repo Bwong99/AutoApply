@@ -63,6 +63,7 @@ function List(props: {
 export function ModelPicker(props: { showFallback?: boolean }) {
   const selected = useStored("selectedModel");
   const fallback = useStored("fallbackModel") ?? null;
+  const review = useStored("reviewModel") ?? null;
   const fetchedAt = useStored("modelListFetchedAt") ?? 0;
   const [check, setCheck] = useState<Check>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -118,6 +119,23 @@ export function ModelPicker(props: { showFallback?: boolean }) {
             if (id) void validate(id);
           }}
         />
+      )}
+      {props.showFallback && (
+        <List
+          label="Review model (optional; none = the primary model)"
+          value={review}
+          allowNone
+          onPick={(id) => {
+            void save({ reviewModel: id });
+            if (id) void validate(id);
+          }}
+        />
+      )}
+      {props.showFallback && (
+        <p class="muted">
+          The AI review of each filled page and YOLO's navigator use this model, thinking as hard as it allows. A
+          stronger (Pro) model catches more mistakes.
+        </p>
       )}
     </section>
   );

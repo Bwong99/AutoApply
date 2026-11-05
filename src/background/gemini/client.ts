@@ -1,7 +1,7 @@
 // Gemini REST client: generateContent + models.list via fetch, with key rotation (§10.1, §10.5).
 import { GEMINI_BASE } from "../../shared/constants";
 import type { ApiKeyEntry, ModelCaps, ThinkingCap } from "../../shared/types";
-import { essayThinking, isFresh, nextThinking, THINKING_CHAIN, thinkingConfig } from "./capabilities";
+import { essayThinking, isFresh, nextThinking, reviewThinking, THINKING_CHAIN, thinkingConfig } from "./capabilities";
 import {
   AllKeysExhaustedError,
   BadOutputError,
@@ -105,6 +105,8 @@ export interface CallSpec<T> {
   schema?: object;
   validate: (data: unknown) => T;
   essay?: boolean;
+  /** The AI review or YOLO's navigator: the deepest thinking the model takes (reviewThinking). */
+  review?: boolean;
   timeoutMs: number;
   signal?: AbortSignal;
   maxOutputTokens?: number;
@@ -308,7 +310,7 @@ export function createGemini(deps: GeminiDeps) {
         let badOutputRetried = false;
         let preferKey: string | undefined;
         for (;;) {
-          const thinking = spec.essay ? essayThinking(caps) : caps.thinking;
+          const thinking = spec.essay ? essayThinking(caps) : spec.review ? reviewThinking(caps) : caps.thinking;
           const body = buildBody(spec.system, payload, spec.schema, caps, thinking, spec.maxOutputTokens);
           if (deps.debug?.()) log("[gemini] request", model, JSON.stringify(body).slice(0, 4000));
           const r = await runOnModel(model, body, ctx, preferKey);
@@ -316,6 +318,10 @@ export function createGemini(deps: GeminiDeps) {
           if (r.kind === "ok") {
             if (spec.essay && thinking !== caps.thinking && !caps.essayThinking) {
               caps = { ...caps, essayThinking: thinking };
+              deps.setCaps(model, caps);
+            }
+            if (spec.review && thinking !== caps.thinking && !caps.reviewThinking) {
+              caps = { ...caps, reviewThinking: thinking };
               deps.setCaps(model, caps);
             }
             try {
@@ -344,6 +350,7 @@ export function createGemini(deps: GeminiDeps) {
             preferKey = r.key.id;
             if (r.what === "schema") caps = { ...caps, schema: "promptOnly" };
             else if (spec.essay && thinking !== caps.thinking) caps = { ...caps, essayThinking: caps.thinking };
+            else if (spec.review && thinking !== caps.thinking) caps = { ...caps, reviewThinking: caps.thinking };
             else caps = { ...caps, thinking: nextThinking(caps.thinking) ?? { kind: "none" } };
             deps.setCaps(model, caps);
             continue;

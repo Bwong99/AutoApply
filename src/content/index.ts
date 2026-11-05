@@ -31,7 +31,7 @@ import { deterministicValue, isFreeText, matchLearned, RE_CITY_FIELD, shoutedNam
 import { localMatchAll } from "./match/localMatch";
 import { harvestOptions } from "./fill/dropdown";
 import { fill, serial, type FillOp } from "./fill/engine";
-import { isFilling, sleep, waitFor } from "./fill/events";
+import { dispatching, isFilling, sleep, waitFor } from "./fill/events";
 import { findDropzones } from "./fill/file";
 import { addEntries, expandSections, resumeEntries, saveEntries, trimEntries, type EntryKind } from "./fill/sections";
 import { readValue } from "./fill/verify";
@@ -56,6 +56,10 @@ import { RE_SIGNUP_BOX } from "./yolo/classify";
 import { drive, type FillReport } from "./yolo/driver";
 import { DRIVER_FRAME, endTransitions, IN_HOST, throttled } from "./yolo/frame";
 import { labelOf } from "./yolo/nav";
+import { adoption, opForAnswer, RE_POLICY_NOTE, revealable } from "./review/reconcile";
+import { snapshot } from "./review/snapshot";
+import type { ReviewField } from "../shared/review";
+import { clip } from "../shared/normalize";
 
 type Status =
   | "pending"
@@ -106,7 +110,16 @@ const checkedByUs = new Set<Element>();
 const harvested = new Map<string, string[]>();
 let current: { groupId: string; ctrl: AbortController } | null = null;
 let running = false;
-let queued: { rerun: boolean; depth?: number } | null = null;
+/** `round`: AI review rounds this trigger already ran (each follow-up pass carries the count on). */
+let queued: { rerun: boolean; depth?: number; round?: number } | null = null;
+/** The AI review is reading the page (overlay: "Reviewing…"). */
+let reviewing = false;
+/** Times the review corrected each field: a third correction means the page won't take it. */
+const reviewTries = new Map<string, number>();
+/** "Add" / "Show more" buttons the review pressed, each once. */
+const revealed = new WeakSet<Element>();
+/** Review rounds per trigger: each re-reads the page after the last one's corrections. */
+const MAX_REVIEW_ROUNDS = 3;
 /** Save buttons of entry editors addEntries opened, clicked after the last fill pass. */
 const unsaved: HTMLElement[] = [];
 let lastError: ApiError | null = null;
@@ -169,7 +182,15 @@ function frameStatus(): FrameStatus {
     if (s.status === "needs" || s.status === "failed")
       needsYou.push({ fieldId: id, label: handles.get(id)?.desc.label ?? "", note: s.note ?? "" });
   const docs = [...uploads].filter(([id]) => !states.get(id)?.userOwned).map(([, d]) => d);
-  return { frameId: 0, counts: counts(), needsYou, running, error: lastError?.message, uploads: docs };
+  return {
+    frameId: 0,
+    counts: counts(),
+    needsYou,
+    running,
+    ...(reviewing ? { reviewing } : {}),
+    error: lastError?.message,
+    uploads: docs,
+  };
 }
 
 let reportTimer: ReturnType<typeof setTimeout> | undefined;
@@ -221,6 +242,7 @@ function renderOverlay() {
     counts: total,
     needsYou: frames.flatMap((f) => f.needsYou.map((n) => ({ ...n, frameId: f.frameId }))),
     running: frames.some((f) => f.running),
+    reviewing: frames.some((f) => f.reviewing),
     uploads: [...new Map(frames.flatMap((f) => f.uploads ?? []).map((d) => [d.id, d])).values()],
     error,
     model: usedModel ?? config?.selectedModel ?? null,
@@ -646,11 +668,13 @@ function emptied(h: FieldHandle): boolean {
   );
 }
 
-async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
+async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: number } = {}) {
   if (running) {
     queued = { rerun: !!opts.rerun || !!queued?.rerun };
     return;
   }
+  // A new trigger (not a follow-up pass of one): the review may correct each field afresh.
+  if (opts.depth === undefined && opts.round === undefined) reviewTries.clear();
   running = true;
   lastError = null;
   clearTimeout(retryTimer);
@@ -900,8 +924,20 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
       await transitionsEnd();
       const fresh = rescan();
       await Promise.all(fresh.filter(emptied).map((h) => doFill(h, ...applied.get(h.id)!, ctrl)));
-      if (fresh.some((h) => !states.has(h.id))) queued ??= { rerun: false, depth: depth + 1 };
+      if (fresh.some((h) => !states.has(h.id))) queued ??= { rerun: false, depth: depth + 1, round: opts.round };
     }
+    // The AI review (content/review): the page as shown, read once nothing more is queued for this trigger.
+    if (!queued && !ctrl.signal.aborted && !lastError && config.settings.reviewFills)
+      for (let round = opts.round ?? 0; round < MAX_REVIEW_ROUNDS && !ctrl.signal.aborted; round++) {
+        const r = await reviewPage(groupId, ctrl);
+        mark(`review${round + 1}`);
+        // New fields (adopted, revealed, or follow-ups the corrections showed): a pass fills them, then reviews.
+        if (r === "fresh") {
+          queued ??= { rerun: false, round: round + 1 };
+          break;
+        }
+        if (r !== "changed") break;
+      }
     // Entry editors we opened (SmartRecruiters' Experience) are saved once nothing more will be filled in them.
     if (!queued && !ctrl.signal.aborted && unsaved.length) await saveEntries(unsaved.splice(0));
   } catch (e) {
@@ -922,6 +958,161 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number } = {}) {
       queued = null;
       void runPipeline(q);
     }
+  }
+}
+
+// ---------- the AI review (./review, background/services/reviewForm.ts) ----------
+/** A choice group whose picked option the page doesn't mark (pills without aria state or a checked box). */
+const stateHidden = (h: FieldHandle) =>
+  !!h.buttonStyle &&
+  !(h.members ?? []).some(
+    (m) =>
+      m instanceof HTMLInputElement || ["aria-checked", "aria-pressed", "aria-selected"].some((a) => m.hasAttribute(a)),
+  );
+
+/** A field as the review sees it: what it asks, what the page shows, where the answer came from, if it's ours to change. */
+function reviewField(h: FieldHandle): ReviewField {
+  const s = states.get(h.id);
+  const options = h.desc.options ?? harvested.get(h.id);
+  const shown = readValue(h);
+  const locked =
+    !!s?.userOwned ||
+    ["you", "saved", "edited", "draft"].includes(s?.status ?? "") ||
+    h.sensitive ||
+    h.consent ||
+    optInAnswered(h.desc) ||
+    (!!options && isConsent({ ...h.desc, options })) ||
+    RE_POLICY_NOTE.test(s?.note ?? "") ||
+    (h.desc.kind === "file" && (!!shown || s?.status === "filled"));
+  return {
+    id: h.id,
+    question: h.desc.label,
+    kind: h.desc.kind,
+    required: h.desc.required,
+    ...(h.desc.section ? { section: h.desc.section } : {}),
+    ...(h.desc.hint ? { hint: clip(h.desc.hint, 300) } : {}),
+    ...(options ? { options: options.slice(0, 80) } : {}),
+    ...(h.desc.multiple ? { multiple: true } : {}),
+    shown: clip(shown, 600),
+    status: s?.status ?? "new",
+    ...(s?.tooltip ? { source: clip(s.tooltip, 200) } : {}),
+    ...(s?.note ? { note: clip(s.note, 200) } : {}),
+    ...(locked ? { locked: true } : {}),
+  };
+}
+
+/** A file the review says is missing: the same résumé or cover letter a fill would upload. */
+async function reviewUpload(h: FieldHandle, groupId: string, ctrl: AbortController, why: string) {
+  if (isResumeUpload(h) && config.settings.resumeUpload === "tailor") return tailoredUpload(h, groupId, ctrl);
+  const doc = primaryDocFor(h);
+  if (doc) return doFill(h, { type: "file", documentId: doc }, "filled", why, ctrl);
+  setStatus(h, "needs", why);
+}
+
+/**
+ * One review round: the page as text and the fields on it to the AI, then its verdicts applied. "fresh": fields
+ * appeared (adopted, revealed or shown by a correction) for a fill pass; "changed": answers were corrected, for
+ * another round to check; "none": nothing to do. Fails open: an AI error leaves the fills as they are.
+ */
+async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none" | "changed" | "fresh"> {
+  reviewing = true;
+  report();
+  try {
+    await transitionsEnd();
+    const shown = rescan().filter(
+      (h) => h.el.isConnected && (h.desc.kind === "file" || isVisible(h.container ?? h.el)),
+    );
+    const owner = new Map<Element, string>();
+    for (const h of shown)
+      for (const e of [h.el, ...(h.members ?? []), h.searchInput, ...(h.sections ?? [])]) if (e) owner.set(e, h.id);
+    const snap = snapshot({
+      fieldOf: (el) => owner.get(el),
+      shown: (id) => {
+        const h = handles.get(id);
+        return h ? readValue(h) : "";
+      },
+      excluded: (el) => scanState.excluded.get(el),
+      unknownState: (id) => {
+        const h = handles.get(id);
+        if (!h || !stateHidden(h)) return undefined;
+        const a = applied.get(id);
+        return a ? opText(a[0]) : "";
+      },
+    });
+    if (!shown.length && !snap.unscanned.length) return "none";
+    const r = await send({ type: "REVIEW_FORM", page: snap.text, fields: shown.map(reviewField), groupId, yolo });
+    if (ctrl.signal.aborted) return "none";
+    if (isErr(r)) {
+      if (config.settings.debugLogging) console.warn("[AutoApply] review failed:", r.error.message);
+      return "none";
+    }
+    let changed = false;
+    const jobs: Promise<void>[] = [];
+    for (const fix of r.fixes) {
+      const h = handles.get(fix.fieldId);
+      const s = h && states.get(h.id);
+      if (!h || s?.userOwned) continue;
+      if (fix.verdict === "relabel" && fix.question && fix.question !== h.desc.label) {
+        scanState.relabeled.set(h.el, fix.question);
+        h.desc.label = fix.question;
+      }
+      const why = `Review: ${fix.reason || "corrected"}`;
+      const suggestion = fix.answer ? `Suggested: ${fix.answer}` : undefined;
+      if (fix.verdict === "needs_user") {
+        // YOLO keeps its answer rather than a blank; a fill shows the user what the review doubts.
+        if (yolo && readValue(h)) continue;
+        setStatus(h, readValue(h) ? "check" : "needs", why, suggestion);
+        continue;
+      }
+      if (fix.answer === undefined) continue;
+      // What the page held before the fill may be the user's own: suggested, not overwritten (Overwrite pre-filled).
+      if (!yolo && s?.status === "prefilled" && !config.settings.overwritePrefilled) {
+        setStatus(h, "check", why, suggestion);
+        continue;
+      }
+      const tries = (reviewTries.get(h.id) ?? 0) + 1;
+      reviewTries.set(h.id, tries);
+      if (tries > 2) {
+        setStatus(h, "needs", `The page didn't take the review's answer (${fix.reason || "corrected"})`, suggestion);
+        continue;
+      }
+      changed = true;
+      if (h.desc.kind === "file") {
+        jobs.push(reviewUpload(h, groupId, ctrl, why));
+        continue;
+      }
+      const op = opForAnswer(h, fix.answer, h.desc.options ?? harvested.get(h.id));
+      if (!op) {
+        setStatus(h, "needs", why, suggestion);
+        continue;
+      }
+      // A YOLO best guess is logged and badged like the mapping's guesses.
+      jobs.push(doFill(h, op, "ai", yolo && fix.sources.includes("guess") ? "guess" : why, ctrl));
+    }
+    await Promise.all(jobs);
+    let found = false;
+    for (const m of r.missed) {
+      const a = adoption(m, snap.refs);
+      if (!a || owner.has(a[0]) || scanState.adopted.has(a[0])) continue;
+      scanState.adopted.set(a[0], a[1]);
+      found = true;
+    }
+    for (const ref of r.reveal.slice(0, 5)) {
+      const el = snap.refs.get(ref);
+      if (!revealable(el) || revealed.has(el)) continue;
+      revealed.add(el);
+      dispatching(() => el.click());
+      found = true;
+      await sleep(600);
+    }
+    if (changed || found) {
+      await transitionsEnd();
+      if (rescan().some((h) => !states.has(h.id))) return "fresh";
+    }
+    return changed ? "changed" : "none";
+  } finally {
+    reviewing = false;
+    report();
   }
 }
 

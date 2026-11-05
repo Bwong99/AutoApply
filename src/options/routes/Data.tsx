@@ -15,6 +15,7 @@ const ExportSchema = z.object({
   apiKeys: z.array(ApiKeyEntrySchema).optional(),
   selectedModel: z.string().nullable(),
   fallbackModel: z.string().nullable(),
+  reviewModel: z.string().nullable().optional(),
   // YOLO's settings and its log of applications (what is never applied to again). Site passwords stay behind:
   // their key can't leave this browser.
   yolo: z.unknown().optional(),
@@ -40,17 +41,27 @@ export function Data() {
   const [resetStep, setResetStep] = useState(0);
 
   const doExport = async () => {
-    const { profile, settings, documentsIndex, apiKeys, selectedModel, fallbackModel, yolo, applications } =
-      await store.getMany([
-        "profile",
-        "settings",
-        "documentsIndex",
-        "apiKeys",
-        "selectedModel",
-        "fallbackModel",
-        "yolo",
-        "applications",
-      ]);
+    const {
+      profile,
+      settings,
+      documentsIndex,
+      apiKeys,
+      selectedModel,
+      fallbackModel,
+      reviewModel,
+      yolo,
+      applications,
+    } = await store.getMany([
+      "profile",
+      "settings",
+      "documentsIndex",
+      "apiKeys",
+      "selectedModel",
+      "fallbackModel",
+      "reviewModel",
+      "yolo",
+      "applications",
+    ]);
     const documents = [];
     if (withDocs)
       for (const meta of documentsIndex) documents.push({ meta, base64: (await store.getDoc(meta.id)) ?? "" });
@@ -68,6 +79,7 @@ export function Data() {
       settings,
       selectedModel,
       fallbackModel,
+      reviewModel,
       yolo,
       applications,
       ...(withDocs ? { documents, tailorResume } : {}),
@@ -134,6 +146,7 @@ export function Data() {
       ...(data.apiKeys ? { apiKeys: data.apiKeys } : {}),
       selectedModel: data.selectedModel,
       fallbackModel: data.fallbackModel,
+      ...(data.reviewModel !== undefined ? { reviewModel: data.reviewModel } : {}),
       ...(data.yolo ? { yolo: { ...YoloSchema.parse(data.yolo), enabled: false } } : {}),
       ...(data.applications ? { applications: LOCAL_SCHEMAS.applications.parse(data.applications) } : {}),
     });

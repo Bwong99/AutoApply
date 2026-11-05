@@ -7,6 +7,8 @@ export interface OverlayView {
   counts: StatusCounts;
   needsYou: NeedsYouItem[];
   running: boolean;
+  /** The AI review is checking the answers. */
+  reviewing?: boolean;
   /** Résumés and cover letters the fill uploaded, opened in a new tab on click. */
   uploads: UploadedDoc[];
   error: ApiError | null;
@@ -54,7 +56,8 @@ function jobRows(b: JobBrief | null): HTMLElement {
   );
 }
 
-export function statusLine(c: StatusCounts, running: boolean): string {
+export function statusLine(c: StatusCounts, running: boolean, reviewing = false): string {
+  if (running && reviewing) return `Reviewing answers… ${c.total - pendingOf(c)}/${c.total}`;
   if (running) return `Filling… ${c.total - pendingOf(c)}/${c.total}`;
   return `Done · ${c.filled} filled · ${c.aiDrafted} AI draft${c.aiDrafted === 1 ? "" : "s"} · ${c.needsYou + c.failed} need you`;
 }
@@ -176,7 +179,7 @@ export function createOverlay(h: OverlayHandlers, initialBottom: number | null) 
   return {
     update(v: OverlayView) {
       const c = v.counts;
-      status.textContent = statusLine(c, v.running);
+      status.textContent = statusLine(c, v.running, v.reviewing);
       model.textContent = v.model ? `Model: ${v.model}` : "";
       notice.textContent = v.notice ?? "";
       notice.style.display = v.notice ? "" : "none";
