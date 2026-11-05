@@ -230,11 +230,15 @@ export async function fillCheckbox(h: FieldHandle, checked: boolean): Promise<Fi
     : { outcome: "failed", note: "Checkbox did not toggle" };
 }
 
-/** Reach exactly the target set; only unchecks boxes we checked ourselves (§14.4, §18.8). */
+/**
+ * Reach exactly the target set; only unchecks boxes we checked ourselves (§14.4, §18.8), or with `exact` (the AI
+ * review's answer for the whole group) any box outside it, such as opt-ins the page ticked by default.
+ */
 export async function fillCheckboxGroup(
   h: FieldHandle,
   texts: string[],
   checkedByUs: Set<Element>,
+  exact = false,
 ): Promise<FillResult> {
   const want = new Set(texts.map((t) => indexOfText(h, t)));
   if (want.has(-1)) return { outcome: "failed", note: "Option not found" };
@@ -243,7 +247,7 @@ export async function fillCheckboxGroup(
     if (want.has(i) && !on) {
       clickChoice(m);
       checkedByUs.add(m);
-    } else if (!want.has(i) && on && checkedByUs.has(m)) {
+    } else if (!want.has(i) && on && (exact || checkedByUs.has(m))) {
       clickChoice(m);
       checkedByUs.delete(m);
     }

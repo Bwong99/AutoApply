@@ -90,6 +90,24 @@ describe("review guards (checkFix)", () => {
     expect(checkFix(fix({ verdict: "wrong" }), field({ shown: "ada" }), profile(), false, undefined)).toBeNull();
   });
 
+  it("takes a choice's answer only when it is one of the options", () => {
+    const states = field({
+      question: "State",
+      kind: "select",
+      required: true,
+      options: ["Alabama", "Indiana"],
+      shown: "Indiana",
+    });
+    const bc = fix({ verdict: "wrong", answer: "British Columbia", sources: ["personal.address.region"] });
+    expect(checkFix(bc, states, profile(), false, undefined)).toMatchObject({ verdict: "needs_user" });
+    // YOLO keeps its guess rather than an answer the list can't take.
+    expect(checkFix(bc, states, profile(), true, undefined)).toBeNull();
+    const ways = field({ kind: "checkbox_group", options: ["Email", "SMS", "WhatsApp"], shown: "Email | SMS" });
+    expect(checkFix(fix({ verdict: "wrong", answer: "Email" }), ways, profile(), true, undefined)?.answer).toBe(
+      "Email",
+    );
+  });
+
   it("empties only optional fields that hold a value", () => {
     expect(
       checkFix(fix({ verdict: "wrong", answer: "" }), field({ shown: "x" }), profile(), false, undefined),
@@ -176,6 +194,7 @@ describe("reconcile", () => {
     expect(opForAnswer(sel, "british columbia", sel.desc.options)).toEqual({
       type: "options",
       texts: ["British Columbia"],
+      exact: true,
     });
     expect(opForAnswer(sel, "BC", sel.desc.options)).toEqual({ type: "intended", answer: "BC" });
     const box = handle(`<label><input type="checkbox"> I agree</label>`);
