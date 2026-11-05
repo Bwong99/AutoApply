@@ -19,6 +19,8 @@ test("badges: outlines stay on their fields through window and inner-container s
     scrollTo(0, 50);
     document.querySelector("form")!.parentElement!.scrollTop = 120;
   });
+  // Chrome moves anchored boxes for a scroll at the next frame: measure after it, not mid-way.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   // Each box is CSS-anchored (no scroll handler involved) and sits 3px outside its field on every side.
   const offsets = await page.evaluate(() =>
     [...document.querySelector("autoapply-root")!.shadowRoot!.querySelectorAll<HTMLElement>(".box")].map((b) => {
