@@ -115,6 +115,8 @@ let running = false;
 let queued: { rerun: boolean; depth?: number; round?: number } | null = null;
 /** The AI review is reading the page (overlay: "Reviewing…"). */
 let reviewing = false;
+/** Fields answered by the screening policy (shared/screening.ts): the AI review leaves them as they are. */
+const screened = new Set<string>();
 /** Times the review corrected each field: a third correction means the page won't take it. */
 const reviewTries = new Map<string, number>();
 /** "Add" / "Show more" buttons the review pressed, each once. */
@@ -546,6 +548,7 @@ async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: str
     guesses.set(h.id, { q: h.desc.label, a: opText(op) });
   }
   if (tooltip === SCREENING_SOURCE) {
+    screened.add(h.id);
     okStatus = "check";
     tooltip = "Meets the job's screening requirement; review this answer";
     guesses.set(h.id, { q: h.desc.label, a: opText(op) });
@@ -989,6 +992,7 @@ function reviewField(h: FieldHandle): ReviewField {
     optInAnswered(h.desc) ||
     (!!options && isConsent({ ...h.desc, options })) ||
     RE_POLICY_NOTE.test(s?.note ?? "") ||
+    screened.has(h.id) ||
     (h.desc.kind === "file" && (!!shown || s?.status === "filled"));
   return {
     id: h.id,
@@ -1095,7 +1099,9 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         continue;
       }
       // Prose is the essay writer's (its rules against AI-sounding text, the question's limits), not the review's.
-      if ((h.desc.kind === "textarea" || h.desc.kind === "contenteditable") && fix.answer.length > 200) {
+      // Screening quantities are fills, never essays (shared/screening.ts).
+      const screening = fix.sources.includes(SCREENING_SOURCE);
+      if (!screening && (h.desc.kind === "textarea" || h.desc.kind === "contenteditable") && fix.answer.length > 200) {
         if (!config.settings.draftEssays) {
           setStatus(h, "needs", "Write this yourself");
           continue;
@@ -1115,7 +1121,9 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         continue;
       }
       // A YOLO best guess is logged and badged like the mapping's guesses.
-      jobs.push(doFill(h, op, "ai", yolo && fix.sources.includes("guess") ? "guess" : why, ctrl));
+      // A YOLO best guess, or an answer the screening policy permits, is logged and badged like the mapping's.
+      const tooltip = screening ? SCREENING_SOURCE : yolo && fix.sources.includes("guess") ? "guess" : why;
+      jobs.push(doFill(h, op, "ai", tooltip, ctrl));
     }
     if (essays.length) jobs.push(draftEssays(essays, groupId, ctrl, () => undefined));
     await Promise.all(jobs);

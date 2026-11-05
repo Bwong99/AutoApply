@@ -262,3 +262,17 @@ describe("reconcile", () => {
     expect(scan(state).handles[0].id).toBe(h.id);
   });
 });
+
+describe("screening policy", () => {
+  it("is part of the review's rules, and its answers pass the review's guards", async () => {
+    const { REVIEW_FORM_PROMPT, SCREENING_POLICY } = await import("../../src/background/gemini/prompts");
+    expect(REVIEW_FORM_PROMPT).toContain(SCREENING_POLICY);
+    const q = field({
+      question: "Do you have 3+ years of React experience?",
+      kind: "radio_group",
+      options: ["Yes", "No"],
+    });
+    const r = checkFix(fix({ answer: "Yes", sources: ["screening"] }), q, profile(), false, undefined);
+    expect(r?.answer).toBe("Yes");
+  });
+});
