@@ -9,10 +9,10 @@ import { codeInput, visiblePasswords } from "./classify";
 import { findButton, press } from "./nav";
 
 const RE_SIGNIN_BTN = /^(sign ?in|log ?in|continue|next|submit)$/i;
-const RE_SIGNUP_BTN = /^(create (an |my )?account|sign ?up|register|continue|next|submit)$/i;
+const RE_SIGNUP_BTN = /^(create (an |a |my |your )?(new )?account|sign ?up|register|continue|next|submit)$/i;
 // Avature (National Bank): "Don't have a profile yet? … Create profile".
 const RE_TO_SIGNUP =
-  /^(create (an |my )?account|create (a |my |your )?profile|sign ?up|register|new user\??|don'?t have an account\?.*)$/i;
+  /^(create (an |a |my |your )?(new )?(account|profile)|sign ?up|register|new user\??|don'?t have an account\?.*)$/i;
 const RE_TO_SIGNIN = /^(sign ?in|log ?in|already have an account\?.*)$/i;
 const RE_FORGOT = /forgot (your )?password|reset (your )?password/i;
 const RE_VERIFY_BTN =

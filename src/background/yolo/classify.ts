@@ -19,6 +19,7 @@ const RE_VERIFY_FAILED =
   /\b(not|n't|unable to|failed to) (be |been )?(verified|confirmed|activated)|expired|invalid|no longer valid|already (been )?used|went wrong/i;
 const RE_RESET = /(reset|new|change|create) (your )?password/i;
 const RE_SIGNUP = /create (an |your )?account|sign ?up|register|new (user|candidate)/i;
+const RE_SIGNUP_PATH = /(^|[/_-])(create[-_]?account|sign[-_]?up|register|registration)([/_.-]|$)/i;
 /** "Report suspicious activity here" in a careers site's fraud banner (AMD) is not a flag on us. */
 const RE_FLAGGED =
   /flagged as (possible )?spam|(detected|due to|because of) (some )?(unusual or )?suspicious activity|recaptcha (verification )?failed/i;
@@ -54,8 +55,11 @@ function stepKind(f: PageFacts, hidden: boolean): StepKind {
     return "verify";
   if (!f.passwords && RE_FORGOT.test(f.headings)) return "verify";
   if (f.passwords >= 2) return RE_RESET.test(f.headings) ? "reset" : "signup";
+  // TikTok's /create-account is headed "Sign in" like its login: the address says which it is.
   if (f.passwords === 1)
-    return RE_SIGNUP.test(f.headings) && !/sign ?in|log ?in/i.test(f.headings) ? "signup" : "signin";
+    return (RE_SIGNUP.test(f.headings) && !/sign ?in|log ?in/i.test(f.headings)) || RE_SIGNUP_PATH.test(f.path)
+      ? "signup"
+      : "signin";
   // An email-first sign-in (Eightfold's "Email · Continue · First time here? Create an account"): no password yet.
   // Its address box and a heading that is only "Sign in": Workday's step "Create Account/Sign In" heads its sign-up too,
   // which reads as no fields while it renders.
