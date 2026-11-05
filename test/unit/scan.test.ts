@@ -600,18 +600,39 @@ describe("skipping and visibility (§11.3, §11.6)", () => {
     expect(fields().map((h) => h.desc.label)).toEqual(["Name", "Website", "Prior Honeywell employee?"]);
   });
 
-  it("skips optional honeypots hidden by their box alone, never a required field", () => {
+  it("skips optional honeypots hidden by their box alone", () => {
     setBody(`<form><label>Name <input name="n"></label>
       <label>Website <input id="z" name="website"></label>
       <div id="w" style="overflow-x:hidden;overflow-y:hidden"><label>Fax <input id="c" name="fax"></label></div>
-      <label>Company URL <input id="r" name="url" required></label></form>`);
+      <label>Company URL <input id="r" name="url"></label></form>`);
     const box = (el: Element, left: number, top: number, width: number, height: number) =>
       (el.getBoundingClientRect = () =>
         ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height }) as DOMRect);
     box(document.getElementById("z")!, 0, 0, 1, 0); // Workday's beecatcher box: 1 × 0
     box(document.getElementById("w")!, 0, 0, 100, 0); // a height-0 wrapper clips its input away
-    box(document.getElementById("r")!, -500, 0, 100, 20); // left of the page, but required
-    expect(fields().map((h) => h.desc.label)).toEqual(["Name", "Company URL"]);
+    box(document.getElementById("r")!, -500, 0, 100, 20); // left of the page
+    expect(fields().map((h) => h.desc.label)).toEqual(["Name"]);
+  });
+
+  it("skips required honeypots only when nothing could show them, not ones a scroll box hides", () => {
+    setBody(`<form><label>Name <input name="n" required></label>
+      <label>Phone <input id="off" name="phone2" required></label>
+      <label>Fax <input id="tiny" name="fax2" required></label>
+      <div id="shut" style="overflow:hidden"><label>Website <input name="site2" required></label></div>
+      <div id="scroll" style="overflow-x:hidden;overflow-y:hidden"><label>City <input id="low" name="city" required></label></div>
+      <div id="scroll2" style="overflow-x:hidden;overflow-y:hidden"><label>Notes <input id="low2" name="notes"></label></div></form>`);
+    const box = (id: string, left: number, top: number, width: number, height: number) =>
+      (document.getElementById(id)!.getBoundingClientRect = () =>
+        ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height }) as DOMRect);
+    box("off", -9999, 0, 100, 20); // a honeypot pushed left of the page
+    box("tiny", 0, 0, 1, 1); // a 1 px honeypot
+    box("shut", 0, 0, 100, 0); // inside a box clipped to nothing
+    // A scroll box 200 px tall whose lower rows (y 500) are out of view: a real question, kept when required.
+    box("scroll", 0, 0, 400, 200);
+    box("low", 0, 500, 100, 20);
+    box("scroll2", 0, 0, 400, 200);
+    box("low2", 0, 500, 100, 20);
+    expect(fields().map((h) => h.desc.label)).toEqual(["Name", "City"]);
   });
 
   it("reports prefilled fields and keeps stable ids across rescans", () => {

@@ -34,7 +34,7 @@ import {
   unseenPlaceholder,
 } from "./labels";
 import { collect, type Collected } from "./traverse";
-import { composedContains, concealed, parentOf } from "./visibility";
+import { composedContains, concealed, outOfSight, parentOf } from "./visibility";
 import { findHiddenSelect, isTypeaheadInput, nativeOptions } from "./widgets";
 
 export interface FieldHandle {
@@ -401,12 +401,14 @@ export function scan(state: ScanState, root: Element | null = document.body): Sc
         (n) => n && textOf(n) === rawLabel && getComputedStyle(n, "::after").content.includes("*"),
       );
     d.required = !!required || !!forced?.required;
-    // A honeypot: an optional text box hidden from people, which only a bot fills, and the site then drops the
-    // application unseen. One with a giveaway label went above (RE_SKIP_LABEL); this is one hidden by its box alone.
+    // A honeypot: a text box hidden from people, which only a bot fills, and the site then drops the application
+    // unseen. One with a giveaway label went above (RE_SKIP_LABEL); this is one hidden by its box alone. A required
+    // box counts only when nothing could show it (outOfSight): one a scroll box or carousel merely hides may be asked.
     // An adopted control too, required or not, of any kind: what the review found must be something people see.
+    const hidden = (n: Element) => (d.required && !forced ? outOfSight(n) : concealed(n) || outOfSight(n));
     if (
-      ((!d.required && /^(text|email|tel|url|number|textarea)$/.test(kind)) || forced) &&
-      (members?.length ? members.every((m) => concealed(labelElementFor(m as HTMLElement) ?? m)) : concealed(el))
+      (/^(text|email|tel|url|number|textarea)$/.test(kind) || forced) &&
+      (members?.length ? members.every((m) => hidden(labelElementFor(m as HTMLElement) ?? m)) : hidden(el))
     ) {
       skip("hidden from people (honeypot)");
       continue;

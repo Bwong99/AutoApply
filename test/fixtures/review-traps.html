@@ -54,6 +54,12 @@
         <input id="hp2" name="phone2" tabindex="-1" aria-label="Phone" />
       </div>
       <div class="shut"><label for="hp3">Last name</label><input id="hp3" name="surname2" /></div>
+      <!-- Required honeypots: marked required, yet no one could see them. -->
+      <div class="offscreen"><label for="hp4">Phone *</label><input id="hp4" name="phone3" type="tel" required /></div>
+      <div style="position: absolute; clip: rect(0 0 0 0)">
+        <label for="hp5">Email *</label><input id="hp5" name="email3" required />
+      </div>
+      <div class="shut"><label for="hp6">First name *</label><input id="hp6" name="given2" required /></div>
       <!-- A question only a bot would answer, hidden; and visible questions that are traps. -->
       <div class="shut">
         <div>Are you a robot</div>
