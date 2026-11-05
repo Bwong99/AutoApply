@@ -80,6 +80,8 @@ export function checkFix(
   if (RE_AI_TELL.test(answer)) return null;
   // Emptying: only what holds a value, and nothing required.
   if (answer === "") return f.shown && !f.required ? { ...fix, answer } : null;
+  // A phone country picker that shows only the dial code (Greenhouse's "+1" for Canada or the US) can't show more.
+  if (/^\+\d{1,4}$/.test(f.shown.trim()) && new RegExp(`\\${f.shown.trim()}(?!\\d)`).test(answer)) return null;
   const guess = fix.sources.includes(GUESS);
   const sourced = fix.sources.some((s) => s !== GUESS);
   if (!f.required) {
@@ -98,7 +100,9 @@ export function checkFix(
     const parts = answer.split(/\s*\|\s*/).filter(Boolean);
     const listed = parts.every((p) => f.options!.some((o) => normalize(o) === normalize(p)));
     if (!listed)
-      return yolo ? null : { ...fix, verdict: "needs_user", answer, reason: fix.reason || "No option fits your answer" };
+      return yolo
+        ? null
+        : { ...fix, verdict: "needs_user", answer, reason: fix.reason || "No option fits your answer" };
   }
   if (CHOICE.has(f.kind) && f.options?.length && !answer.includes(" | ")) {
     const i = f.options.findIndex((o) => normalize(o) === normalize(answer!));
