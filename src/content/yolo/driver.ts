@@ -271,10 +271,22 @@ export async function drive(deps: DriverDeps) {
         case "flagged":
           location.reload(); // the step loop guard ends it after a few tries
           return;
-        case "embedded":
+        case "embedded": {
+          // An embedded form loaded before in this run that led back here (iCIMS's login frame): the navigator decides.
+          const src = embeddedForm();
+          const seen = JSON.parse(sessionStorage.getItem("autoapply-embedded") ?? "[]") as string[];
+          if (!src || seen.includes(src)) {
+            const n = await navigateOn("The embedded application form leads back to this page", facts, before);
+            if (n === "end") return;
+            if (n === "fill") await fill();
+            if (n) continue;
+            return result({ status: "failed", reason: "The embedded form loops back", guesses: deps.guesses() });
+          }
+          sessionStorage.setItem("autoapply-embedded", JSON.stringify([...seen, src].slice(-10)));
           await deps.posting();
-          location.href = embeddedForm()!;
+          location.href = src;
           return;
+        }
         case "verify": {
           const r = await handleVerify(Date.now() - 15 * 60_000, deps.email());
           if ("fail" in r) return needs(r.fail);
@@ -285,7 +297,14 @@ export async function drive(deps: DriverDeps) {
         case "reset": {
           // Refused before: the address has an account we hold no password for, so reset it by email.
           const r = step.refused ? await forgotPassword() : await handleAuth(kind, fill);
-          if ("fail" in r) return needs(r.fail);
+          if ("fail" in r) {
+            // A button its wording rules miss ("Create a new account"): the navigator's press, then the step again.
+            const n = await navigateOn(`Account step: ${r.fail}`, facts, before);
+            if (n === "end") return;
+            if (n === "fill") await fill();
+            if (n) continue;
+            return needs(r.fail);
+          }
           break;
         }
         case "job": {

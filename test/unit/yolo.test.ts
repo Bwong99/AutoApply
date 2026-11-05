@@ -1231,4 +1231,28 @@ describe("embedded steps", () => {
     expect(kindOf(facts, false)).toBe("form");
     expect(kindOf({ ...facts, requiredFields: 0, fields: 0 }, false)).toBe("embedded");
   });
+
+  it('reads a create-account address headed "Sign in" as a sign-up (TikTok)', async () => {
+    const { kindOf } = await import("../../src/background/yolo/classify");
+    const page = {
+      text: "Sign in Email Password Create",
+      title: "TikTok Careers",
+      path: "/create-account",
+      headings: "Sign in",
+      alerts: "",
+      fields: 2,
+      passwords: 1,
+      codeInput: false,
+      captcha: false,
+      scored: false,
+      embedded: false,
+      apply: false,
+      applyKind: "none" as const,
+      applyInForm: false,
+      requiredFields: 0,
+      onward: false,
+    };
+    expect(kindOf(page, false)).toBe("signup");
+    expect(kindOf({ ...page, path: "/login" }, false)).toBe("signin");
+  });
 });
