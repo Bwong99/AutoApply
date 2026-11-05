@@ -31,7 +31,15 @@ export interface TailorOps {
   add?: { after: string; text: string }[];
   remove?: string[];
   order?: { group: string; items: string[] }[];
+  /**
+   * The one-page limit's ranked cuts (entries, bullets, sections), least relevant first. Never applied as given:
+   * planCuts() checks them and tailorResume.ts applies only as many as it takes to fit.
+   */
+  cut?: string[];
 }
+
+/** The most cuts of the AI's list that are tried. */
+export const MAX_CUTS = 10;
 
 /** Commands an edit may never contain: they read or write files, define macros or change how TeX reads. */
 const FORBIDDEN =
@@ -253,11 +261,65 @@ export interface Applied {
   dropped: number;
 }
 
+/** The bullets `remove` deletes: bullets only, and never every bullet of a run. */
+function removals(p: ParsedTex, ops: TailorOps, skip: Set<string>): { removed: Set<string>; dropped: number } {
+  const removed = new Set<string>();
+  let dropped = 0;
+  for (const id of new Set(ops.remove ?? [])) {
+    const u = p.units.get(id);
+    const run = p.groups.find((g) => g.items.includes(id));
+    const left = run ? run.items.filter((x) => x !== id && !removed.has(x)).length : 0;
+    if (!u || u.kind !== "bullet" || skip.has(`remove:${id}`) || left === 0) dropped++;
+    else removed.add(id);
+  }
+  return { removed, dropped };
+}
+
+/**
+ * The AI's ranked cuts that would each delete something, in order: up to MAX_CUTS entries, bullets or sections.
+ * A bullet never goes with the rest of its run (an empty list doesn't compile), an entry that is its section's last
+ * takes the section with it, and the last section always stays. Ids inside an earlier cut are dropped.
+ */
+export function planCuts(p: ParsedTex, ops: TailorOps, skip = new Set<string>()): string[] {
+  const { removed } = removals(p, ops, skip);
+  const cut: string[] = [];
+  const gone = (id: string) => removed.has(id) || cut.some((c) => id === c || id.startsWith(`${c}.`));
+  const alive = (kind: Unit["kind"], under: string, not: string) =>
+    [...p.units.values()].filter((u) => u.kind === kind && u.id.startsWith(under) && u.id !== not && !gone(u.id))
+      .length;
+  for (const id of new Set((ops.cut ?? []).slice(0, MAX_CUTS))) {
+    const u = p.units.get(id);
+    if (!u || u.kind === "line" || gone(id)) continue;
+    let target = id;
+    if (u.kind === "bullet") {
+      const run = p.groups.find((g) => g.items.includes(id));
+      if (!run || !run.items.some((x) => x !== id && !gone(x))) continue;
+    } else if (u.kind === "entry") {
+      const section = id.split(".")[0];
+      if (!alive("entry", `${section}.`, id)) target = section;
+    }
+    if (p.units.get(target)!.kind === "section" && !alive("section", "S", target)) continue;
+    cut.push(target);
+  }
+  return cut;
+}
+
+/** Where a section's deletion stops: before a wrapper it didn't open closes (the end of a list around them all). */
+function sectionEnd(p: ParsedTex, u: Unit): number {
+  let open = 0;
+  for (let j = u.start + 1; j < u.end; j++) {
+    const c = code(p.lines[j]);
+    if (WRAP_OPEN.test(c)) open++;
+    else if (WRAP_CLOSE.test(c) && --open < 0) return j;
+  }
+  return u.end;
+}
+
 /**
  * Checks every op on its own and applies the valid ones. `skip`: op keys ("edit:S1.B2", "add:S1.B2#0") to leave out,
- * after a compile error traced to them.
+ * after a compile error traced to them. `cuts`: from planCuts(), deleted whatever they hold (not counted in `applied`).
  */
-export function applyOps(p: ParsedTex, ops: TailorOps, skip = new Set<string>()): Applied {
+export function applyOps(p: ParsedTex, ops: TailorOps, skip = new Set<string>(), cuts: string[] = []): Applied {
   const out: string[][] = p.lines.map((l) => [l]);
   const from: (string | undefined)[][] = p.lines.map(() => [undefined]);
   let applied = 0;
@@ -292,17 +354,10 @@ export function applyOps(p: ParsedTex, ops: TailorOps, skip = new Set<string>())
   }
 
   // Removals: bullets only, and never every bullet of a run.
-  const removed = new Set<string>();
-  for (const id of new Set(ops.remove ?? [])) {
-    const u = p.units.get(id);
-    const run = p.groups.find((g) => g.items.includes(id));
-    const left = run ? run.items.filter((x) => x !== id && !removed.has(x)).length : 0;
-    if (!u || u.kind !== "bullet" || skip.has(`remove:${id}`) || left === 0) {
-      dropped++;
-      continue;
-    }
-    removed.add(id);
-    replace(u, [], `remove:${id}`);
+  const r = removals(p, ops, skip);
+  dropped += r.dropped;
+  for (const id of r.removed) {
+    replace(p.units.get(id)!, [], `remove:${id}`);
     applied++;
   }
 
@@ -317,6 +372,12 @@ export function applyOps(p: ParsedTex, ops: TailorOps, skip = new Set<string>())
     from[last] = [...from[last], key];
     applied++;
   });
+
+  // Cuts last: they delete whatever was edited or added inside them.
+  for (const id of cuts) {
+    const u = p.units.get(id);
+    if (u) replace({ ...u, end: u.kind === "section" ? sectionEnd(p, u) : u.end }, [], `cut:${id}`);
+  }
 
   // Orders: complete permutations of a group's items only.
   const order = new Map<string, string[]>();

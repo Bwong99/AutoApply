@@ -179,33 +179,119 @@ const INDEED_HOSTS: Record<string, string> = {
 };
 const indeedHost = (loc: string) => INDEED_HOSTS[countryOf(loc)] ?? "www.indeed.com";
 
-/** Indeed builds its result cards in script, so the search page is rendered in the hidden host. */
+/**
+ * Indeed's search, read as the signed-in user (their cookies): fetched by the worker, or rendered in a background tab
+ * when Cloudflare checks the fetch. Either way the page carries its result cards as JSON (`parseIndeed`).
+ */
 export const indeedSearch = (q: string, loc: string, days: number) =>
   `https://${indeedHost(loc)}/jobs?q=${enc(q)}&l=${enc(loc)}&fromage=${[1, 3, 7, 14].find((d) => d >= days) ?? 14}&sort=date`;
 
-export function parseIndeed(links: Link[], host: string): Listing[] {
+/**
+ * Indeed's account page, asked with HEAD (headers only): signed out, it redirects to sign-in at /auth; signed in, it
+ * answers 200 where it is (live, 2026-11-04). The sign-in is Indeed-wide, so it covers every country's search.
+ */
+export const INDEED_ACCOUNT = "https://secure.indeed.com/settings/account";
+/** Whether the INDEED_ACCOUNT probe, at the URL it ended on, landed on Indeed's sign-in page. */
+export const indeedSignedOut = (finalUrl: string) =>
+  /^https:\/\/secure\.indeed\.com\/(auth|account\/login)\b/.test(finalUrl);
+
+const INDEED_CARDS = /window\.mosaic\.providerData\["mosaic-provider-jobcards"\]\s*=\s*/;
+/** A bot check standing in for the search: Cloudflare's interstitial or block page (titles as in botWall). */
+const INDEED_WALL =
+  /<title[^>]*>\s*(just a moment|security check|attention required|blocked|access denied)\b|\bRay ID\b/i;
+
+/** The JSON object starting at `at` in `s`, its braces matched outside strings; null if there's none or it won't parse. */
+function objectAt(s: string, at: number): unknown {
+  if (s[at] !== "{") return null;
+  let depth = 0;
+  let str = false;
+  for (let i = at; i < s.length; i++) {
+    const c = s[i];
+    if (str) {
+      if (c === "\\") i++;
+      else if (c === '"') str = false;
+    } else if (c === '"') str = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) {
+      try {
+        return JSON.parse(s.slice(at, i + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+interface IndeedCard {
+  jobkey?: string;
+  displayTitle?: string;
+  title?: string;
+  company?: string;
+  truncatedCompany?: string;
+  formattedLocation?: string;
+  remoteLocation?: boolean;
+  /** Epoch ms. */
+  pubDate?: number;
+  indeedApplyEnabled?: boolean;
+  indeedApplyable?: boolean;
+  expired?: boolean;
+}
+
+/**
+ * A search page's result cards, from the job-card data Indeed embeds in it (a fetched page, or that script's text from
+ * a rendered one). null = a bot check stood in for the page; [] = no cards.
+ */
+export function parseIndeed(page: string, host: string): Listing[] | null {
+  const m = INDEED_CARDS.exec(page);
+  const data = m
+    ? (objectAt(page, m.index + m[0].length) as {
+        metaData?: { mosaicProviderJobCardsModel?: { results?: IndeedCard[] } };
+      } | null)
+    : null;
+  const cards = data?.metaData?.mosaicProviderJobCardsModel?.results;
+  if (!Array.isArray(cards)) {
+    if (INDEED_WALL.test(page)) return null;
+    if (page) console.warn("[AutoApply] Indeed: the search page had no job-card data");
+    return [];
+  }
   const seen = new Set<string>();
-  return links.flatMap((l) => {
-    const jk = /[?&]jk=([0-9a-f]+)/.exec(l.href)?.[1];
-    if (!jk || !l.card || !l.text || seen.has(jk)) return [];
+  return cards.flatMap((c) => {
+    const jk = c?.jobkey;
+    const title = decode(c?.displayTitle || c?.title || "");
+    if (!jk || !/^[0-9a-f]+$/i.test(jk) || !title || c.expired || seen.has(jk)) return [];
     seen.add(jk);
-    // A card reads: title, company, location, then pay and snippets.
-    const lines = l.card
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const i = Math.max(0, lines.indexOf(l.text));
+    const place = decode(c.formattedLocation ?? "");
     return [
       {
         url: `https://${host}/viewjob?jk=${jk}`,
-        title: l.text,
-        company: lines[i + 1] ?? "",
-        location: lines[i + 2] ?? "",
+        title,
+        company: decode(c.company || c.truncatedCompany || ""),
+        location: c.remoteLocation && !/\bremote\b/i.test(place) ? (place ? `Remote - ${place}` : "Remote") : place,
+        // Epoch ms; anything smaller isn't a date in this century, so it's left out rather than read as 1970.
+        postedAt: typeof c.pubDate === "number" && c.pubDate > 1e12 ? c.pubDate : undefined,
         source: "indeed",
-        easyApply: /easily apply/i.test(l.card) || undefined,
+        // Applied to on Indeed itself (Indeed Apply): not supported yet, so never queued.
+        easyApply: c.indeedApplyEnabled || c.indeedApplyable || undefined,
       },
     ];
   });
+}
+
+/**
+ * Run in Indeed's search page in a tab (chrome.scripting sends it as source, so it is self-contained): the job-card
+ * script's text, "" once the page has loaded without one, or null while a bot check stands in for it.
+ */
+export function indeedCardsInPage(): string | null {
+  // The data is assigned in <script id="mosaic-data">; an earlier, smaller script names the same provider without it
+  // (live, signed in, 2026-11-04).
+  const s = Array.from(document.scripts).find((x) => /\["mosaic-provider-jobcards"\]\s*=/.test(x.text));
+  if (s) return s.text;
+  const wall =
+    /^(just a moment|security check|attention required|blocked|access denied)\b/i.test(document.title) ||
+    /\bRay ID\b/.test(document.body?.textContent ?? "") ||
+    !!document.querySelector('iframe[src*="captcha"], iframe[src*="challenges.cloudflare.com"]');
+  return document.readyState === "complete" && !wall ? "" : null;
 }
 export { indeedHost };
 

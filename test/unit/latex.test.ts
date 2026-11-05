@@ -7,10 +7,20 @@ import {
   errorLines,
   pageCount,
   parseTex,
+  planCuts,
   unsupported,
 } from "../../src/shared/latex";
+import { tailor, type Compile } from "../../src/background/services/tailorResume";
+import { TAILOR_PROMPT, tailorSystem } from "../../src/background/gemini/prompts";
+import { TAILOR_CUT_SCHEMA, TAILOR_SCHEMA } from "../../src/background/gemini/schemas";
+import { emptyProfile } from "../../src/shared/profileSchema";
 import { resumeProblem } from "../../src/shared/resumeMode";
-import { DEFAULT_TAILOR_PROMPT, SettingsSchema } from "../../src/shared/settings";
+import {
+  defaultSettings,
+  DEFAULT_TAILOR_PROMPT,
+  LEGACY_TAILOR_PROMPT,
+  SettingsSchema,
+} from "../../src/shared/settings";
 import { YoloSchema } from "../../src/shared/yolo";
 
 const fixture = (f: string) => readFileSync(`test/fixtures/latex/${f}.tex`, "utf8");
@@ -159,5 +169,141 @@ describe("hidden résumé text", () => {
       edits: [{ id: "S2.E1.B1", text: "\resumeItem{Developed a REST API \tiny{kubernetes rust golang}}" }],
     });
     expect(r).toMatchObject({ applied: 0, dropped: 1 });
+  });
+});
+
+describe("one-page limit", () => {
+  const listsBalanced = (tex: string) => {
+    const live = tex.replace(/^\s*%.*$/gm, "");
+    const n = (re: RegExp) => (live.match(re) ?? []).length;
+    return (
+      n(/\\resumeSubHeadingListStart/g) === n(/\\resumeSubHeadingListEnd/g) &&
+      n(/\\resumeItemListStart/g) === n(/\\resumeItemListEnd/g)
+    );
+  };
+
+  it("is on by default, and the old default prompt (which asked for one page) becomes the new one", () => {
+    expect(defaultSettings()).toMatchObject({ tailorOnePage: true, coverLetterOnePage: true });
+    expect(DEFAULT_TAILOR_PROMPT).not.toMatch(/one page|one-page/);
+    expect(LEGACY_TAILOR_PROMPT).toContain("Keep the résumé to one page.");
+    expect(SettingsSchema.parse({ tailorPrompt: LEGACY_TAILOR_PROMPT }).tailorPrompt).toBe(DEFAULT_TAILOR_PROMPT);
+    // A prompt the user wrote is theirs, one-page line or not.
+    const mine = `${LEGACY_TAILOR_PROMPT}\n- Mention Rust.`;
+    expect(SettingsSchema.parse({ tailorPrompt: mine }).tailorPrompt).toBe(mine);
+  });
+
+  it("asks for ranked cuts only when on: off, the prompt is as before", () => {
+    expect(tailorSystem(false)).toBe(TAILOR_PROMPT);
+    expect(tailorSystem(true)).toContain('- "cut":');
+    expect(tailorSystem(true).replace(/\n- "cut":.*/, "")).toBe(TAILOR_PROMPT);
+  });
+
+  it("plans cuts that each delete something: an entry's last takes its section, a list keeps a bullet", () => {
+    expect(planCuts(jake, { cut: ["S3.E2", "S3.E1", "S3.E1.B1", "L99", "bogus", "S2.E1.B1"] })).toEqual([
+      "S3.E2",
+      "S3",
+      "S2.E1.B1",
+    ]);
+    // Never a run's last bullet (with what `remove` already took), nor the last section.
+    expect(planCuts(jake, { remove: ["S2.E1.B1", "S2.E1.B2"], cut: ["S2.E1.B3"] })).toEqual([]);
+    expect(planCuts(jake, { cut: ["S1", "S2", "S3", "S4"] })).toEqual(["S1", "S2", "S3"]);
+    expect(planCuts(jake, { cut: Array.from({ length: 12 }, (_, i) => `S2.E3.B${i + 1}`) })).toHaveLength(5);
+  });
+
+  it("applies cuts only when asked, deleting whole entries and sections and leaving lists balanced", () => {
+    const untouched = applyOps(jake, {}).tex;
+    expect(applyOps(jake, { cut: ["S3"] }).tex).toBe(untouched);
+    const entry = applyOps(jake, {}, undefined, ["S2.E3"]).tex;
+    expect(untouched).toContain("Artificial Intelligence Research Assistant");
+    expect(entry).not.toContain("Artificial Intelligence Research Assistant");
+    expect(entry).not.toContain("generate video game dungeons");
+    expect(entry).toContain("\\section{Projects}");
+    expect(listsBalanced(entry)).toBe(true);
+    const section = applyOps(jake, { edits: [{ id: "S3.E1.B1", text: "\\resumeItem{Edited}" }] }, undefined, ["S3"]);
+    expect(section.tex).not.toContain("\\section{Projects}");
+    expect(section.tex).not.toContain("Edited");
+    expect(section.tex).toContain("\\section{Technical Skills}");
+    expect(listsBalanced(section.tex)).toBe(true);
+  });
+
+  describe("tailor", () => {
+    // A stand-in for pdfLaTeX: a page per 30 \resumeItem lines.
+    const items = (tex: string) => (body(tex).match(/^\s*\\resumeItem\{/gm) ?? []).length;
+    const fake = (perPage = 30) => {
+      const calls: string[] = [];
+      const compile: Compile = async (tex) => {
+        calls.push(tex);
+        return { pdf: btoa(tex.slice(0, 20)), log: "", pages: Math.max(1, Math.ceil(items(tex) / perPage)) };
+      };
+      return { compile, calls };
+    };
+    const ctx = (ops: object, seen: { system?: string; schema?: object; context?: object }[] = []) => ({
+      ai: {
+        call: async (req: { system: string; schema: object; context?: object }) => {
+          seen.push(req);
+          return { data: ops };
+        },
+      } as never,
+      settings: defaultSettings(),
+      model: "m",
+      fallback: null,
+    });
+    const input = (pages: number, onePage: boolean) => ({
+      tex: fixture("jake"),
+      pages,
+      prompt: DEFAULT_TAILOR_PROMPT,
+      job: { company: "Acme", jobTitle: "Dev", text: "Python", header: "", location: "" } as never,
+      profile: emptyProfile(),
+      onePage,
+    });
+    const jakeItems = items(fixture("jake"));
+    const edit = { edits: [{ id: "S2.E1.B1", text: "\\resumeItem{Built a REST API in FastAPI}" }] };
+
+    it("off: asks and checks as before, against the résumé's own length", async () => {
+      const seen: { system?: string; schema?: object; context?: object }[] = [];
+      const { compile, calls } = fake(jakeItems - 1);
+      const r = await tailor(ctx({ ...edit, cut: ["S3"] }, seen), input(2, false), compile);
+      expect(seen[0]).toMatchObject({ system: TAILOR_PROMPT, schema: TAILOR_SCHEMA });
+      expect(seen[0].context).not.toHaveProperty("pages");
+      expect(r).toMatchObject({ note: "1 change for this job" });
+      expect(r.pdf).toBeTruthy();
+      expect(calls).toHaveLength(1);
+    });
+
+    it("on: a résumé that fits needs no more compiles, and the AI is told its length", async () => {
+      const seen: { system?: string; schema?: object; context?: object }[] = [];
+      const { compile, calls } = fake();
+      const r = await tailor(ctx({ ...edit, cut: ["S3"] }, seen), input(1, true), compile);
+      expect(seen[0]).toMatchObject({ system: tailorSystem(true), schema: TAILOR_CUT_SCHEMA, context: { pages: 1 } });
+      expect(r).toMatchObject({ note: "1 change for this job" });
+      expect(calls).toHaveLength(1);
+    });
+
+    it("on: makes the fewest of the AI's cuts that fit, in its order", async () => {
+      // One page holds all but 4 bullets: S2.E3 (6) alone does it, though the AI ranks S3.E2.B4 first.
+      const { compile, calls } = fake(jakeItems - 4);
+      const cut = ["S3.E2.B4", "S2.E3", "S3.E2", "S3.E1", "S1.E2"];
+      const r = await tailor(ctx({ ...edit, cut }), input(2, true), compile);
+      expect(r.note).toBe("1 change for this job; 2 cuts to fit one page");
+      expect(items(r.tex!)).toBe(jakeItems - 7);
+      expect(r.tex).toContain("Built a REST API in FastAPI");
+      expect(calls.length).toBeLessThanOrEqual(4);
+    });
+
+    it("on: a résumé over one page is cut even when the AI changes nothing else", async () => {
+      const { compile } = fake(jakeItems - 1);
+      const r = await tailor(ctx({ cut: ["S3.E2"] }), input(2, true), compile);
+      expect(r).toMatchObject({ note: "1 cut to fit one page" });
+      expect(r.pdf).toBeTruthy();
+    });
+
+    it("on: never returns a résumé over one page", async () => {
+      const { compile } = fake(5);
+      const r = await tailor(ctx({ ...edit, cut: ["S3.E2", "S2.E3.B1"] }), input(1, true), compile);
+      expect(r.pdf).toBeUndefined();
+      expect(r.note).toMatch(/even after 2 cuts, over the one-page limit/);
+      const none = await tailor(ctx(edit), input(1, true), fake(5).compile);
+      expect(none.pdf).toBeUndefined();
+    });
   });
 });

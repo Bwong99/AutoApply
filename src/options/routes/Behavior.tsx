@@ -2,6 +2,7 @@ import { NumberInput, SelectInput, TagInput, Toggle } from "../components/contro
 import { save, useStored } from "../store";
 import type { Settings } from "../../shared/types";
 import { MAX_BATCH_APPLICATIONS } from "../../shared/yolo";
+import { ONE_PAGE_WORDS } from "../../shared/constants";
 
 type Bool = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 type Num = { [K in keyof Settings]: Settings[K] extends number ? K : never }[keyof Settings];
@@ -110,7 +111,17 @@ export function Behavior() {
           </>
         ))}
         {NUMBERS.map(([k, label, help, min, max]) => (
-          <NumberInput label={label} help={help} value={s[k]} min={min} max={max} onChange={(v) => set({ [k]: v })} />
+          <>
+            <NumberInput label={label} help={help} value={s[k]} min={min} max={max} onChange={(v) => set({ [k]: v })} />
+            {k === "coverLetterDefaultWords" && (
+              <Toggle
+                label="Keep generated cover letters to one page"
+                help={`Cover letter PDFs written for autofill and YOLO. Their length target is at most ${ONE_PAGE_WORDS} words, and a letter that still runs past one page is written again shorter, once; if it still doesn't fit, the upload is left for you. Off: any length.`}
+                checked={s.coverLetterOnePage}
+                onChange={(coverLetterOnePage) => set({ coverLetterOnePage })}
+              />
+            )}
+          </>
         ))}
         <TagInput
           label="Excluded sites"

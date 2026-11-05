@@ -2,6 +2,7 @@
 // during a fill (AI edits compiled in the offscreen document), its fallback, and the Upload résumés modes.
 import { readFileSync } from "node:fs";
 import type { Page, Worker } from "@playwright/test";
+import { textPdf } from "../../src/background/yolo/pdf";
 import { BASE, badge, expect, fillPage, seed, storage, test, waitDone } from "./extension";
 
 const JAKE = readFileSync("test/fixtures/latex/jake.tex");
@@ -191,7 +192,8 @@ test("tailor: an uploaded fallback PDF is used instead of the untailored one whe
   sw,
   mock,
 }) => {
-  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false } });
+  // Without the one-page limit: this fallback can't be read, so its pages can't be counted.
+  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false, tailorOnePage: false } });
   await uploadTex(page, sw, "jake.tex", JAKE);
   await expect.poll(() => storage(sw, "tailorResume"), { timeout: 30_000 }).toBeTruthy();
   const pdf = Buffer.from("%PDF-1.4\n% my fallback\n%%EOF\n");
@@ -217,4 +219,94 @@ test("tailor: an uploaded fallback PDF is used instead of the untailored one whe
   await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 30_000 });
   expect(await uploadedBase64(page)).toBe(pdf.toString("base64"));
   await expect(page.locator("autoapply-root .panel .notice")).toContainText("Untailored résumé used");
+});
+
+const BULLETS = [
+  ...["S2.E1", "S2.E2"].flatMap((e) => [1, 2, 3].map((b) => `${e}.B${b}`)),
+  ...[1, 2, 3, 4, 5, 6].map((b) => `S2.E3.B${b}`),
+  ...["S3.E1", "S3.E2"].flatMap((e) => [1, 2, 3, 4].map((b) => `${e}.B${b}`)),
+];
+/** A bullet added after every one of Jake's: the résumé runs to a second page. */
+const LONGER = {
+  edits: [],
+  remove: [],
+  order: [],
+  add: BULLETS.map((after) => ({
+    after,
+    text: "\\resumeItem{Wrote and reviewed design documents, tests and runbooks for the services the team owned}",
+  })),
+};
+
+test("tailor: with one page on, the fewest of the AI's ranked cuts that fit are made, after compiling", async ({
+  page,
+  sw,
+  mock,
+}) => {
+  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false, tailorOnePage: false } });
+  await uploadTex(page, sw, "jake.tex", JAKE);
+  await expect.poll(() => storage(sw, "tailorResume"), { timeout: 30_000 }).toBeTruthy();
+  mock.tailorOps = () => ({ ...LONGER, cut: ["S3", "S2.E3", "S1"] });
+
+  // Off: as before, longer than the original is the untailored one, and no cuts are asked for.
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 30_000 });
+  await expect(page.locator("autoapply-root .panel .notice")).toContainText("ran to 2 pages instead of 1");
+  expect(mock.calls_("tailor")[0].payload).not.toHaveProperty("pages");
+
+  await sw.evaluate(async () => {
+    const { settings } = await chrome.storage.local.get("settings");
+    await chrome.storage.local.set({ settings: { ...(settings as object), tailorOnePage: true } });
+  });
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 60_000 });
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("title", /20 changes for this job; \d cuts? to fit one page/);
+  await expect(page.locator("autoapply-root .panel .notice")).not.toContainText("Untailored");
+  expect(mock.calls_("tailor")[1].payload).toMatchObject({ pages: 1 });
+});
+
+test("tailor: with one page on, a fallback over one page is never uploaded; a one-page one is", async ({
+  page,
+  sw,
+  mock,
+}) => {
+  await seed(sw, { settings: { resumeUpload: "tailor", autoAcceptAcknowledgements: false } });
+  await uploadTex(page, sw, "jake.tex", JAKE);
+  await expect.poll(() => storage(sw, "tailorResume"), { timeout: 30_000 }).toBeTruthy();
+  const two = Buffer.from(textPdf(Array.from({ length: 60 }, (_, i) => `Line ${i}`).join("\n")), "base64");
+  await page
+    .getByLabel("Fallback PDF résumé")
+    .setInputFiles({ name: "two.pdf", mimeType: "application/pdf", buffer: two });
+  await expect
+    .poll(async () => (await storage<{ fallback: { pages?: number } | null }>(sw, "tailorResume")).fallback?.pages)
+    .toBe(2);
+  await expect(page.locator(".note", { hasText: "Your fallback PDF is 2 pages" })).toBeVisible();
+  // Tailoring that can't fit: no cuts to make.
+  mock.tailorOps = () => ({ ...LONGER, cut: [] });
+
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "yellow", { timeout: 60_000 });
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("title", /fallback PDF is 2 pages, over the one-page limit/);
+  expect(await page.locator("#cv").evaluate((i: HTMLInputElement) => i.files?.length ?? 0)).toBe(0);
+
+  const one = Buffer.from(textPdf("Ada Lovelace"), "base64");
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/options/index.html#/documents`);
+  await page
+    .getByLabel("Fallback PDF résumé")
+    .setInputFiles({ name: "one.pdf", mimeType: "application/pdf", buffer: one });
+  await expect
+    .poll(async () => (await storage<{ fallback: { pages?: number } | null }>(sw, "tailorResume")).fallback?.pages)
+    .toBe(1);
+  await expect(page.locator(".note", { hasText: "fallback PDF is" })).toBeHidden();
+  await page.goto(BASE + "plain.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(badge(page, "Resume/CV")).toHaveAttribute("data-color", "green", { timeout: 60_000 });
+  expect(await uploadedBase64(page)).toBe(one.toString("base64"));
 });

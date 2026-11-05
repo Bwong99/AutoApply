@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { setBody, stubLayout } from "./dom";
 import { botWall, captchaShown, embeddedForm, pageFacts } from "../../src/content/yolo/classify";
 import { cardText } from "../../src/content/yolo/driver";
+import { indeedCardsInPage, parseIndeed } from "../../src/background/yolo/sources";
 import { confirmation, confirmFirst, kindOf, verifyFailed } from "../../src/background/yolo/classify";
 
 const classify = (fields: number, hidden = false, requiredFields = 0) =>
@@ -130,6 +131,23 @@ describe("YOLO page kinds", () => {
       false,
     );
     expect(page("Unblocked Games Developer Intern - Acme Careers", "<h1>Unblocked Games</h1>")).toBe(false);
+  });
+
+  it("reads Indeed's job-card data in a rendered search page, not the script that only names it", () => {
+    const data = `window.mosaic.providerData["mosaic-provider-jobcards"]={"metaData":{"mosaicProviderJobCardsModel":{"results":[{"jobkey":"d9f514d9d78b1a2a","displayTitle":"Software Intern","company":"Co","formattedLocation":"Waterloo, ON","pubDate":1793772000000}]}}};`;
+    const read = (title: string, body: string) => ((document.title = title), setBody(body), indeedCardsInPage());
+    // Live layout, signed in: an earlier, small script names the provider; <script id="mosaic-data"> assigns it.
+    const text = read(
+      "100 Software Intern Jobs Hiring Now in Canada | Indeed",
+      `<script>window.mosaic.setup(["mosaic-provider-jobcards"]);</script><script id="mosaic-data">${data}</script>`,
+    );
+    expect(text).toContain("d9f514d9d78b1a2a");
+    expect(parseIndeed(text!, "ca.indeed.com")).toMatchObject([
+      { url: "https://ca.indeed.com/viewjob?jk=d9f514d9d78b1a2a", title: "Software Intern", postedAt: 1793772000000 },
+    ]);
+    // A bot check is waited out; a loaded page without cards is no results.
+    expect(read("Just a moment...", "<p>Checking</p>")).toBeNull();
+    expect(read("Indeed", "<p>No jobs</p>")).toBe("");
   });
 
   it("finds a visible CAPTCHA challenge, never the invisible score badge", () => {
