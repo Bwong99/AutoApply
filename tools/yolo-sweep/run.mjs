@@ -21,7 +21,7 @@ import {
   profileChecks,
   tenantOf,
 } from "./lib.mjs";
-import { DUMP, launch, pageLines, providerFor, seed } from "./harness.mjs";
+import { DUMP, launch, pageLines, providerFor, reviewLines, seed } from "./harness.mjs";
 
 const [url, outArg] = process.argv.slice(2);
 if (!url) throw new Error("usage: node tools/yolo-sweep/run.mjs <url> [outPrefix]");
@@ -235,6 +235,9 @@ const answers = [
   ...(a?.guesses ?? []).map((g) => `${g.q} = ${g.a} (guess)`),
 ];
 if (answers.length) lines.push(`AI ANSWERS (${answers.length})`, ...answers.map((x) => "  " + x.slice(0, 200)));
+if (a?.notes?.length) lines.push(`NOTES`, ...a.notes.map((n) => "  " + n.slice(0, 400)));
+const rv = reviewLines(o.ai);
+if (rv.length) lines.push(`REVIEW`, ...rv);
 const pl = pageLines(pages, checks);
 const flags = pl.flags;
 lines.push(...pl.lines);

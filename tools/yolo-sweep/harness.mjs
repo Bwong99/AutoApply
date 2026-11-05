@@ -170,3 +170,50 @@ export function pageLines(pages, checks) {
   }
   return { lines, flags };
 }
+
+/** The AI review's and the navigator's calls in a run's AI log, one line each: what they changed and why. */
+export function reviewLines(log = []) {
+  const out = [];
+  const json = (s) => {
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+  for (const e of log) {
+    // Claude entries carry the prompts; Gemini's carry the request body.
+    const body = e.system === undefined ? json(e.req) : null;
+    const system = e.system ?? body?.systemInstruction?.parts?.[0]?.text ?? "";
+    const kind = system.startsWith("You review") ? "review" : system.startsWith("You navigate") ? "navigate" : "";
+    if (!kind) continue;
+    const req = body ? json(body.contents?.[0]?.parts?.[0]?.text ?? "") : json(e.req);
+    let text = e.res ?? "";
+    const r = json(text);
+    text = r?.result ?? r?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? text;
+    const reply = json(String(text).slice(String(text).indexOf("{"), String(text).lastIndexOf("}") + 1));
+    const head = `  ${kind}${e.model ? ` (${e.model}${e.ms ? `, ${Math.round(e.ms / 1000)}s` : ""})` : ""}`;
+    if (!reply) {
+      out.push(`${head}: no reply`);
+      continue;
+    }
+    if (kind === "navigate") {
+      out.push(
+        `${head}: ${req?.why ?? ""} → ${reply.state} ${reply.action}${reply.ref ? ` ${reply.ref}` : ""}${reply.purpose ? ` (${reply.purpose})` : ""}: ${reply.reason ?? ""}`,
+      );
+      continue;
+    }
+    const q = new Map((req?.fields ?? []).map((f) => [f.id, f.question]));
+    const verdicts = (reply.fields ?? []).filter((v) => v.verdict !== "ok");
+    out.push(
+      `${head}: ${(reply.fields ?? []).length} fields, ${verdicts.length} not ok, ${(reply.missed ?? []).length} missed`,
+    );
+    for (const v of verdicts)
+      out.push(
+        `    ${v.verdict} ${String(q.get(v.fieldId) ?? v.fieldId).slice(0, 60)}${v.answer != null ? ` → "${String(v.answer).slice(0, 60)}"` : ""}${v.reason ? ` (${v.reason})` : ""}`,
+      );
+    for (const m of reply.missed ?? [])
+      out.push(`    missed ${m.kind} ${m.question.slice(0, 70)}${m.answer ? ` → "${m.answer}"` : ""}`);
+  }
+  return out;
+}

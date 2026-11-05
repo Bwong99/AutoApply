@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { STATE, extDir, kindOfUrl, loadExport, mkdirp, nameFor, profileChecks } from "./lib.mjs";
-import { DUMP, launch, pageLines, providerFor, seed } from "./harness.mjs";
+import { DUMP, launch, pageLines, providerFor, reviewLines, seed } from "./harness.mjs";
 
 const [url, outArg] = process.argv.slice(2);
 if (!url) throw new Error("usage: node tools/yolo-sweep/fill.mjs <url> [outPrefix]");
@@ -194,6 +194,8 @@ const lines = [
 ];
 if (badges.length)
   lines.push(`BADGES not filled (${badges.length})`, ...[...new Set(badges)].map((b) => "  ~ " + b.slice(0, 200)));
+const rv = reviewLines(ai);
+if (rv.length) lines.push(`REVIEW`, ...rv);
 lines.push(...pl.lines);
 if (status !== "FILLED" && status !== "SUBMITTED" && main)
   lines.push(`--- FINAL TEXT ${main.v.text.slice(0, 600)}`, `BUTTONS ${main.v.buttons.join(" ; ")}`);
