@@ -13,7 +13,8 @@ execFileSync(
   {
     cwd: top,
     stdio: "inherit",
-    env: { ...process.env, VITE_YOLO_DRY: real ? "" : "1" },
+    // AA_NATIVE_REQUIRED: nativeMessaging granted up front, so headless runs can use the Claude bridge.
+    env: { ...process.env, VITE_YOLO_DRY: real ? "" : "1", AA_NATIVE_REQUIRED: "1" },
   },
 );
 console.log(`built ${real ? "real" : "dry"} extension from ${top} → ${out}`);
