@@ -2,6 +2,7 @@
 // storage seeded from the user's export, and the compact report's per-page section.
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { TOOLS } from "./lib.mjs";
 
@@ -12,7 +13,40 @@ export const providerFor = (exp) =>
   process.env.AI_PROVIDER ??
   (exp.settings?.aiProvider === "claude" && exp.apiKeys?.length ? "gemini" : exp.settings?.aiProvider);
 
+/** The Claude bridge AutoApply's setup installed (src/native/host.sh), which headless runs reuse. */
+const BRIDGE = path.join(
+  os.homedir(),
+  ".autoapply",
+  "claude-bridge",
+  process.platform === "win32" ? "host.bat" : "host.sh",
+);
+
+/**
+ * Registers the installed Claude bridge for this browser profile: Chrome also reads native messaging manifests from
+ * `<user-data-dir>/NativeMessagingHosts` (macOS/Linux), and only lets the origins listed there connect.
+ */
+function registerBridge(profileDir, extId) {
+  const dir = path.join(profileDir, "NativeMessagingHosts");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "com.autoapply.claude.json"),
+    JSON.stringify({
+      name: "com.autoapply.claude",
+      description: "AutoApply bridge to Claude Code (test harness)",
+      path: BRIDGE,
+      type: "stdio",
+      allowed_origins: [`chrome-extension://${extId}/`],
+    }),
+  );
+}
+
 export async function launch(ext, profileDir, port, say) {
+  // A profile of our own, so the Claude bridge can be registered in it (Playwright's own temp profile is unknown).
+  // Removed when the process exits: a browser profile is tens of MB, and a sweep runs hundreds.
+  if (!profileDir) {
+    const tmp = (profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "aa-sweep-")));
+    process.on("exit", () => fs.rmSync(tmp, { recursive: true, force: true }));
+  }
   const ctx = await chromium.launchPersistentContext(profileDir, {
     channel: "chromium",
     headless: true,
@@ -27,7 +61,11 @@ export async function launch(ext, profileDir, port, say) {
     ],
   });
   const sw = ctx.serviceWorkers()[0] ?? (await ctx.waitForEvent("serviceworker"));
-  sw.on("console", (m) => /AutoApply|YOLO/.test(m.text()) && say("SW:", m.text().slice(0, 400)));
+  sw.on(
+    "console",
+    (m) => /AutoApply|YOLO|\[review\]|\[navigate\]/.test(m.text()) && say("SW:", m.text().slice(0, 400)),
+  );
+  if (fs.existsSync(BRIDGE)) registerBridge(profileDir, new URL(sw.url()).host);
   return { ctx, sw };
 }
 
@@ -39,6 +77,13 @@ export async function seed(sw, exp, settings, extra) {
         await new Promise((r) => setTimeout(r, 20));
       const docs = {};
       for (const d of exp.documents ?? []) docs[`doc:${d.meta.id}`] = { base64: d.base64 };
+      // The LaTeX résumé for AI tailoring, as the options page imports it (routes/Data.tsx).
+      const t = exp.tailorResume;
+      if (t) {
+        docs["doc:tailor-tex"] = { base64: t.tex };
+        docs["doc:tailor-pdf"] = { base64: t.pdf };
+        if (t.fallbackPdf) docs["doc:tailor-fallback-pdf"] = { base64: t.fallbackPdf };
+      }
       globalThis.__log = [];
       const f = globalThis.fetch;
       globalThis.fetch = async (...a) => {
@@ -49,6 +94,31 @@ export async function seed(sw, exp, settings, extra) {
             .then((t) => globalThis.__log.push({ req: a[1]?.body, res: t }));
         return r;
       };
+      // Claude bridge calls too: the request's prompts and claude's stream-json reply, decoded.
+      const connect = chrome.runtime.connectNative?.bind(chrome.runtime);
+      if (connect) {
+        const dec = (b) => new TextDecoder().decode(Uint8Array.from(atob(b), (c) => c.charCodeAt(0)));
+        chrome.runtime.connectNative = (name) => {
+          const port = connect(name);
+          const entry = { at: Date.now() };
+          const post = port.postMessage.bind(port);
+          port.postMessage = (m) => {
+            if (Array.isArray(m))
+              Object.assign(entry, { system: dec(m[0]), req: dec(m[1]), model: m[2], effort: m[3] });
+            return post(m);
+          };
+          port.onMessage.addListener((m) => {
+            const out = dec(m.out ?? "");
+            const res =
+              out
+                .split("\n")
+                .reverse()
+                .find((l) => l.includes('"type":"result"')) ?? out.slice(-4000);
+            globalThis.__log.push({ ...entry, ms: Date.now() - entry.at, code: m.code, res });
+          });
+          return port;
+        };
+      }
       await chrome.storage.local.set({
         settings: { ...exp.settings, ...settings },
         profile: exp.profile,
@@ -57,6 +127,9 @@ export async function seed(sw, exp, settings, extra) {
         selectedModel: exp.selectedModel,
         fallbackModel: exp.fallbackModel,
         documentsIndex: (exp.documents ?? []).map((d) => d.meta),
+        tailorResume: t?.info ? { ...t.info, fallback: t.fallbackPdf ? t.info.fallback : null } : null,
+        // The bridge is registered for this profile (launch): Claude is as set up as in the user's browser.
+        claudeReady: (settings?.aiProvider ?? exp.settings?.aiProvider) === "claude",
         ...docs,
         ...extra,
       });

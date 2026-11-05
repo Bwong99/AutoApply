@@ -10,7 +10,8 @@ export const ROOT = path.dirname(git("-C", TOOLS, "rev-parse", "--path-format=ab
 export const STATE = path.join(ROOT, ".yolo-sweep");
 export const EXPORT = process.env.AA_EXPORT ?? path.join(ROOT, "autoapply-export.json");
 /** One fixed build path per mode, so the extension ID (and the per-ID password vault) stays the same. */
-export const extDir = (real) => path.join(STATE, real ? "ext-real" : "ext-dry");
+// AA_EXT: another build to run instead (e.g. a copy of an earlier one, for before/after sweeps).
+export const extDir = (real) => process.env.AA_EXT ?? path.join(STATE, real ? "ext-real" : "ext-dry");
 export const mkdirp = (d) => (fs.mkdirSync(d, { recursive: true }), d);
 export const readJson = (f, d) => {
   try {
