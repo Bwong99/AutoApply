@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { checkFix, reviewForm } from "../../src/background/services/reviewForm";
+import { checkFix, covered, reviewForm } from "../../src/background/services/reviewForm";
 import type { ServiceCtx } from "../../src/background/services/mapFields";
 import { adoption, opForAnswer, revealable } from "../../src/content/review/reconcile";
 import { newScanState, scan, type FieldHandle } from "../../src/content/scan/fields";
@@ -134,6 +134,15 @@ describe("review guards (checkFix)", () => {
         undefined,
       ),
     ).toBeNull();
+  });
+});
+
+describe("covered", () => {
+  it("refuses a review that skips most fields", () => {
+    const fields = [field({ id: "a" }), field({ id: "b" }), field({ id: "c" })];
+    expect(() => covered({ fields: [] }, fields)).toThrow("answered 0 of 3");
+    expect(covered({ fields: [{ fieldId: "a" }, { fieldId: "b" }] }, fields).fields).toHaveLength(2);
+    expect(covered({ fields: [] }, []).fields).toHaveLength(0);
   });
 });
 

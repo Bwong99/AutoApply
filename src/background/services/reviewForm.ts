@@ -5,6 +5,7 @@ import { RE_SENSITIVE_LABEL } from "../../shared/constants";
 import { plainDashes, RE_AI_TELL, trapLabel } from "../../shared/injection";
 import { normalize } from "../../shared/normalize";
 import type { Decision, DocumentMeta, FieldDescriptor, FieldKind, JobContext, Pay, Profile } from "../../shared/types";
+import { BadOutputError } from "../gemini/errors";
 import { REVIEW_FORM_PROMPT } from "../gemini/prompts";
 import { REVIEW_SCHEMA, ReviewZ } from "../gemini/schemas";
 import {
@@ -127,6 +128,18 @@ export function checkFix(
   return { ...fix, answer, question };
 }
 
+/**
+ * A review that skips most fields checked nothing: Gemini Flash-Lite at its highest thinking returned no verdicts at
+ * all on long pages. Asked again (the clients retry bad output once, then use the fallback model).
+ */
+export function covered<T extends { fields: { fieldId: string }[] }>(r: T, fields: ReviewField[]): T {
+  const ids = new Set(r.fields.map((v) => v.fieldId));
+  const answered = fields.filter((f) => ids.has(f.id)).length;
+  if (fields.length && answered < Math.ceil(fields.length / 2))
+    throw new BadOutputError(`The review answered ${answered} of ${fields.length} fields`);
+  return r;
+}
+
 export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<ReviewResult> {
   const { resumeText, learnedAnswers, ...rest } = input.profile;
   const job = input.job?.location ? jobCountry(input.job.location) : undefined;
@@ -166,7 +179,7 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
         page: input.page,
       },
       schema: REVIEW_SCHEMA,
-      validate: (d) => ReviewZ.parse(d),
+      validate: (d) => covered(ReviewZ.parse(d), input.fields),
       review: true,
       timeoutMs: ctx.settings.reviewTimeoutMs,
       maxOutputTokens: 32768,
