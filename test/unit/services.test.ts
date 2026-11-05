@@ -1103,7 +1103,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(asked).toEqual(["a", "b", "c", "d"]);
   });
 
-  it("picks the lowest experience bracket when even the total experience is under it", async () => {
+  it("keeps ordinary experience brackets but meets explicit screening minimums", async () => {
     const asked: string[] = [];
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
@@ -1162,17 +1162,17 @@ describe("mapFields chunking and splitting (§10.7)", () => {
         job: null,
       },
     );
-    // 11 months: under 2; below "1-2" (with "None" offered) and over 0.5 stay with the model; nearest a lowest "1-2".
+    // Ordinary brackets still use 11 months; explicit minimums pass without a dedicated contrary profile value.
     expect(r.decisions.map((d) => d.intendedAnswer ?? d.action)).toEqual([
       "Less than 2",
       "flag",
       "flag",
-      "No",
-      "No",
-      "flag",
+      "Yes",
+      "Yes",
+      "Yes",
       "1-2 years",
     ]);
-    expect(asked).toEqual(["b", "c", "f"]);
+    expect(asked).toEqual(["b", "c"]);
   });
 
   it("matches the graduation date to an option by year and month or season", async () => {

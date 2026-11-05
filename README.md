@@ -113,6 +113,8 @@ Each AI request starts `claude -p` once with every tool, MCP server, plugin, hoo
 
 ### How filling works
 
+Manual and YOLO autofill choose answers that meet a job's screening requirements, preferences and recommendations unless a dedicated structured Profile field explicitly contradicts them. For example, “All” acceptable term lengths permits a three-month minimum, and a three-year React requirement takes precedence over weaker claims in essay guidance, résumé prose or saved answers. Explicit term lengths and availability dates still apply. Policy-derived answers are marked **Check** for review and included in YOLO's application log. Existing work authorization, sponsorship, age, criminal-record, clearance, demographic and consent safeguards still apply, and AI-directed instructions and hidden honeypots remain excluded.
+
 1. Click **Fill this page** in the popup or press **Alt+Shift+F**. AutoApply never starts on its own; it scans the page (including iframes and shadow DOM) only when you ask.
 2. Instant pass (no network): name, email, phone, address and links are matched from your profile; questions you answered before (saved answers) fill immediately.
 3. Everything else goes to Gemini in one batched call. It picks options **by meaning** (e.g. "willing to relocate = yes" → "I am willing to relocate"), and custom dropdowns and typeaheads are operated one at a time.

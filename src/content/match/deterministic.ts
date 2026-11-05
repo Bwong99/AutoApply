@@ -1,4 +1,5 @@
 // §13.2 deterministic matching: autocomplete tokens, unambiguous label regexes, learned answers.
+import { isScreeningQuestion } from "../../shared/screening";
 import { AUTOCOMPLETE_MAP, LABEL_RULES, RE_ENTRY_SECTION, type DetKey } from "../../shared/constants";
 import { digitsOnly, normalize } from "../../shared/normalize";
 import type { DeterministicProfile, FieldDescriptor, FieldKind } from "../../shared/types";
@@ -159,6 +160,8 @@ const compatible = (a: FieldKind, b: FieldKind) =>
   a === b || (FREE_TEXT.has(a) && FREE_TEXT.has(b)) || (CHOICE.has(a) && CHOICE.has(b));
 
 export function matchLearned(d: FieldDescriptor, learned: DeterministicProfile["learnedAnswers"]) {
+  // A saved amount or eligibility answer may fail this job's threshold. Mapping rechecks it against the profile.
+  if (isScreeningQuestion(d)) return null;
   const q = normalize(d.label);
   if (!q) return null;
   return learned.find((l) => l.normalizedQuestion === q && compatible(l.kind, d.kind)) ?? null;

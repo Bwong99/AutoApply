@@ -2,6 +2,7 @@
 import { stripMarkdown, trimToLimits } from "../../shared/essay";
 import { plainDashes, RE_AI_TELL } from "../../shared/injection";
 import type { EssayItem, JobContext, Profile } from "../../shared/types";
+import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { ESSAYS_PROMPT } from "../gemini/prompts";
 import { ESSAYS_SCHEMA, EssaysZ } from "../gemini/schemas";
@@ -20,6 +21,23 @@ export async function draftEssays(
   profile: Profile,
   job: JobContext | null,
 ): Promise<EssayResult[]> {
+  const local = new Map<string, EssayResult>();
+  for (const i of items) {
+    const d = screeningDecision(
+      {
+        id: i.fieldId,
+        label: i.question,
+        hint: i.hint,
+        kind: "textarea",
+        required: true,
+        optionsKnown: true,
+        maxLength: i.maxChars,
+      },
+      profile,
+      job,
+    );
+    if (d) local.set(i.fieldId, { fieldId: i.fieldId, text: d.text ?? null, ...(d.note ? { note: d.note } : {}) });
+  }
   const { resumeText, learnedAnswers: _l, ...rest } = profile;
   const resume = resumeText.slice(0, 12000);
   const letterContext = { profile: compactProfile(rest) ?? {}, resume };
@@ -74,7 +92,12 @@ export async function draftEssays(
   }
 
   const batches: EssayItem[][] = [];
-  for (const group of [items.filter((i) => i.kind === "cover_letter"), items.filter((i) => i.kind !== "cover_letter")])
+  const pending = items.filter((i) => !local.has(i.fieldId));
+  for (const group of [
+    pending.filter((i) => i.kind === "cover_letter"),
+    pending.filter((i) => i.kind !== "cover_letter"),
+  ])
     for (let i = 0; i < group.length; i += 4) batches.push(group.slice(i, i + 4));
-  return (await Promise.all(batches.map(run))).flat();
+  const mapped = new Map((await Promise.all(batches.map(run))).flat().map((e) => [e.fieldId, e]));
+  return items.map((i) => local.get(i.fieldId) ?? mapped.get(i.fieldId)!);
 }

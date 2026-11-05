@@ -22,7 +22,8 @@ import {
   regionCode,
   regionCountry,
 } from "../../shared/constants";
-import { plainDashes, RE_AI_TELL } from "../../shared/injection";
+import { plainDashes, RE_AI_TELL, trapLabel } from "../../shared/injection";
+import { hasExperienceMinimum, isScreeningQuestion, screeningDecision, SCREENING_SOURCE } from "../../shared/screening";
 import { normalize } from "../../shared/normalize";
 import { emptyProfile } from "../../shared/profileSchema";
 import { todayIso } from "../../shared/time";
@@ -118,6 +119,7 @@ function guessed(d: Decision, f: FieldDescriptor): boolean {
     d.action !== "fill" ||
     d.sources?.some(citesCandidate) ||
     d.sources?.includes(GUESS) ||
+    (d.sources?.includes(SCREENING_SOURCE) && isScreeningQuestion(f)) ||
     isToday(d.text) ||
     d.text === NOT_APPLICABLE
   )
@@ -753,8 +755,9 @@ function experienceMonths(experience: Profile["experience"]): number {
  * ("Less than 2", "0-1 years"): relevant experience can only be less. The model picked "2,4" for 11 months. Some
  * experience below a lowest "1-2 years" with nothing under it is nearest that: Replit's got "3-5 years".
  */
-function experienceDecision(f: FieldDescriptor, months: number): Decision | null {
+function experienceDecision(f: FieldDescriptor, months: number, jobMinimum: boolean): Decision | null {
   if (!f.options || isMulti(f) || !/\bhow many years\b|\byears of\b.*\bexperience\b/i.test(f.label)) return null;
+  if (jobMinimum || hasExperienceMinimum(`${f.label} ${f.hint ?? ""}`)) return null;
   const tops = f.options.map((o) => {
     const n = (o.match(/\d+(\.\d+)?/g) ?? []).map(Number);
     if (/^(less than|under|fewer than|<)/i.test(o.trim()) && n.length === 1) return { low: 0, top: n[0] };
@@ -1732,29 +1735,6 @@ function optInDecision(f: FieldDescriptor, consent: "yes" | "no"): Decision | nu
   return hits.length === 1 ? { ...base, optionIndexes: hits, intendedAnswer: f.options![hits[0]] } : null;
 }
 
-const WORD_NUMBERS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, ten: 10 };
-
-/**
- * "Do you have at least one year of experience as a software engineer?" (Yes/No) when even the candidate's total
- * experience falls short: "No". Squarespace got "Yes" for 11 months. Enough total experience stays with the model.
- */
-function minYearsDecision(f: FieldDescriptor, months: number): Decision | null {
-  const m = f.label.match(
-    /\b(?:at least|minimum of|over|more than)\s+(\d+(?:\.\d+)?|[a-z]+)\s+years?\b|\b(\d+(?:\.\d+)?)\+\s*years?\b/i,
-  );
-  const years = m && (m[2] ? Number(m[2]) : Number(m[1]) || WORD_NUMBERS[m[1].toLowerCase()]);
-  const no = f.options && !isMulti(f) ? f.options.findIndex((o) => /^no\b/i.test(o)) : -1;
-  if (!years || no < 0 || !/experience/i.test(f.label) || months / 12 >= years) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: [no],
-    intendedAnswer: f.options![no],
-    confidence: "high",
-    sources: ["experience"],
-  };
-}
-
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const SEASONS: [RegExp, number[]][] = [
   [/\bspring\b/i, [3, 4, 5]],
@@ -2096,6 +2076,9 @@ async function guessFlagged(
   const flagged = fields.filter(
     (f, i) =>
       decisions[i].action === "flag" &&
+      !aiUseDecision(f) &&
+      !trapLabel(f.label) &&
+      !decisions[i].sources?.includes(SCREENING_SOURCE) &&
       (f.required || (SINGLE_CHOICE.has(f.kind) && !needsNoSource(f))) &&
       f.kind !== "file" &&
       !(f.options?.length && f.options.every((o) => !o.trim())),
@@ -2205,6 +2188,7 @@ export async function mapFields(
   const base = mappingPayloadBase(input, pay);
   const countries = new Map(input.fields.map((f) => [f.id, workCountry(f.label, home, job)]));
   const months = experienceMonths(input.profile.experience);
+  const jobExperienceMinimum = hasExperienceMinimum(input.job?.text || input.job?.header || "");
   // "Years of experience (excluding internships)": EA's got "Between 1 and 2 Years" for internships alone.
   const fullTime = experienceMonths(
     input.profile.experience.filter((e) => !/\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`)),
@@ -2223,8 +2207,8 @@ export async function mapFields(
       workAuthDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
       needsSponsorshipDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
       nationalityDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??
-      experienceDecision(f, excluding ? fullTime : months) ??
-      minYearsDecision(f, excluding ? fullTime : months) ??
+      screeningDecision(f, input.profile, input.job) ??
+      experienceDecision(f, excluding ? fullTime : months, jobExperienceMinimum) ??
       graduationDecision(f, input.profile) ??
       currentStudentDecision(f, input.profile.education) ??
       entryDateDecision(f, input.profile) ??

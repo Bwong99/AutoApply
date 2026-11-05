@@ -1,5 +1,6 @@
 // §10.8.2 follow-up option choice for options discovered late.
 import type { Choice, ChooseItem, Profile } from "../../shared/types";
+import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { CHOOSE_OPTIONS_PROMPT } from "../gemini/prompts";
 import { CHOOSE_SCHEMA, ChooseZ } from "../gemini/schemas";
@@ -26,9 +27,26 @@ export function validateChoices(items: ChooseItem[], raw: Choice[]): Choice[] {
 
 /** The profile resolves vague answers: "Asian" among East/South/Southeast Asian, "Citizen" (SpaceX: "U.S. citizen"). */
 export async function chooseOptions(ctx: ServiceCtx, items: ChooseItem[], profile: Profile): Promise<Choice[]> {
+  const local = new Map<string, Choice>();
+  for (const i of items) {
+    const d = screeningDecision(
+      {
+        id: i.fieldId,
+        label: i.question,
+        kind: i.multiple ? "multiselect" : "select",
+        options: i.options,
+        optionsKnown: true,
+        required: true,
+      },
+      profile,
+    );
+    if (d)
+      local.set(i.fieldId, { fieldId: i.fieldId, optionIndexes: d.optionIndexes ?? null, confidence: d.confidence });
+  }
   const { resumeText: _resume, learnedAnswers: _learned, ...rest } = profile;
+  const pending = items.filter((i) => !local.has(i.fieldId));
   const batches: ChooseItem[][] = [];
-  for (let i = 0; i < items.length; i += 20) batches.push(items.slice(i, i + 20));
+  for (let i = 0; i < pending.length; i += 20) batches.push(pending.slice(i, i + 20));
   const results = await Promise.all(
     batches.map(async (batch) => {
       try {
@@ -51,5 +69,6 @@ export async function chooseOptions(ctx: ServiceCtx, items: ChooseItem[], profil
       }
     }),
   );
-  return results.flat();
+  const mapped = new Map(results.flat().map((c) => [c.fieldId, c]));
+  return items.map((i) => local.get(i.fieldId) ?? mapped.get(i.fieldId)!);
 }

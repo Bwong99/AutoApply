@@ -15,6 +15,7 @@ import {
 import { parseEssayLimits, wordCount } from "../shared/essay";
 import { isErr, send, type Message, type Responses } from "../shared/messages";
 import { resumeProblem, TAILOR_PLACEHOLDER } from "../shared/resumeMode";
+import { SCREENING_SOURCE } from "../shared/screening";
 import type {
   ApiError,
   Decision,
@@ -520,6 +521,11 @@ async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: str
   if (tooltip === "guess") {
     okStatus = "check";
     tooltip = "Best guess (YOLO)";
+    guesses.set(h.id, { q: h.desc.label, a: opText(op) });
+  }
+  if (tooltip === SCREENING_SOURCE) {
+    okStatus = "check";
+    tooltip = "Meets the job's screening requirement; review this answer";
     guesses.set(h.id, { q: h.desc.label, a: opText(op) });
   }
   applied.set(h.id, [op, okStatus, tooltip]);
