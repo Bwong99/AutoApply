@@ -618,6 +618,15 @@ label.inline {
   align-items: center;
   font-weight: 600;
 }
+.popup .yolo-actions {
+  margin-top: 8px;
+}
+.popup .yolo-actions .btn {
+  width: 100%;
+}
+.popup .yolo-actions p {
+  margin: 4px 0 0;
+}
 .popup .links {
   display: flex;
   gap: 14px;

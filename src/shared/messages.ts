@@ -122,6 +122,7 @@ export type Message =
   | { type: "YOLO_STATUS" }
   | { type: "YOLO_SET"; enabled: boolean }
   | { type: "YOLO_CHECK_NOW" }
+  | { type: "YOLO_FORCE_BATCH" }
   | { type: "YOLO_RESUME"; key: string }
   | { type: "YOLO_FORGET"; key: string }
   | { type: "YOLO_GMAIL_CONNECT" }
@@ -229,6 +230,7 @@ export interface Responses {
   YOLO_STATUS: YoloStatus;
   YOLO_SET: Ok | Err;
   YOLO_CHECK_NOW: Ok;
+  YOLO_FORCE_BATCH: Ok | Err;
   YOLO_RESUME: Ok | Err;
   YOLO_FORGET: Ok;
   YOLO_GMAIL_CONNECT: Ok | Err;

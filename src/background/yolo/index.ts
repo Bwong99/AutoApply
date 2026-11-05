@@ -586,6 +586,22 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     return { ok: true };
   },
 
+  async YOLO_FORCE_BATCH() {
+    if (!yolo.enabled || !yolo.queries.length)
+      return { error: { kind: "other", message: "Turn on YOLO with a job search before starting a batch." } };
+    const batchAt = Date.now();
+    await chrome.alarms.create(CHECK, {
+      when: batchAt + yolo.intervalMin * 60_000,
+      periodInMinutes: yolo.intervalMin,
+    });
+    const state = await store.get("yoloState");
+    await setState({ batchAt, pauseReason: state.pausedUntil > batchAt ? state.pauseReason : "" });
+    // The new budget takes effect even during discovery. Reuse that work and any application in flight;
+    // otherwise discover for the batch just started, without moving its timestamp again.
+    void cycle(true);
+    return { ok: true };
+  },
+
   YOLO_RESUME: ({ key }) => resume(key),
 
   async YOLO_FORGET({ key }) {

@@ -46,6 +46,8 @@ export function Popup() {
   const [info, setInfo] = useState<TabStatusResponse | null>(null);
   const [msg, setMsg] = useState("");
   const [yolo, setYolo] = useState<YoloStatus | null>(null);
+  const [startingBatch, setStartingBatch] = useState(false);
+  const [batchError, setBatchError] = useState("");
 
   const host = (() => {
     try {
@@ -64,10 +66,26 @@ export function Popup() {
   }, []);
 
   const setYoloOn = async (enabled: boolean) => {
+    setBatchError("");
     const r = await send({ type: "YOLO_SET", enabled });
     // Turning it on with no résumé for its upload mode is refused.
     setMsg(isErr(r) ? r.error.message : "");
     setYolo(await send({ type: "YOLO_STATUS" }));
+  };
+
+  const forceBatch = async () => {
+    if (startingBatch) return;
+    setStartingBatch(true);
+    setBatchError("");
+    try {
+      const r = await send({ type: "YOLO_FORCE_BATCH" });
+      if (isErr(r)) setBatchError(r.error.message);
+      setYolo(await send({ type: "YOLO_STATUS" }));
+    } catch {
+      setBatchError("Couldn't start a batch. Please try again.");
+    } finally {
+      setStartingBatch(false);
+    }
   };
 
   useEffect(() => {
@@ -132,6 +150,28 @@ export function Popup() {
             </span>
           ))}
         </button>
+      )}
+      {yolo?.enabled && yolo.searches > 0 && (
+        <div class="yolo-actions">
+          <button
+            type="button"
+            class="btn"
+            onClick={() => void forceBatch()}
+            disabled={startingBatch}
+            aria-describedby="force-batch-help"
+            aria-busy={startingBatch}
+          >
+            {startingBatch ? "Starting batch…" : "Force start batch"}
+          </button>
+          <p id="force-batch-help" class="help">
+            Starts a new batch now and resets the next batch timer.
+          </p>
+          {batchError && (
+            <p class="err" role="alert">
+              {batchError}
+            </p>
+          )}
+        </div>
       )}
       <div class="links">
         <a

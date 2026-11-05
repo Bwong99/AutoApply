@@ -278,6 +278,122 @@ test("stops at the batch size", async ({ sw, page }) => {
   expect(await storage(sw, "yoloQueue")).toHaveLength(1);
 });
 
+test("force starts a fresh batch from the popup and schedules the next one a full interval later", async ({
+  sw,
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await seed(sw, { caps: true });
+  await sw.evaluate(async () => {
+    const batchAt = Date.now() - 60_000;
+    await chrome.storage.local.set({
+      yoloState: { batchAt },
+      applications: [{ key: "previous", url: "https://example.com/previous", status: "submitted", at: batchAt + 1 }],
+    });
+  });
+  await queue(sw, `${BASE}yolo-job.html`, { batchSize: 1, intervalMin: 120 });
+  await expect
+    .poll(async () => (await storage<{ pauseReason: string }>(sw, "yoloState"))?.pauseReason)
+    .toBe("Batch done");
+  // Give the old schedule a different deadline so retaining it would fail the test.
+  await sw.evaluate(() => chrome.alarms.create("yolo", { delayInMinutes: 30, periodInMinutes: 120 }));
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  const toggle = page.getByRole("switch", { name: "YOLO Mode" });
+  await expect(toggle).toBeChecked();
+  await expect(toggle).toContainText("1/1 applied this batch");
+
+  const before = await sw.evaluate(() => Date.now());
+  await page.getByRole("button", { name: "Force start batch" }).click();
+  await expect
+    .poll(async () => (await storage<{ batchAt: number }>(sw, "yoloState")).batchAt)
+    .toBeGreaterThanOrEqual(before);
+  const { batchAt } = await storage<{ batchAt: number }>(sw, "yoloState");
+  const alarm = await sw.evaluate(() => chrome.alarms.get("yolo"));
+  expect(alarm).toMatchObject({ scheduledTime: batchAt + 120 * 60_000, periodInMinutes: 120 });
+  expect(await storage(sw, "yolo")).toMatchObject({ enabled: true, intervalMin: 120, batchSize: 1 });
+  await expect(toggle).toBeChecked();
+  await expect.poll(async () => (await storage<Application[]>(sw, "applications")).length, { timeout: 90_000 }).toBe(2);
+  const apps = await storage<Application[]>(sw, "applications");
+  expect(apps.find((a) => a.key === "previous")?.status).toBe("submitted");
+  expect(apps.find((a) => a.key !== "previous")).toMatchObject({ status: "submitted", mode: "yolo" });
+  await page.reload();
+  await expect(toggle).toContainText("1/1 applied this batch");
+
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Force start batch" })).toHaveCount(0);
+  expect(await sw.evaluate(() => chrome.alarms.get("yolo"))).toBeUndefined();
+});
+
+test("force starts a batch during discovery while preserving an AI usage pause", async ({ context, sw, page }) => {
+  await seed(sw, { caps: true });
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const discovering = new Promise<void>((resolve) => (started = resolve));
+  let requests = 0;
+  await context.route("https://autoapply.test/jobs.json", async (route) => {
+    requests++;
+    started();
+    await held;
+    await route.fulfill({ contentType: "application/json", body: "[]" });
+  });
+  await queue(sw, `${BASE}yolo-job.html`, {
+    batchSize: 0,
+    intervalMin: 120,
+    feeds: ["https://autoapply.test/jobs.json"],
+  });
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  await page.evaluate(() => chrome.runtime.sendMessage({ type: "YOLO_CHECK_NOW" }));
+  await discovering;
+  const pausedUntil = await sw.evaluate(async () => {
+    const pausedUntil = Date.now() + 60_000;
+    const { yoloState } = await chrome.storage.local.get("yoloState");
+    await chrome.storage.local.set({
+      yoloState: { ...(yoloState as object), pausedUntil, pauseReason: "AI usage limit reached" },
+    });
+    return pausedUntil;
+  });
+  const before = await sw.evaluate(() => Date.now());
+  try {
+    await page.getByRole("button", { name: "Force start batch" }).click();
+    await expect
+      .poll(async () => (await storage<{ batchAt: number }>(sw, "yoloState")).batchAt)
+      .toBeGreaterThanOrEqual(before);
+    expect(await storage(sw, "yoloState")).toMatchObject({ pausedUntil, pauseReason: "AI usage limit reached" });
+    expect(requests).toBe(1);
+  } finally {
+    release();
+  }
+  await expect
+    .poll(async () => (await storage<{ lastCheckAt: number }>(sw, "yoloState")).lastCheckAt)
+    .toBeGreaterThanOrEqual(before);
+  expect(await storage(sw, "yoloState")).toMatchObject({ pausedUntil, pauseReason: "AI usage limit reached" });
+  expect(await storage(sw, "yoloQueue")).toHaveLength(1);
+});
+
+test("force batch requires YOLO to be on with a search and leaves its off state alone", async ({ sw, page }) => {
+  await seed(sw, { caps: true });
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  for (const yolo of [
+    { enabled: false, queries: ["x"] },
+    { enabled: true, queries: [] },
+  ]) {
+    await sw.evaluate(async (yolo) => {
+      await chrome.storage.local.set({ yolo: { ...yolo, feeds: [], boards: [] } });
+    }, yolo);
+    const r = await page.evaluate(() => chrome.runtime.sendMessage({ type: "YOLO_FORCE_BATCH" }));
+    expect(r.error.message).toMatch(/Turn on YOLO with a job search/);
+    expect(await storage(sw, "yolo")).toMatchObject(yolo);
+    expect(await sw.evaluate(() => chrome.alarms.get("yolo"))).toBeUndefined();
+  }
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Force start batch" })).toHaveCount(0);
+});
+
 test("with YOLO off, a fill leaves no alarm or hidden page behind", async ({ sw, page }) => {
   await seed(sw, { caps: true });
   await page.goto(`${BASE}plain.html`);
