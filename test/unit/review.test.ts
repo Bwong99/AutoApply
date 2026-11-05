@@ -120,6 +120,7 @@ describe("reviewForm", () => {
               fields: [
                 { fieldId: "f1", verdict: "fill", answer: "Ada", reason: "Profile", sources: ["personal.firstName"] },
                 { fieldId: "f2", verdict: "ok", sources: [] },
+                { fieldId: "f3", verdict: "leave_blank", reason: "No current employer", sources: [] },
                 { fieldId: "nope", verdict: "fill", answer: "x", sources: ["resume"] },
               ],
               missed: [
@@ -138,7 +139,11 @@ describe("reviewForm", () => {
     } as unknown as ServiceCtx;
     const r = await reviewForm(ctx, {
       page: "[c1 textbox field=f1]",
-      fields: [field({}), field({ id: "f2", question: "Email" })],
+      fields: [
+        field({}),
+        field({ id: "f2", question: "Email" }),
+        field({ id: "f3", question: "Current company", shown: "FORM Swim", status: "ai" }),
+      ],
       profile: profile(),
       documents: [],
       job: null,
@@ -147,7 +152,11 @@ describe("reviewForm", () => {
     });
     expect(spec?.review).toBe(true);
     expect(spec?.payload.page).toBe("[c1 textbox field=f1]");
-    expect(r.fixes).toEqual([expect.objectContaining({ fieldId: "f1", answer: "Ada" })]);
+    expect(r.fixes).toEqual([
+      expect.objectContaining({ fieldId: "f1", answer: "Ada" }),
+      // "Leave it blank" about a field holding a value empties it.
+      expect.objectContaining({ fieldId: "f3", verdict: "wrong", answer: "" }),
+    ]);
     expect(r.missed).toEqual([expect.objectContaining({ refs: ["c4"], question: "Pronouns" })]);
     expect(r.reveal).toEqual(["c9"]);
   });
