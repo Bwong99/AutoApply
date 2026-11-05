@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { NumberInput, SelectInput, TagInput, TextInput, Toggle } from "../components/controls";
+import { Field, NumberInput, SelectInput, TagInput, TextInput, Toggle } from "../components/controls";
 import { save, useStored } from "../store";
 import { isErr, send, type Responses } from "../../shared/messages";
 import { formatDateTime } from "../../shared/time";
@@ -17,6 +17,7 @@ const SOURCE_NAMES: Record<SourceGroup, string> = {
   careers: "Company career sites",
   feeds: "GitHub job lists",
   ...BOARD_NAMES,
+  jobright: "Jobright",
 };
 const SORT_NAMES: [QueueSort, string][] = [
   ["newest", "Newest posted first"],
@@ -207,8 +208,66 @@ function Gmail(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) 
   );
 }
 
+/** What each choice does, and what it costs. */
+const REAL_CHOICES: [YoloConfig["realInput"], string, string][] = [
+  [
+    "off",
+    "Off",
+    "Script input only. No permission, no debugging bar, fastest. Bot checks can tell script events from a person’s, so graded sites may score the application lower.",
+  ],
+  [
+    "clicks",
+    "Clicks",
+    "Real mouse movement over the form and real Next/Submit clicks. Covers what score checks weigh most (the submit click and the pointer before it) for little cost: the bar shows for about 3–5 seconds per press.",
+  ],
+  [
+    "typing",
+    "Typing",
+    "Real keystrokes into text answers (long answers are pasted in one go, as a person would). Adds about 60 ms per character of short answers, and the bar shows while the page is filled. Clicks stay script-made.",
+  ],
+  [
+    "both",
+    "Both",
+    "Real typing and real clicks: the most human-looking, and the slowest, with the bar showing for the whole fill and submit.",
+  ],
+];
+
+function RealInput(props: { y: YoloConfig; set: (p: Partial<YoloConfig>) => void }) {
+  return (
+    <Field
+      label="Real input on bot-checked pages"
+      help="Only on pages a bot check grades (an invisible CAPTCHA or bot-detection service), and only in a tab (never the hidden frame). AutoApply drives Chrome’s debugger there, so the check sees a person’s events, not a script’s. While it does, Chrome shows “AutoApply started debugging this browser” on every window; it closes 3 s after the last click or key. Pressing Cancel on that bar stops it for that job (script input from then on)."
+      extra={
+        <ul class="help">
+          {REAL_CHOICES.map(([, name, text]) => (
+            <li>
+              <b>{name}:</b> {text}
+            </li>
+          ))}
+        </ul>
+      }
+    >
+      {(id) => (
+        <select
+          id={id}
+          value={props.y.realInput}
+          onChange={(e) => {
+            const realInput = e.currentTarget.value as YoloConfig["realInput"];
+            props.set({ realInput });
+          }}
+        >
+          {REAL_CHOICES.map(([v, name]) => (
+            <option value={v}>{name}</option>
+          ))}
+        </select>
+      )}
+    </Field>
+  );
+}
+
 export function Yolo() {
   const y = useStored("yolo");
+  const state = useStored("yoloState");
   if (!y) return <p>Loading…</p>;
   const set = (patch: Partial<YoloConfig>) => void save({ yolo: { ...y, ...patch } });
   const urls = (v: string[]) => v.filter((u) => /^https?:\/\//i.test(u));
@@ -216,10 +275,10 @@ export function Yolo() {
     <section class="yolo">
       <h1>YOLO Mode</h1>
       <p class="intro">
-        While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself: it creates site
-        accounts when needed, fills every field (with its best guess where your profile has no answer), and submits. It
-        works in a hidden page, so nothing opens on screen. Everything it does is listed under Applications, with the
-        answers it guessed. Turn it on or off from the toolbar popup.
+        While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself:
+        it creates site accounts when needed, fills every field (with its best guess where your profile has no answer),
+        and submits. It works in a hidden page, so nothing opens on screen. Everything it does is listed under
+        Applications, with the answers it guessed. Turn it on or off from the toolbar popup.
       </p>
       <h2>Schedule</h2>
       <div class="form">
@@ -289,6 +348,23 @@ export function Yolo() {
               onChange={(on) => set({ boards: on ? [...y.boards, b] : y.boards.filter((x) => x !== b) })}
             />
           ))}
+          <Toggle
+            label="Jobright"
+            help="Reads your Jobright recommendations (jobright.ai/jobs/recommend), filtered by the roles and places in your Jobright preferences rather than your queries. Needs you signed in to jobright.ai in this browser; the other filters here still apply."
+            checked={y.jobright.length > 0}
+            onChange={(on) => set({ jobright: on ? ["recommendations"] : [] })}
+          />
+          {y.jobright.length > 0 && state?.jobrightSignedOut && (
+            <p class="err" role="status">
+              Jobright answered as signed out at the last check. Sign in to jobright.ai in this browser to get its jobs.
+            </p>
+          )}
+          {y.boards.includes("indeed") && state?.indeedBlocked && (
+            <p class="err" role="status">
+              Indeed showed a bot check instead of results at the last check, so it added no jobs. YOLO doesn't solve
+              these; using indeed.com yourself in this browser may clear it before the next batch.
+            </p>
+          )}
         </div>
         <TagInput
           label="GitHub job lists"
@@ -332,6 +408,7 @@ export function Yolo() {
           checked={y.tabFallback}
           onChange={(tabFallback) => set({ tabFallback })}
         />
+        <RealInput y={y} set={set} />
         <Toggle
           label="Write optional cover letters"
           help="Required cover-letter uploads always get a PDF written for the job when Documents has none. On: optional ones do too."

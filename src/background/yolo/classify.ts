@@ -29,9 +29,15 @@ const RE_REFUSED =
 /**
  * `hidden`: the run is in the hidden frame, where bot checks fail but a tab often passes them, or never shows them:
  * the frame is a cross-site one (the site's own cookies set by script are dropped, and Cloudflare's checks can't run)
- * in a document with no window or screen. Its bot checks are "blocked", for the tab retry.
+ * in a document with no window or screen. Its bot checks are "blocked", for the tab retry. So is a step the run would
+ * send while an invisible score check grades it: the frame's low score can file the application as spam unseen.
  */
 export function kindOf(f: PageFacts, hidden: boolean): StepKind {
+  const kind = stepKind(f, hidden);
+  return hidden && f.scored && /^(job|form|signin|signup|reset)$/.test(kind) ? "blocked" : kind;
+}
+
+function stepKind(f: PageFacts, hidden: boolean): StepKind {
   if (f.captcha) return hidden ? "blocked" : "captcha";
   if (confirmFirst(f)) return "verify";
   if (

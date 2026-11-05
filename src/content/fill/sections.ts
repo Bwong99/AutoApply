@@ -6,7 +6,7 @@ import { collapse } from "../../shared/normalize";
 import type { EntryCounts } from "../../shared/types";
 import { shownText } from "../scan/labels";
 import { deepQueryAll, shadowOf } from "../scan/traverse";
-import { composedContains, isVisible, parentOf } from "../scan/visibility";
+import { composedContains, concealed, isVisible, parentOf } from "../scan/visibility";
 import { dispatching, holdScroll, isForbiddenClick, waitFor } from "./events";
 
 type Kind = keyof EntryCounts;
@@ -129,7 +129,8 @@ export async function expandSections(signal: AbortSignal): Promise<void> {
       !t.hasAttribute("aria-haspopup") &&
       !isForbiddenClick(t) &&
       isVisible(t) &&
-      deepQueryAll(CONTROLS, section).some((c) => !composedContains(head, c) && !isVisible(c))
+      // Clipped shut (height 0) too: the scan skips an optional text box no one could see, as it would a honeypot.
+      deepQueryAll(CONTROLS, section).some((c) => !composedContains(head, c) && (!isVisible(c) || concealed(c)))
     );
   });
   if (!toggles.length) return;

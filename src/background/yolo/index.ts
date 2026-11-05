@@ -18,9 +18,11 @@ import {
 import { RELEVANCE_PROMPT } from "../gemini/prompts";
 import { RELEVANCE_SCHEMA, RelevanceZ } from "../gemini/schemas";
 import { draftEssays } from "../services/draftEssays";
+import { FALLBACK, tailoredDoc } from "../services/tailorResume";
 import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
+import { realInput, realInputReady } from "./realInput";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, inQueueOrder, RETRY } from "./discover";
 import {
@@ -34,6 +36,7 @@ import {
 } from "./gmail";
 import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
+import { indeedSearch, JOBRIGHT_PING } from "./sources";
 import { textPdf } from "./pdf";
 import {
   credit,
@@ -120,21 +123,42 @@ async function schedule() {
 }
 
 let cycling: Promise<void> | null = null;
+let toppingUp = false;
+/** The batch (its `batchAt`) whose last discovery found nothing new: no top-up until the next batch. */
+let dryBatch = 0;
 /**
  * One batch: discovery, then applying to up to `batchSize` jobs. A run in the host keeps it busy, so rendered sources
- * wait for the next batch; a run still going from the last batch counts toward this one.
+ * wait for the next batch; a run still going from the last batch counts toward this one. `topUp`: more discovery for
+ * the current batch, its queue having run dry.
  */
-function cycle(): Promise<void> {
+function cycle(topUp = false): Promise<void> {
+  // A batch's own check waits out a top-up instead of being skipped for it, so its `batchAt` still starts a new batch.
+  const again = () => cycle();
+  if (cycling && toppingUp && !topUp) return cycling.then(again, again);
   return (cycling ??= (async () => {
+    toppingUp = topUp;
+    // The turn-on check holds the hidden host; waiting it out keeps Indeed and career pages in this batch.
+    await checking;
+    let batchAt = 0;
+    let added = 0;
     try {
       if (!yolo.enabled || !yolo.queries.length) return;
-      await setState({ batchAt: Date.now(), pauseReason: "" });
-      const busy = !!(await getRun());
-      await discover({
+      if (!topUp) await setState({ batchAt: Date.now(), pauseReason: "" });
+      const [busy, state, queue, apps] = await Promise.all([
+        getRun(),
+        store.get("yoloState"),
+        store.get("yoloQueue"),
+        store.get("applications"),
+      ]);
+      batchAt = state.batchAt;
+      added = await discover({
         yolo,
         fetch: (url, init) => fetch(url, init),
         scrape: busy ? undefined : scrape,
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
+        want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
+        jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
+        indeedBlocked: (blocked) => setState({ indeedBlocked: blocked }),
       });
       await setState({ lastCheckAt: Date.now() });
     } catch (e) {
@@ -142,8 +166,37 @@ function cycle(): Promise<void> {
     } finally {
       cycling = null;
     }
+    // Failed or found nothing: topping up again would repeat it.
+    if (batchAt && !added) dryBatch = batchAt;
     await pump();
   })());
+}
+
+let checking: Promise<void> | null = null;
+/**
+ * At turn-on, whether Jobright and Indeed can be read, so the popup shows it within seconds rather than once the first
+ * batch's discovery reaches them. Discovery keeps both flags current after that.
+ */
+async function checkSources() {
+  if (yolo.jobright.length) {
+    const r = await fetch(JOBRIGHT_PING, { credentials: "include" }).catch(() => null);
+    if (r) await setState({ jobrightSignedOut: r.status === 401 });
+  }
+  if (yolo.boards.includes("indeed") && yolo.queries.length && !(await getRun())) {
+    const links = await scrape(indeedSearch(yolo.queries[0], yolo.locations[0] ?? "", yolo.postedWithinDays));
+    await setState({ indeedBlocked: !links });
+  }
+}
+
+/** The queue ran dry with the batch short of `batchSize`: finds more now rather than at the next batch. */
+async function topUp(): Promise<boolean> {
+  const [state, next] = await Promise.all([store.get("yoloState"), chrome.alarms.get(CHECK)]);
+  // Not when the next batch, which discovers anyway, is due within minutes (or YOLO was just turned on).
+  if (!next || next.scheduledTime - Date.now() < 5 * 60e3) return false;
+  if (cycling || !yolo.queries.length || state.batchAt === dryBatch || state.pausedUntil > Date.now()) return false;
+  if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) return false;
+  void cycle(true);
+  return true;
 }
 
 async function relevance(items: Listing[]): Promise<Set<number>> {
@@ -195,7 +248,7 @@ async function pump() {
   try {
     if (!yolo.enabled || (await getRun())) return;
     const queue = await store.get("yoloQueue");
-    if (!queue.length) return void (await closeFrame().catch(() => undefined));
+    if (!queue.length) return void ((await topUp()) || (await closeFrame().catch(() => undefined)));
     const state = await store.get("yoloState");
     if (state.pausedUntil > Date.now()) return;
     if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) {
@@ -335,19 +388,19 @@ async function logRun(run: Run, r: YoloResult, limit: number) {
   await store.set({ yoloLogs: [...(await store.get("yoloLogs")), entry].slice(-limit) });
 }
 
-type LogFile = { name: string; text: string };
+type LogFile = { name: string; base64: string };
 
-/** The résumés and cover letters the run uploaded, by name, and the text of those YOLO wrote for the job. */
+/** The résumés and cover letters the run uploaded, by name, and the files YOLO made for the job as uploaded. */
 async function uploaded(run: Run) {
   const docs = await store.get("documentsIndex");
   const up = { resume: [] as string[], letter: [] as string[], files: [] as LogFile[] };
   for (const id of run.uploads ?? []) {
     if (isTailoredDoc(id) || isYoloDoc(id)) {
-      const f = await session.get<LogFile>(`${isYoloDoc(id) ? "yololetter" : "tailortex"}:${id}`);
-      if (f) up.files.push(f);
-      if (isYoloDoc(id)) up.letter.push(`Generated (${f?.name ?? "text no longer kept"})`);
-      // No .tex: the untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
-      else up.resume.push(f ? `Tailored (${f.name})` : "Untailored LaTeX résumé");
+      const d = await (isYoloDoc(id) ? yoloDoc(id) : tailoredDoc(store, id));
+      if (d) up.files.push({ name: d.meta.fileName, base64: d.base64 });
+      if (isYoloDoc(id)) up.letter.push(`Generated (${d?.meta.fileName ?? "file no longer kept"})`);
+      // The untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
+      else up.resume.push(d && id !== FALLBACK ? `Tailored (${d.meta.fileName})` : "Untailored LaTeX résumé");
       continue;
     }
     const d = docs.find((x) => x.id === id);
@@ -478,6 +531,14 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       nextCheckAt: alarm?.scheduledTime ?? null,
       running: run?.mode === "apply" ? `${run.item.company} – ${run.item.title}` : null,
       paused: state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
+      warnings: yolo.enabled
+        ? [
+            yolo.jobright.length && state.jobrightSignedOut ? "Jobright: sign in to jobright.ai in this browser" : "",
+            yolo.boards.includes("indeed") && state.indeedBlocked
+              ? "Indeed: showed a bot check, so YOLO can't read it"
+              : "",
+          ].filter(Boolean)
+        : [],
     };
   },
 
@@ -488,6 +549,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     await store.set({ yolo });
     // The new alarm's first firing, 30 s on, starts the first batch.
     await schedule();
+    if (enabled) checking ??= checkSources().finally(() => (checking = null));
     return { ok: true };
   },
 
@@ -557,6 +619,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       company: run.item.company,
       title: run.item.title,
       visible: run.host === "visible",
+      realInput: run.host !== "frame" && realInputReady() ? yolo.realInput : "off",
       ...(skipped ? { posting: run.item.url } : {}),
     };
   },
@@ -610,6 +673,17 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       // user's to finish, never a failure.
       ...(stop ? { stop, needs: kind === "flagged" || !!run.confirming } : {}),
     };
+  },
+
+  async REAL_INPUT({ op }, sender) {
+    const run = await getRun();
+    const tabId = sender.tab?.id;
+    const want = op.kind === "type" ? "typing" : "clicks";
+    // Only the run's own tab, its top frame (whose viewport the points are in), and only what the setting allows.
+    if (!fromRun(run, sender) || run.host === "frame" || tabId === undefined || sender.frameId !== 0)
+      return { ok: false };
+    if (yolo.realInput !== want && yolo.realInput !== "both") return { ok: false };
+    return { ok: await realInput(tabId, op) };
   },
 
   async YOLO_RESULT({ result }, sender) {
@@ -696,8 +770,6 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     };
     await Promise.all([
       session.set(`yolodoc:${id}`, { meta, base64 }),
-      // For the debug log: its text, not the PDF.
-      session.set(`yololetter:${id}`, { name: meta.fileName.replace(/\.pdf$/i, ".txt"), text: e.text }),
       // For the overlay: the job as draftEssays gave it to the AI.
       session.set(`docjob:${id}`, jobBrief(job) ?? {}),
     ]);

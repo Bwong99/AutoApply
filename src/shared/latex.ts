@@ -227,12 +227,19 @@ const SPECIALS = ["&", "%", "#", "_", "$"] as const;
 const bare = (s: string, ch: string) => (s.match(new RegExp(`(^|[^\\\\])\\${ch}`, "g")) ?? []).length;
 
 /** The edit as one line, made safe, or null when it would change the line's LaTeX structure. */
+const RE_HIDING =
+  /\\(color|textcolor|colorbox|fcolorbox|pagecolor|phantom|hphantom|vphantom|smash|tiny|scriptsize|fontsize|scalebox|resizebox|rlap|llap|transparent)\b|\{\s*white\s*\}/g;
+const hiding = (s: string) => (s.match(RE_HIDING) ?? []).length;
+
 function checkText(p: ParsedTex, original: string, text: string): string | null {
   let t = text.replace(/\s*\n\s*/g, " ").trim();
   if (!t || FORBIDDEN.test(t)) return null;
   for (const ch of SPECIALS) if (!bare(original, ch)) t = t.replace(new RegExp(`(^|[^\\\\])\\${ch}`, "g"), `$1\\${ch}`);
   if (lead(t) !== lead(original) || braceDelta(t) !== 0 || groupCount(t) !== groupCount(original)) return null;
   if ([...t.matchAll(/\\([a-zA-Z@]+)/g)].some((m) => !p.commands.has(m[1]))) return null;
+  // Text hidden from a reader (white, tiny, invisible), keyword stuffing recruiters reject on sight: no more of it
+  // than the line had.
+  if (hiding(t) > hiding(original)) return null;
   // A reworded line stays about as long (the page count is checked after compiling, too).
   if (t.length > original.length * 1.5 + 20) return null;
   return t;

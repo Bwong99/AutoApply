@@ -1,8 +1,16 @@
 import { readFile } from "node:fs/promises";
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { installChromeMock } from "./chromeMock";
 import { altKey, applyUrl, jobKey } from "../../src/background/yolo/jobKey";
-import { parseFeed, parseGlassdoor, parseIndeed, parseLinkedIn } from "../../src/background/yolo/sources";
+import {
+  glassdoorSearch,
+  jobrightFeed,
+  parseFeed,
+  parseGlassdoor,
+  parseIndeed,
+  parseJobrightFeed,
+  parseLinkedIn,
+} from "../../src/background/yolo/sources";
 import { boardOf, findOnEmployerBoard, jobLinks, sameTitle, workdayPosted } from "../../src/background/yolo/careers";
 import { locationMatches, rejectReason, titleMatches } from "../../src/background/yolo/filter";
 import { loadPlaces, PLACES_FILE } from "../../src/background/yolo/places";
@@ -15,7 +23,7 @@ import { mapFields } from "../../src/background/services/mapFields";
 import type { Gemini } from "../../src/background/gemini/client";
 import { defaultSettings } from "../../src/shared/settings";
 import { emptyProfile } from "../../src/shared/profileSchema";
-import { defaultYolo, type Application, type Listing } from "../../src/shared/yolo";
+import { defaultYolo, YoloSchema, type Application, type Listing } from "../../src/shared/yolo";
 import type { FieldDescriptor } from "../../src/shared/types";
 
 beforeAll(() => loadPlaces(() => readFile(`public/${PLACES_FILE}`, "utf8")));
@@ -203,6 +211,58 @@ describe("sources", () => {
       },
     ]);
   });
+
+  it("reads Jobright's recommendations as employer postings, never a LinkedIn or Jobright link", () => {
+    const job = (jobResult: object, companyName = "Vena Solutions") => ({
+      jobResult: {
+        jobTitle: "Software Developer Co-op",
+        jobLocation: "Toronto, ON",
+        publishTime: "2026-11-03 14:40:16",
+        applyLink: "https://vena.pinpointhq.com/postings/1",
+        ...jobResult,
+      },
+      companyResult: { companyName },
+    });
+    const out = parseJobrightFeed([
+      job({}),
+      job({ jobLocation: "Canada", jobLocations: ["Canada"], workModel: "Remote", isRemote: true }),
+      job({ jobLocations: ["Ottawa, ON", "Remote, Canada"], workModel: "Hybrid" }),
+      job({ applyLink: "https://www.linkedin.com/jobs/view/1" }),
+      job({ applyLink: "https://jobright.ai/jobs/info/1" }),
+      job({ isDeleted: true }),
+      job({ applyLink: undefined }),
+    ]);
+    expect(out.map((l) => [l.company, l.title, l.location, l.url, l.source])).toEqual([
+      [
+        "Vena Solutions",
+        "Software Developer Co-op",
+        "Toronto, ON",
+        "https://vena.pinpointhq.com/postings/1",
+        "jobright",
+      ],
+      [
+        "Vena Solutions",
+        "Software Developer Co-op",
+        "Remote - Canada",
+        "https://vena.pinpointhq.com/postings/1",
+        "jobright",
+      ],
+      [
+        "Vena Solutions",
+        "Software Developer Co-op",
+        "Ottawa, ON; Remote, Canada",
+        "https://vena.pinpointhq.com/postings/1",
+        "jobright",
+      ],
+    ]);
+    expect(out[0].postedAt).toBe(Date.UTC(2026, 10, 3, 14, 40, 16));
+    // A cursor: the first page starts the list afresh, the rest continue it.
+    expect(new URL(jobrightFeed(0)).searchParams.get("refresh")).toBe("true");
+    expect(Object.fromEntries(new URL(jobrightFeed(2)).searchParams)).toMatchObject({
+      refresh: "false",
+      position: "40",
+    });
+  });
 });
 
 describe("employer boards", () => {
@@ -245,6 +305,19 @@ describe("employer boards", () => {
         location: "Kirkland, WA",
         source: "careers",
       },
+    ]);
+    // Recruitee's posting links carry no number.
+    const recruitee = jobLinks(
+      [
+        { href: "https://huaweicanada.recruitee.com/o/intern-engineer-ai", text: "Intern Engineer - AI" },
+        { href: "https://huaweicanada.recruitee.com/o/intern-engineer-ai", text: "Apply" },
+        { href: "https://huaweicanada.recruitee.com/?jobs[search]=intern", text: "Search jobs" },
+      ],
+      "huaweicanada",
+      "https://huaweicanada.recruitee.com/",
+    );
+    expect(recruitee.map((l) => [l.url, l.title])).toEqual([
+      ["https://huaweicanada.recruitee.com/o/intern-engineer-ai", "Intern Engineer - AI"],
     ]);
   });
 
@@ -560,6 +633,96 @@ describe("discovery", () => {
     expect(seenHeaders[1]).toEqual({ "if-none-match": '"v1"' });
   });
 
+  it("pages LinkedIn only while the batch wants more postings on an employer's board, stopping at a failed page", async () => {
+    const card = (id: number, title = `Software Engineer Intern ${id}`, company = "Acme") =>
+      `<li data-entity-urn="urn:li:jobPosting:${id}"><h3 class="base-search-card__title">${title}</h3>
+      <h4 class="base-search-card__subtitle">${company}</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+    // Acme posts its jobs on Lever; Nobody's aren't on any board, so they don't count toward the batch.
+    const lever = JSON.stringify(
+      [1, 2, 3].map((n) => ({ text: `Software Engineer Intern ${n}`, hostedUrl: `https://jobs.lever.co/acme/${n}` })),
+    );
+    const pages: Record<number, string> = {
+      0: card(1) + card(9, "Mechanical Intern"),
+      10: card(1) + card(2) + card(7, "Software Engineer Intern", "Nobody"),
+      20: card(8, "Software Engineer Intern", "Nobody"),
+      30: card(3),
+    };
+    const gaps: number[] = [];
+    const later = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(
+      ((fn: () => void, ms?: number) => (gaps.push(ms ?? 0), later(fn, 0))) as typeof setTimeout,
+    );
+    onTestFinished(() => void vi.restoreAllMocks());
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      boards: ["linkedin" as const],
+    };
+    const run = async (want: number | undefined, fail = Infinity, fresh = true) => {
+      if (fresh) installChromeMock();
+      const starts: number[] = [];
+      const f = async (url: string) => {
+        if (url === "https://api.lever.co/v0/postings/acme?mode=json") return new Response(lever);
+        if (!url.includes("linkedin")) return new Response("", { status: 404 });
+        const start = Number(new URL(url).searchParams.get("start"));
+        starts.push(start);
+        return start >= fail ? new Response("", { status: 429 }) : new Response(pages[start] ?? "");
+      };
+      const n = await discover({ yolo: y, fetch: f, want });
+      return [starts, n];
+    };
+    expect(await run(undefined)).toEqual([[0], 1]);
+    expect(await run(0)).toEqual([[0], 1]);
+    expect(await run(2)).toEqual([[0, 10], 2]);
+    expect(await run(3)).toEqual([[0, 10, 20, 30], 3]);
+    expect(await run(50)).toEqual([[0, 10, 20, 30, 40], 3]);
+    expect(await run(50, 10)).toEqual([[0, 10], 1]);
+    // LinkedIn is asked a second apart at most.
+    expect(gaps.length).toBeGreaterThan(0);
+    expect(gaps.every((ms) => ms > 0 && ms <= 1000)).toBe(true);
+    // Topping up the same batch reads past the pages already looked at.
+    installChromeMock();
+    expect(await run(1)).toEqual([[0], 1]);
+    expect(await run(1, Infinity, false)).toEqual([[0, 10], 1]);
+    expect(await run(1, Infinity, false)).toEqual([[0, 10, 20, 30], 1]);
+    const { yoloQueue, yoloSeen } = (await chrome.storage.local.get(["yoloQueue", "yoloSeen"])) as {
+      yoloQueue: { url: string }[];
+      yoloSeen: Record<string, number>;
+    };
+    expect(yoloQueue.map((i) => i.url)).toEqual([1, 2, 3].map((n) => `https://jobs.lever.co/acme/${n}`));
+    // Nobody's posting (twice on LinkedIn) was looked up once and isn't again.
+    expect(yoloSeen["linkedin:7"] && yoloSeen["nobody|software engineer intern"]).toBeTruthy();
+  });
+
+  it("leaves LinkedIn postings without an employer posting out of the AI's batch", async () => {
+    const card = (id: number, company: string) =>
+      `<li data-entity-urn="urn:li:jobPosting:${id}"><h3 class="base-search-card__title">Software Engineer Intern</h3>
+      <h4 class="base-search-card__subtitle">${company}</h4><span class="job-search-card__location">Toronto, ON</span></li>`;
+    const f = async (url: string) => {
+      if (url.includes("linkedin")) return new Response(card(1, "Acme") + card(2, "Nobody"));
+      if (url === "https://api.lever.co/v0/postings/acme?mode=json")
+        return new Response(
+          JSON.stringify([{ text: "Software Engineer Intern", hostedUrl: "https://jobs.lever.co/acme/1" }]),
+        );
+      return new Response("", { status: 404 });
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      boards: ["linkedin" as const],
+    };
+    const asked: string[][] = [];
+    const n = await discover({
+      yolo: y,
+      fetch: f,
+      relevance: async (items) => (asked.push(items.map((i) => i.company)), new Set(items.keys())),
+    });
+    expect(asked).toEqual([["Acme"]]);
+    expect(n).toBe(1);
+  });
+
   it("queues one application for a job's copies across requisitions and sources", async () => {
     const rows = ["J000704364", "J000704365"].map((id) => ({
       company_name: "Aptiv",
@@ -610,6 +773,149 @@ describe("discovery", () => {
     expect(asked).toEqual([["Software Engineer Intern", "Software Engineer Intern (PhD)"]]);
     expect(n).toBe(1);
   });
+
+  it("reads the signed-in Jobright feed until it runs out, trusting its roles over the queries", async () => {
+    const job = (jobTitle: string, jobLocation: string, n: number) => ({
+      jobResult: {
+        jobTitle,
+        jobLocation,
+        publishTime: "2026-11-02 10:00:00",
+        applyLink: `https://jobs.lever.co/co/${n}`,
+      },
+      companyResult: { companyName: `Co${n}` },
+    });
+    const pages = [
+      // Not a "software intern" title, but what the user's Jobright preferences ask for; excluded words still count.
+      [job("Backend Developer - Intern", "Toronto, ON", 1), job("Senior Software Intern", "Toronto, ON", 2)],
+      [job("Software Engineer Intern", "Seattle, WA", 3)],
+      [],
+    ];
+    const asked: [string, RequestCredentials | undefined][] = [];
+    let signedIn = true;
+    const f = async (url: string, init?: RequestInit) => {
+      if (!url.startsWith("https://jobright.ai/swan/recommend/list/jobs")) return new Response("", { status: 404 });
+      const u = new URL(url);
+      asked.push([`${u.searchParams.get("refresh")}@${u.searchParams.get("position")}`, init?.credentials]);
+      if (!signedIn) return new Response('{"success":false,"errorCode":41001}', { status: 401 });
+      return new Response(
+        JSON.stringify({ success: true, result: { jobList: pages[Number(u.searchParams.get("position")) / 20] } }),
+      );
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Intern"],
+      locations: ["Canada"],
+      feeds: [],
+      boards: [],
+      jobright: ["recommendations"],
+    };
+    const now = Date.UTC(2026, 10, 3);
+    const out: boolean[] = [];
+    const jobrightSignedOut = (o: boolean) => out.push(o);
+    expect(await discover({ yolo: y, fetch: f, now, jobrightSignedOut })).toBe(1);
+    expect(asked).toEqual([
+      ["true@0", "include"],
+      ["false@20", "include"],
+      ["false@40", "include"],
+    ]);
+    const { yoloQueue } = (await chrome.storage.local.get("yoloQueue")) as {
+      yoloQueue: { url: string; title: string; source: string }[];
+    };
+    expect(yoloQueue.map((i) => [i.url, i.title, i.source])).toEqual([
+      ["https://jobs.lever.co/co/1", "Backend Developer - Intern", "jobright"],
+    ]);
+    // Signed out: Jobright answers 401 and is left alone.
+    installChromeMock();
+    signedIn = false;
+    asked.length = 0;
+    expect(await discover({ yolo: y, fetch: f, now, jobrightSignedOut })).toBe(0);
+    expect(asked).toHaveLength(1);
+    // Told once per read, for the settings page and popup to warn.
+    expect(out).toEqual([false, true]);
+  });
+
+  it("searches the country's own Glassdoor on its search page, which keeps the age filter", () => {
+    expect(glassdoorSearch("Software Intern", "Canada", 14)).toBe(
+      "https://www.glassdoor.ca/Job/software-intern-jobs-SRCH_KO0,15.htm?fromAge=14",
+    );
+    expect(glassdoorSearch("C++ Développeur / Intern", "Austin, TX", 60)).toBe(
+      "https://www.glassdoor.com/Job/c-developpeur-intern-jobs-SRCH_KO0,20.htm?fromAge=30",
+    );
+  });
+
+  it("tells when Indeed shows a bot check instead of results, and reads it when it doesn't", async () => {
+    const card = {
+      href: "https://ca.indeed.com/rc/clk?jk=abc123",
+      text: "Software Intern",
+      card: "Software Intern\nCo\nToronto, ON",
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Intern"],
+      locations: ["Canada"],
+      boards: ["indeed" as const],
+      feeds: [],
+      jobright: [],
+    };
+    const told: boolean[] = [];
+    const f = async () => new Response("", { status: 404 });
+    const run = (links: (typeof card)[] | null) =>
+      discover({ yolo: y, fetch: f, scrape: async () => links, indeedBlocked: (b) => told.push(b) });
+    expect(await run(null)).toBe(0);
+    expect(await run([card])).toBe(1);
+    expect(told).toEqual([true, false]);
+  });
+
+  it("pages LinkedIn only for what the lists read before it don't supply", async () => {
+    const linkedin: number[] = [];
+    const f = async (url: string) => {
+      if (url.startsWith("https://jobright.ai/swan/"))
+        return new Response(
+          JSON.stringify({
+            result: {
+              jobList: url.includes("position=0&")
+                ? [
+                    {
+                      jobResult: {
+                        jobTitle: "Software Intern",
+                        jobLocation: "Toronto, ON",
+                        applyLink: "https://jobs.lever.co/co/1",
+                      },
+                      companyResult: { companyName: "Co" },
+                    },
+                  ]
+                : [],
+            },
+          }),
+        );
+      if (!url.includes("linkedin")) return new Response("", { status: 404 });
+      const start = Number(new URL(url).searchParams.get("start"));
+      linkedin.push(start);
+      return new Response(
+        start
+          ? ""
+          : `<li data-entity-urn="urn:li:jobPosting:9"><h3 class="base-search-card__title">Software Intern</h3>
+          <h4 class="base-search-card__subtitle">Nobody</h4><span class="job-search-card__location">Toronto, ON</span></li>`,
+      );
+    };
+    const later = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void) => later(fn, 0)) as typeof setTimeout);
+    onTestFinished(() => void vi.restoreAllMocks());
+    const y = (jobright: string[]) => ({
+      ...defaultYolo(),
+      queries: ["Software Intern"],
+      locations: ["Canada"],
+      feeds: [],
+      boards: ["linkedin" as const],
+      jobright,
+    });
+    await discover({ yolo: y([]), fetch: f, want: 1 });
+    expect(linkedin).toEqual([0, 10]);
+    installChromeMock();
+    linkedin.length = 0;
+    await discover({ yolo: y(["recommendations"]), fetch: f, want: 1 });
+    expect(linkedin).toEqual([0]);
+  });
 });
 
 describe("queue order", () => {
@@ -634,6 +940,8 @@ describe("queue order", () => {
     // Unlisted sources (Indeed, Glassdoor) go last.
     expect(order({ queueBySource: true, sourceOrder: ["feeds", "linkedin", "careers"] })).toEqual([1, 3, 4, 2]);
     expect(order({ queueSort: "oldest" }, [...jobs, { source: "indeed", postedAt: RETRY, addedAt: 5 }])[0]).toBe(RETRY);
+    // An order saved before a source existed gains it at the end.
+    expect(YoloSchema.parse({ sourceOrder: ["feeds", "careers"] }).sourceOrder.slice(-1)).toEqual(["jobright"]);
   });
 });
 

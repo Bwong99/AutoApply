@@ -56,7 +56,7 @@ export function fromRun(run: Run | null, s: chrome.runtime.MessageSender): run i
   return run.host === "frame" ? !s.tab && /^https?:/.test(s.url ?? "") : s.tab?.id === run.tabId;
 }
 
-const scrapes = new Map<string, (links: Link[]) => void>();
+const scrapes = new Map<string, (links: Link[] | null) => void>();
 
 export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"]): Promise<Run> {
   const now = Date.now();
@@ -86,8 +86,8 @@ export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"
   return run;
 }
 
-/** Reads a page's links in the hidden host (Indeed results, career sites without an API). */
-export async function scrape(url: string, timeoutMs = 40_000): Promise<Link[]> {
+/** Reads a page's links in the hidden host (Indeed results, career sites without an API); null = a bot check stood in. */
+export async function scrape(url: string, timeoutMs = 40_000): Promise<Link[] | null> {
   const run = await start(
     { key: url, alt: "", listing: "", url, company: "", title: "", location: "", source: "", postedAt: 0, addedAt: 0 },
     "scrape",
@@ -114,7 +114,7 @@ export async function end(id: string): Promise<Run | null> {
 
 /** A scrape's links reach the discovery that waits for them; an application's result is the caller's to record. */
 export function resolveScrape(run: Run, r: YoloResult) {
-  scrapes.get(run.id)?.(r.status === "scraped" ? r.links : []);
+  scrapes.get(run.id)?.(r.status !== "scraped" ? [] : r.walled ? null : r.links);
   scrapes.delete(run.id);
 }
 

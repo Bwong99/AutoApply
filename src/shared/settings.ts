@@ -19,18 +19,22 @@ const claudeTasks = z.object({ fill: claudeTask, write: claudeTask, resume: clau
 /** What the AI is told about tailoring a LaTeX résumé (Documents → AI tailoring prompt). The user may edit it. */
 export const DEFAULT_TAILOR_PROMPT = `Tailor this résumé to the job. It should read as the same résumé sharpened for this role, not a rewrite: make the few changes that matter most.
 
+You must:
+- Keep the résumé to one page.
+  - If it runs over, remove whole entries until it fits, starting with the entry least relevant to this job, regardless of section. When entries are about equally relevant, remove Extracurriculars before Projects, and Projects before Work Experience.
+
 You may:
 - Reword bullets to use the job's own terms for skills and tools the résumé already shows. Keep each bullet's meaning, tense and voice, and its length within about 15%.
 - Reorder bullets within an entry, and sections, so the most relevant come first. Reorder entries only in sections not ordered by date (such as projects).
-- Drop up to 2 bullets that matter least for this job, but never an entire entry and never an entry's only bullet.
+- Drop up to 2 bullets that matter least for this job, but never an entire entry, except to meet the one-page limit.
 - Add up to 2 bullets to existing experiences or projects that expand on details the résumé already states about them.
-- Add a skill to the skills section only if the job asks for it and it is in the candidate's Profile skills.
+- Add skills to the skills section only if the job asks for it and it is in the candidate's Profile skills.
 - Lightly reword a summary or objective to fit the role.
 
 You must not:
 - Invent or exaggerate anything: no employers, titles, dates, projects, degrees, awards, metrics, numbers, tools or skills that the résumé (or, for skills, the Profile) doesn't have.
 - Change names, contact details, dates, company or school names, job titles, degrees or grades.
-- Make the résumé longer: balance any added text with shorter or dropped bullets so it keeps its number of pages.
+- Make the résumé longer: balance any added text with shorter or dropped bullets.
 - Change its spelling conventions (US or UK English), capitalization or punctuation style.`;
 
 const base = z.object({

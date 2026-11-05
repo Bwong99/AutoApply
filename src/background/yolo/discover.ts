@@ -1,10 +1,8 @@
 // One discovery cycle: read every source, keep the new postings that fit the user, queue them for applying.
 import { createStorage } from "../../shared/storage";
 import {
-  BOARDS,
   SOURCE_GROUPS,
   type Application,
-  type Board,
   type Listing,
   type QueueItem,
   type QueueSort,
@@ -19,10 +17,12 @@ import {
   glassdoorSearch,
   indeedHost,
   indeedSearch,
+  jobrightFeed,
   linkedinSearch,
   parseFeed,
   parseGlassdoor,
   parseIndeed,
+  parseJobrightFeed,
   parseLinkedIn,
   type Link,
 } from "./sources";
@@ -31,14 +31,28 @@ const store = createStorage("background");
 const SEEN_DAYS = 90;
 /** Postings checked by the AI per cycle; the rest wait for the next one. */
 const BATCH = 60;
+/** LinkedIn search pages read per search when `want` asks for more: ~20 fast pages draw a 429, 40 a second apart don't (live, 2026-11-03). */
+const LINKEDIN_PAGES = 30;
+const LINKEDIN_GAP_MS = 1000;
+/** Jobright recommendation pages of 20 (~240 kB each) read per cycle; the feed held 160 jobs (live, 2026-11-03). */
+const JOBRIGHT_PAGES = 15;
 
 export interface DiscoverDeps {
   yolo: Yolo;
   fetch: Fetcher;
   /** Renders a page in the hidden host and reads its links; absent while an application is running there. */
-  scrape?: (url: string) => Promise<Link[]>;
+  scrape?: (url: string) => Promise<Link[] | null>;
   /** Indexes of the listings the AI judges a match; absent = keep all. */
   relevance?: (items: Listing[]) => Promise<Set<number>>;
+  /**
+   * Jobs the batch still has room for: LinkedIn is paged until that many fit, counting the lists read before it and
+   * LinkedIn's postings that have an employer posting. Absent = its first page only.
+   */
+  want?: number;
+  /** Told whether Jobright's feed answered as signed out, each time it's read. */
+  jobrightSignedOut?: (out: boolean) => unknown;
+  /** Told whether Indeed's search showed a bot check instead of results, each time it's read. */
+  indeedBlocked?: (blocked: boolean) => unknown;
   now?: number;
 }
 
@@ -56,7 +70,11 @@ export const RETRY = Number.MAX_SAFE_INTEGER;
 // careerSite's sources: its ATS APIs' names, or "careers" for a rendered page.
 const CAREERS = new Set(["careers", "greenhouse", "lever", "ashby", "smartrecruiters", "workday"]);
 const groupOf = (source: string): SourceGroup =>
-  (BOARDS as readonly string[]).includes(source) ? (source as Board) : CAREERS.has(source) ? "careers" : "feeds";
+  (SOURCE_GROUPS as readonly string[]).includes(source)
+    ? (source as SourceGroup)
+    : CAREERS.has(source)
+      ? "careers"
+      : "feeds";
 
 type Ranked = Pick<Listing, "source" | "postedAt"> & { addedAt?: number };
 
@@ -108,8 +126,8 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     }
   };
 
-  for (const url of y.feeds)
-    await safely(async () => {
+  const readFeed = (url: string, parse: (body: string) => Listing[]) =>
+    safely(async () => {
       // Conditional: GitHub answers 304 while the file is unchanged (most polls), so only changes are downloaded.
       const c = s.feedCache[url];
       const r = await d.fetch(url, {
@@ -120,24 +138,80 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       });
       if (r.status === 304 || !r.ok) return [];
       s.feedCache[url] = { etag: r.headers.get("etag") ?? "", modified: r.headers.get("last-modified") ?? "" };
-      return parseFeed(await r.text(), sourceName(url));
+      return parse(await r.text());
+    });
+  for (const url of y.feeds) await readFeed(url, (body) => parseFeed(body, sourceName(url)));
+  if (y.jobright.length)
+    await safely(async () => {
+      const out: Listing[] = [];
+      for (let page = 0; page < JOBRIGHT_PAGES; page++) {
+        // The user's cookies: the feed is theirs, filtered by their Jobright preferences.
+        const r = await d.fetch(jobrightFeed(page), { credentials: "include" });
+        if (page === 0) await d.jobrightSignedOut?.(r.status === 401);
+        const list = r.ok ? ((await r.json()) as { result?: { jobList?: [] } }).result?.jobList : undefined;
+        if (!list?.length) break;
+        out.push(...parseJobrightFeed(list));
+      }
+      return out;
     });
 
+  await loadPlaces();
+  const seen = s.yoloSeen;
+  const queued = new Set(s.yoloQueue.map((i) => i.key));
+  // What the pass below keeps before the AI and employer lookups, so LinkedIn stops paging once there's enough.
+  const fits = (l: Listing, key = jobKey(l.url), alt = altKey(l.company, l.title)) =>
+    !seen[key] &&
+    !seen[alt] &&
+    !queued.has(key) &&
+    !rejectReason(l, y, now) &&
+    !applied(s.applications, key, alt, y.reapplyManual);
+  const boards = new Map<string, Listing[] | null>();
+  // LinkedIn shows logged-out visitors no way to the employer, so each fitting card is looked up on the employer's own
+  // board while paging: about 3 in 4 have none (live, 2026-11-03), and only those that do count toward `want`.
+  const linkedin = new Map<string, string | null>();
+  /** The employer postings found that way, new to YOLO: what `want` counts. */
+  const linkedinOwn = new Set<string>();
+  let linkedinAt = 0;
+  // What the lists read above already supply, a posting counted once across them.
+  const ahead = new Set(found.filter((l) => fits(l)).map((l) => altKey(l.company, l.title))).size;
   const days = y.postedWithinDays;
   for (const q of y.queries)
     for (const loc of y.locations.length ? y.locations : [""]) {
       if (y.boards.includes("linkedin"))
-        await safely(async () => {
-          const r = await d.fetch(linkedinSearch(q, loc, days), { credentials: "omit" });
-          return r.ok ? parseLinkedIn(await r.text()) : [];
-        });
+        for (let page = 0; page < (d.want ? LINKEDIN_PAGES : 1); page++) {
+          let more = false;
+          await safely(async () => {
+            const wait = linkedinAt + LINKEDIN_GAP_MS - Date.now();
+            if (linkedinAt && wait > 0) await new Promise((r) => setTimeout(r, wait));
+            linkedinAt = Date.now();
+            const r = await d.fetch(linkedinSearch(q, loc, days, page * 10), { credentials: "omit" });
+            const jobs = r.ok ? parseLinkedIn(await r.text()) : [];
+            for (const l of jobs) {
+              const key = jobKey(l.url);
+              if (linkedin.has(key) || !fits(l, key)) continue;
+              const own = await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
+              linkedin.set(key, own);
+              if (own && !seen[jobKey(own)]) linkedinOwn.add(jobKey(own));
+            }
+            // An empty page is the end of the results; a failed one (429) means stop asking. Pages already seen add
+            // nothing, so a later search for the same batch reads on past them.
+            more = jobs.length > 0 && ahead + linkedinOwn.size < (d.want ?? 0);
+            return jobs;
+          });
+          if (!more) break;
+        }
       if (y.boards.includes("glassdoor"))
         await safely(async () => {
           const r = await d.fetch(glassdoorSearch(q, loc, days), { credentials: "omit" });
           return r.ok ? parseGlassdoor(await r.text(), now) : [];
         });
       if (y.boards.includes("indeed") && d.scrape)
-        await safely(async () => parseIndeed(await d.scrape!(indeedSearch(q, loc, days)), indeedHost(loc)));
+        await safely(async () => {
+          // Cloudflare guards Indeed's search; YOLO never solves a bot check, it tells the user instead.
+          const links = await d.scrape!(indeedSearch(q, loc, days));
+          await d.indeedBlocked?.(!links);
+          return parseIndeed(links ?? [], indeedHost(loc));
+        });
     }
 
   for (const url of y.careerSites) {
@@ -150,9 +224,6 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   }
 
   // New postings that fit, each looked at once.
-  await loadPlaces();
-  const seen = s.yoloSeen;
-  const queued = new Set(s.yoloQueue.map((i) => i.key));
   const fresh: Listing[] = [];
   const keys = new Set<string>();
   for (const l of found) {
@@ -164,13 +235,17 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     keys.add(alt);
     // Not marked seen: a posting the filters reject now may fit after the user changes them.
     if (rejectReason(l, y, now) || applied(s.applications, key, alt, y.reapplyManual)) continue;
+    // Looked up while paging and not on the employer's board: done with, without taking a place in the AI's batch.
+    if (l.source === "linkedin" && !linkedin.get(key)) {
+      seen[key] = seen[alt] = now;
+      continue;
+    }
     fresh.push(l);
   }
   // In queue order, so the jobs the user ranks first aren't the ones left for the next cycle.
   const batch = inQueueOrder(fresh, y, now).slice(0, BATCH);
   const keep = d.relevance && batch.length ? await d.relevance(batch) : null;
 
-  const boards = new Map<string, Listing[] | null>();
   const items: QueueItem[] = [];
   for (const [i, l] of batch.entries()) {
     const key = jobKey(l.url);
@@ -181,7 +256,10 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     // Boards: apply on the employer's own posting. LinkedIn shows logged-out visitors no way there; Glassdoor and
     // Indeed pages have an "Apply on company site" button the run can click instead.
     if (["linkedin", "glassdoor", "indeed"].includes(l.source)) {
-      const own = await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
+      const own =
+        l.source === "linkedin"
+          ? linkedin.get(key)
+          : await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
       if (own) url = own;
       else if (l.source === "linkedin") continue;
     }

@@ -128,7 +128,7 @@ const companyOf = (host: string) => {
  */
 export async function careerSite(
   f: Fetcher,
-  scrape: (url: string) => Promise<Link[]>,
+  scrape: (url: string) => Promise<Link[] | null>,
   raw: string,
   query: string,
 ): Promise<Listing[]> {
@@ -136,11 +136,11 @@ export async function careerSite(
   const b = boardOf(url);
   if (b) return (await boardJobs(f, b, b.slug, query)) ?? [];
   const host = new URL(url).hostname;
-  return jobLinks(await scrape(url), companyOf(host), url);
+  return jobLinks((await scrape(url)) ?? [], companyOf(host), url);
 }
 
 const RE_JOB_LINK =
-  /\/(jobs?|positions?|openings?|requisitions?|vacanc\w*|careers?\/job)\/[^?#]*\d|jobdetail|[?&](job_?id|gh_jid|jobreq|req_?id)=|\/j\/[A-Z0-9]{6,}/i;
+  /\/(jobs?|positions?|openings?|requisitions?|vacanc\w*|careers?\/job)\/[^?#]*\d|jobdetail|[?&](job_?id|gh_jid|jobreq|req_?id)=|\/j\/[A-Z0-9]{6,}|\.recruitee\.com\/o\/[^/?#]/i;
 const RE_NOT_TITLE = /^(apply( now)?|learn more|view( job| details)?|see (details|more)|read more|details|more)$/i;
 
 /** Job-detail links on a rendered career page: title = link text, location = the card's next line. */

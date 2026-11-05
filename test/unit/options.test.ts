@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { installChromeMock } from "./chromeMock";
 installChromeMock();
-const { completeness, leaves, setPath, getPath } = await import("../../src/options/store");
+const { completeness, leaves, setPath, getPath, newEntries } = await import("../../src/options/store");
 const { statusText } = await import("../../src/popup/Popup");
 const { emptyProfile } = await import("../../src/shared/profileSchema");
 
@@ -23,6 +23,19 @@ describe("options helpers", () => {
     ]);
     setPath(o, "a.b", "y");
     expect(getPath(o, "a.b")).toBe("y");
+  });
+  it("newEntries keeps only résumé list entries the profile lacks", () => {
+    const have = [{ name: "AutoApply", description: "mine" }];
+    const found = [
+      { name: "auto-apply", description: "résumé" },
+      { name: "Chess AI" },
+      { name: "Chess AI" },
+      { name: "" },
+    ];
+    expect(newEntries("projects", have, found)).toEqual([{ name: "Chess AI" }]);
+    expect(newEntries("skills.technical", ["TypeScript"], ["typescript", "Go"])).toEqual(["Go"]);
+    const job = { company: "Acme", title: "SWE" };
+    expect(newEntries("experience", [job], [job, { ...job, title: "Intern" }])).toEqual([{ ...job, title: "Intern" }]);
   });
 });
 

@@ -22,6 +22,7 @@ import {
   regionCode,
   regionCountry,
 } from "../../shared/constants";
+import { plainDashes, RE_AI_TELL } from "../../shared/injection";
 import { normalize } from "../../shared/normalize";
 import { emptyProfile } from "../../shared/profileSchema";
 import { todayIso } from "../../shared/time";
@@ -2122,7 +2123,15 @@ async function guessFlagged(
       },
       { model: ctx.model, fallback: ctx.fallback },
     );
-    const raw = r.data.decisions.map((d) => ({ ...d, confidence: "medium" as const, sources: [GUESS] }));
+    // A made-up answer that reads as an AI's ("As an AI, I…") stays unanswered; its em dashes are typed as a person does.
+    const raw = r.data.decisions
+      .filter((d) => !(d.text && RE_AI_TELL.test(d.text)))
+      .map((d) => ({
+        ...d,
+        ...(d.text ? { text: plainDashes(d.text) } : {}),
+        confidence: "medium" as const,
+        sources: [GUESS],
+      }));
     const guesses = new Map(validateDecisions(flagged, raw).map((d) => [d.fieldId, d]));
     return decisions.map((d) => {
       const g = guesses.get(d.fieldId);

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { toBase64 } from "../../shared/base64";
 import type { DocumentMeta } from "../../shared/types";
-import { TextInput } from "../components/controls";
 import { Prefill } from "../components/Prefill";
-import { ResumeModes, TailorPrompt, TailorUpload } from "../components/ResumeTailoring";
+import { downloadDoc, ResumeModes, TailorPrompt, TailorUpload } from "../components/ResumeTailoring";
 import { pdfText } from "../pdf";
 import { markSaved, save, store, useProfile, useStored } from "../store";
 
@@ -43,6 +42,88 @@ export function useResumeTexts() {
     })();
     return () => void (live = false);
   }, [docs, texts]);
+}
+
+/** The AI tailoring résumé's text, from its compiled PDF rather than the LaTeX source: same facts, far fewer tokens. */
+async function tailorText(): Promise<string> {
+  const b64 = await store.getDoc("tailor-pdf");
+  return b64 ? pdfText(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer).catch(() => "") : "";
+}
+
+/** Replaces the editable résumé text with a résumé's own text; a second click confirms discarding what's there. */
+function ReloadResumeText() {
+  const [profile, update] = useProfile();
+  const primary = useStored("documentsIndex")?.find((d) => d.isPrimaryResume);
+  const tailor = useStored("tailorResume");
+  const [pick, setPick] = useState<"pdf" | "tex" | null>(null);
+  const [confirm, setConfirm] = useState<"pdf" | "tex" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  if (!profile || (!primary && !tailor)) return null;
+  // Re-derived each render, so removing either file never leaves a stale pick.
+  const source = tailor && (pick === "tex" || !primary) ? "tex" : "pdf";
+
+  const reload = async () => {
+    setErr("");
+    if (profile.resumeText.trim() && confirm !== source) return setConfirm(source);
+    setConfirm(null);
+    setBusy(true);
+    const text = await (source === "pdf" ? docText(primary!) : tailorText()).catch(() => "");
+    setBusy(false);
+    // Never swap the user's text for nothing (e.g. a scanned PDF with no text layer).
+    if (!text.trim()) return setErr("Couldn’t read any text from that résumé.");
+    update((p) => void (p.resumeText = text));
+  };
+
+  const buttons = (
+    <>
+      <button type="button" class="btn small" onClick={() => void reload()}>
+        {confirm === source ? "Replace the text below? Click again" : tailor ? "Reload" : "Reload from primary résumé"}
+      </button>
+      {confirm && (
+        <button type="button" class="btn small" onClick={() => setConfirm(null)}>
+          Cancel
+        </button>
+      )}
+    </>
+  );
+
+  return (
+    <>
+      <fieldset class="field" disabled={busy}>
+        {tailor ? (
+          <>
+            <legend>Extract from</legend>
+            <p class="help above">
+              {source === "pdf"
+                ? "Reload uses the text of your primary résumé."
+                : "Reload uses the text of your .tex résumé as uploaded, before any tailoring."}
+            </p>
+            <div class="row">
+              <label class="inline">
+                <input
+                  type="radio"
+                  name="reload-source"
+                  checked={source === "pdf"}
+                  disabled={!primary}
+                  onChange={() => setPick("pdf")}
+                />
+                Primary résumé (.pdf) <span class="muted">{primary ? `· ${primary.label}` : "· none chosen"}</span>
+              </label>
+              <label class="inline">
+                <input type="radio" name="reload-source" checked={source === "tex"} onChange={() => setPick("tex")} />
+                AI tailoring résumé (.tex) <span class="muted">· {tailor.fileName}</span>
+              </label>
+              {buttons}
+            </div>
+          </>
+        ) : (
+          <div class="row">{buttons}</div>
+        )}
+      </fieldset>
+      {err && <p class="err">{err}</p>}
+    </>
+  );
 }
 
 export function DocumentUpload() {
@@ -208,7 +289,14 @@ export function Documents() {
                     <span class="muted">PDF résumés only</span>
                   )}
                 </td>
-                <td>
+                <td class="doc-actions">
+                  <button
+                    type="button"
+                    class="btn small"
+                    onClick={() => void downloadDoc(d.id, d.fileName, d.mimeType)}
+                  >
+                    Download
+                  </button>
                   <button type="button" class="btn small danger" onClick={() => void remove(d.id)}>
                     Delete
                   </button>
@@ -223,13 +311,19 @@ export function Documents() {
       {profile && (
         <div class="panel-box">
           <h2>Résumé text</h2>
-          <TextInput
-            label="Extracted text (editable)"
-            help="Sent to the AI as context for answers and essays. Edit it if extraction garbled anything."
-            multiline
-            value={profile.resumeText}
-            onInput={(v) => update((p) => void (p.resumeText = v))}
-          />
+          <div class="field">
+            <label for="resume-text">Extracted text (editable)</label>
+            <p class="help above">
+              Sent to the AI as context for answers and essays. Edit it if extraction garbled anything.
+            </p>
+            <ReloadResumeText />
+            <textarea
+              id="resume-text"
+              rows={5}
+              value={profile.resumeText}
+              onInput={(e) => update((p) => void (p.resumeText = e.currentTarget.value))}
+            />
+          </div>
           <Prefill />
         </div>
       )}

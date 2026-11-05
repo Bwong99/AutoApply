@@ -167,6 +167,10 @@ main {
   color: var(--muted);
   font-size: 12px;
 }
+/* Help under its label, above the control. */
+.help.above {
+  margin: 0 0 6px;
+}
 input,
 select,
 textarea {
@@ -336,6 +340,13 @@ label.inline {
 }
 .row-actions .btn + .btn {
   margin-left: 60px;
+}
+.doc-actions {
+  white-space: nowrap;
+}
+/* Wide gap so Download and Delete aren't misclicked for each other. */
+.doc-actions .btn + .btn {
+  margin-left: 32px;
 }
 .table th .btn.small {
   padding: 6px 12px;

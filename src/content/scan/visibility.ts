@@ -15,6 +15,26 @@ export function isVisible(el: Element): boolean {
   return !(r.right + scrollX < -1000 || r.bottom + scrollY < -1000);
 }
 
+/**
+ * A box that passes isVisible yet no one could see or type in: (nearly) zero-size, left of or above the page, or
+ * clipped away by an overflow-hidden ancestor. Bot traps (honeypots) hide their inputs this way.
+ */
+export function concealed(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  if (r.width <= 1 || r.height <= 1 || r.right + scrollX <= 0 || r.bottom + scrollY <= 0) return true;
+  const hides = (o: string) => o === "hidden" || o === "clip";
+  for (let n = parentOf(el); n; n = parentOf(n)) {
+    const cs = getComputedStyle(n);
+    const x = hides(cs.overflowX);
+    const y = hides(cs.overflowY);
+    if (!x && !y) continue;
+    const p = n.getBoundingClientRect();
+    if (x && Math.min(r.right, p.right) - Math.max(r.left, p.left) <= 1) return true;
+    if (y && Math.min(r.bottom, p.bottom) - Math.max(r.top, p.top) <= 1) return true;
+  }
+  return false;
+}
+
 /** Parent element, crossing shadow-root boundaries. */
 export function parentOf(n: Element): Element | null {
   if (n.parentElement) return n.parentElement;

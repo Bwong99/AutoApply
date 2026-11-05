@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { setBody, stubLayout } from "./dom";
-import { captchaShown, embeddedForm, pageFacts } from "../../src/content/yolo/classify";
+import { botWall, captchaShown, embeddedForm, pageFacts } from "../../src/content/yolo/classify";
+import { cardText } from "../../src/content/yolo/driver";
 import { confirmation, confirmFirst, kindOf, verifyFailed } from "../../src/background/yolo/classify";
 
 const classify = (fields: number, hidden = false, requiredFields = 0) =>
   kindOf(pageFacts({ fields, requiredFields }), hidden);
 import { findApply, findNext, findSubmit, validationErrors } from "../../src/content/yolo/nav";
 import { handleAuth, siteKey } from "../../src/content/yolo/auth";
+import { realFor, setGraded, setRealMode } from "../../src/content/yolo/real";
 
 beforeAll(stubLayout);
 
@@ -102,6 +104,34 @@ describe("YOLO page kinds", () => {
     expect(verifyFailed(facts(`<p>Your email could not be verified.</p>`))).toBe(true);
   });
 
+  it("reads a link's result card past a title too long to be its own card", () => {
+    // Indeed's card, live: the title link sits in an h2 inside the card's text.
+    const card = (title: string) => (
+      setBody(
+        `<div class="card"><div><h2><a href="/rc/clk?jk=1">${title}</a></h2><div>Ciena</div><div>Quebec City, QC</div></div><div>$25.00 an hour · Internship</div></div>`,
+      ),
+      cardText(document.querySelector("a")!)
+    );
+    expect(card("Stagiaire en développement logiciel - Software developer Intern/Co-op")).toContain("Ciena");
+    expect(card("Software Developer Intern, Some Long Team Name Here (Winter 2027)")).toContain("Quebec City");
+    expect(card("Software Intern")).toContain("Ciena");
+  });
+
+  it("tells a bot check standing in for a scraped page from the page itself", () => {
+    const page = (title: string, body: string) => ((document.title = title), setBody(body), botWall());
+    // Live shapes: Indeed's hidden-frame block, and Cloudflare's interstitial in a tab.
+    expect(
+      page("Blocked - Indeed.com", "<h1>Request Blocked</h1><p>Your Ray ID for this request is a551aa1e</p>"),
+    ).toBe(true);
+    expect(page("Just a moment...", "<h1>Additional Verification Required</h1>")).toBe(true);
+    expect(page("Security Check - Indeed.com", "<p>Checking</p>")).toBe(true);
+    expect(page("x", "<p>Your Ray ID for this request is 8f2c</p>")).toBe(true);
+    expect(page("100 Software Intern Jobs in Canada | Indeed", "<a href='/rc/clk?jk=1'>Software Intern</a>")).toBe(
+      false,
+    );
+    expect(page("Unblocked Games Developer Intern - Acme Careers", "<h1>Unblocked Games</h1>")).toBe(false);
+  });
+
   it("finds a visible CAPTCHA challenge, never the invisible score badge", () => {
     setBody(`<iframe src="https://www.recaptcha.net/recaptcha/enterprise/anchor?ar=1&k=x&size=invisible"></iframe>`);
     expect(captchaShown()).toBe(false);
@@ -128,6 +158,46 @@ describe("YOLO page kinds", () => {
     // Once solved, the widget stays but its response token is set.
     document.body.insertAdjacentHTML("beforeend", `<textarea name="g-recaptcha-response">tok</textarea>`);
     expect(captchaShown()).toBe(false);
+  });
+
+  it("hands a step graded by an invisible score check from the hidden frame to a tab", () => {
+    const form = `<h2>Apply</h2><input><input><input><button type="submit">Submit application</button>`;
+    setBody(`${form}<script src="https://www.google.com/recaptcha/enterprise.js?render=k"></script>`);
+    expect(classify(3, true)).toBe("blocked");
+    expect(classify(3, false)).toBe("form"); // a tab submits as it is
+    setBody(
+      `${form}<iframe src="https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox-invisible"></iframe>`,
+    );
+    expect(classify(3, true)).toBe("blocked");
+    setBody(form);
+    expect(classify(3, true)).toBe("form");
+    // Already sent: never retried, which would apply twice.
+    setBody(`<h1>Thank you for applying!</h1><script src="https://www.recaptcha.net/recaptcha/api.js"></script>`);
+    expect(classify(0, true)).toBe("success");
+  });
+
+  it("hands a page whose bot-detection service set its cookie from the hidden frame to a tab", () => {
+    setBody(`<h2>Apply</h2><input><input><input><button type="submit">Submit application</button>`);
+    document.cookie = "_abck=x";
+    expect(classify(3, true)).toBe("blocked");
+    document.cookie = "_abck=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    document.cookie = "_pxhd=x";
+    expect(classify(3, true)).toBe("blocked");
+    document.cookie = "_pxhd=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    expect(classify(3, true)).toBe("form");
+  });
+
+  it("uses real input only as set, and only on a graded page", () => {
+    setRealMode("clicks");
+    setGraded(true);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([true, false]);
+    setRealMode("both");
+    expect([realFor("clicks"), realFor("typing")]).toEqual([true, true]);
+    setGraded(false);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([false, false]);
+    setRealMode("off");
+    setGraded(true);
+    expect([realFor("clicks"), realFor("typing")]).toEqual([false, false]);
   });
 
   it("recognizes DataDome's full-page CAPTCHA frame", () => {

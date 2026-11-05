@@ -152,3 +152,12 @@ describe("Upload résumés", () => {
     expect(resumeProblem("tailor", [], true)).toBe("");
   });
 });
+
+describe("hidden résumé text", () => {
+  it("drops an edit that hides keywords from readers, beyond what the line had", () => {
+    const r = applyOps(jake, {
+      edits: [{ id: "S2.E1.B1", text: "\resumeItem{Developed a REST API \tiny{kubernetes rust golang}}" }],
+    });
+    expect(r).toMatchObject({ applied: 0, dropped: 1 });
+  });
+});

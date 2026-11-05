@@ -13,7 +13,7 @@ export const BOARDS = ["linkedin", "indeed", "glassdoor"] as const;
 export type Board = (typeof BOARDS)[number];
 
 /** Where a queued job was found, as the queue order ranks it. */
-export const SOURCE_GROUPS = ["careers", "feeds", ...BOARDS] as const;
+export const SOURCE_GROUPS = ["careers", "feeds", ...BOARDS, "jobright"] as const;
 export type SourceGroup = (typeof SOURCE_GROUPS)[number];
 /** How queued jobs are ordered (within a source, when sources are ranked). */
 export const QUEUE_SORTS = ["newest", "oldest", "foundFirst", "foundLast", "random"] as const;
@@ -21,6 +21,8 @@ export type QueueSort = (typeof QUEUE_SORTS)[number];
 
 /** The most YOLO applies to in one batch, and so the most applications' debug logs worth keeping. */
 export const MAX_BATCH_APPLICATIONS = 500;
+
+export const REAL_INPUT = ["off", "clicks", "typing", "both"] as const;
 
 const base = z.object({
   enabled: b(false),
@@ -37,11 +39,17 @@ const base = z.object({
   aiRelevanceCheck: b(true),
   boards: z.array(z.enum(BOARDS)).catch(["linkedin", "indeed", "glassdoor"]),
   feeds: strs([SIMPLIFY_FEED]),
+  /** Non-empty = read the signed-in user's Jobright recommendations. Its values are unused (once Jobright's GitHub lists). */
+  jobright: strs(),
   careerSites: strs(),
   queueSort: z.enum(QUEUE_SORTS).catch("newest"),
   /** Ranks jobs by `sourceOrder` before `queueSort`. */
   queueBySource: b(false),
-  sourceOrder: z.array(z.enum(SOURCE_GROUPS)).catch([...SOURCE_GROUPS]),
+  // Groups added since the order was saved go last, so they can be moved.
+  sourceOrder: z
+    .array(z.enum(SOURCE_GROUPS))
+    .catch([...SOURCE_GROUPS])
+    .transform((o) => [...o, ...SOURCE_GROUPS.filter((g) => !o.includes(g))]),
   email: z.string().catch(""),
   gmailClientId: z.string().catch(""),
   /** The OAuth client's secret: Google's token endpoint asks a Web application client for it (yolo/gmail.ts). */
@@ -53,6 +61,11 @@ const base = z.object({
   reapplyManual: b(false),
   warnOnYoloApplied: b(true),
   tabFallback: b(true),
+  /**
+   * On pages a bot check grades, in a tab: which of the run's input goes through Chrome's debugger as a person's
+   * (trusted) events; any failure falls back to script input.
+   */
+  realInput: z.enum(REAL_INPUT).catch("off"),
   /** Required cover-letter uploads always get one written; this extends it to optional ones. */
   optionalCoverLetters: b(false),
   /** Résumé upload fields: the best-fitting résumé variant, or the LaTeX résumé tailored by the AI. Never left blank. */
@@ -127,6 +140,10 @@ export const YoloStateSchema = z.object({
   gmailNeedsAuth: b(false),
   /** Gmail last answered as signed in (Connect, or the options page's silent check). */
   gmailConnected: b(false),
+  /** Jobright's feed last answered 401: the user isn't signed in to jobright.ai in this browser. */
+  jobrightSignedOut: b(false),
+  /** Indeed's search last showed a bot check (Cloudflare) instead of results. */
+  indeedBlocked: b(false),
 });
 export type YoloState = z.infer<typeof YoloStateSchema>;
 
@@ -141,4 +158,6 @@ export interface YoloStatus {
   nextCheckAt: number | null;
   running: string | null;
   paused: string;
+  /** Sources YOLO is on for but can't read right now, for the user to tend to (empty while YOLO is off). */
+  warnings: string[];
 }

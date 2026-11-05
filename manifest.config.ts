@@ -42,6 +42,8 @@ export default defineManifest({
     "tabGroups",
     "notifications",
     "identity",
+    // Real clicks and keys for YOLO on bot-checked pages (background/yolo/realInput.ts). Chrome refuses it as optional.
+    "debugger",
   ],
   // Claude through the user's own Claude Code (background/claude/bridge.ts); asked for only when chosen.
   optional_permissions: ["nativeMessaging"],

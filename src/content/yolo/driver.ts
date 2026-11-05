@@ -9,7 +9,9 @@ import { sleep, waitFor } from "../fill/events";
 import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
-import { captchaShown, embeddedForm, pageFacts, pageText } from "./classify";
+import { botWall, captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
+import { IN_HOST } from "./frame";
+import { realFor, realPress, setGraded, setRealMode } from "./real";
 import {
   alertText,
   findApply,
@@ -59,6 +61,15 @@ const RE_EASY_APPLY = /easily apply|easy apply|indeed apply|apply with (indeed|l
 /** The page's own timers run unthrottled while this is set (pageTimers.ts): a run waits on them between steps. */
 const busy = (on: boolean) => document.dispatchEvent(new Event(on ? "autoapply-fill-start" : "autoapply-fill-end"));
 
+/**
+ * Holds a final Submit until the page has been open about as long as a person filling it would take: 3 s a field,
+ * 20–90 s. A plain timer: nothing runs meanwhile, and it keeps no service worker awake.
+ */
+async function dwell(fields: number) {
+  const ms = Math.min(90_000, Math.max(20_000, fields * 3000)) - performance.now();
+  if (ms > 0) await new Promise((r) => setTimeout(r, ms));
+}
+
 /** Loaded, then no DOM change for 800 ms (or 8 s at most): single-page apps render their next step after load. */
 async function settle(maxMs = 8000) {
   await waitFor(() => document.readyState === "complete", 15_000);
@@ -77,17 +88,23 @@ async function changed(before: string, ms: number): Promise<boolean> {
   return !!(await waitFor(() => snapshot() !== before || validationErrors().length > 0 || captchaShown(), ms));
 }
 
+/**
+ * The result card around a link: its nearest ancestor with text beyond the link's own. A long title is never its own
+ * card, which lost company and location for Indeed titles past 60 characters (live, 2026-11-04).
+ */
+export function cardText(a: HTMLElement): string {
+  const min = Math.max(60, (a.innerText ?? "").length + 20);
+  let n: HTMLElement | null = a;
+  for (let i = 0; i < 6 && n; i++, n = n.parentElement)
+    if ((n.innerText ?? "").length > min) return n.innerText.slice(0, 600);
+  return a.innerText;
+}
+
 function scrapeLinks() {
-  const card = (a: HTMLElement) => {
-    let n: HTMLElement | null = a;
-    for (let i = 0; i < 6 && n; i++, n = n.parentElement)
-      if ((n.innerText ?? "").length > 60) return n.innerText.slice(0, 600);
-    return a.innerText;
-  };
   return (deepQueryAll("a[href]") as HTMLAnchorElement[])
     .filter((a) => /^https?:/.test(a.href) && isVisible(a))
     .slice(0, 800)
-    .map((a) => ({ href: a.href, text: collapse(a.innerText || a.textContent || ""), card: card(a) }));
+    .map((a) => ({ href: a.href, text: collapse(a.innerText || a.textContent || ""), card: cardText(a) }));
 }
 
 let driving = false;
@@ -103,6 +120,7 @@ export async function drive(deps: DriverDeps) {
   driving = true;
   const hello = await send({ type: "YOLO_HELLO", url: location.href }).catch(() => null);
   if (!hello) return void (driving = false);
+  setRealMode(hello.realInput);
   const result = (r: YoloResult) => void send({ type: "YOLO_RESULT", result: r }).catch(() => undefined);
   // The fill pipeline marks its own end; the run is still working after it.
   const fill = () => deps.fill().finally(() => busy(true));
@@ -111,7 +129,7 @@ export async function drive(deps: DriverDeps) {
     if (hello.mode === "scrape") {
       await settle();
       await sleep(1500); // result lists often render after the page goes quiet
-      return result({ status: "scraped", links: scrapeLinks() });
+      return result({ status: "scraped", links: scrapeLinks(), walled: botWall() });
     }
     if (hello.posting) await deps.readPosting(hello.posting);
     let refills = 0;
@@ -124,6 +142,7 @@ export async function drive(deps: DriverDeps) {
       }
       await settle();
       const facts = pageFacts(deps.fieldStats());
+      setGraded(facts.scored);
       const step = await send({
         type: "YOLO_STEP",
         facts,
@@ -249,9 +268,16 @@ export async function drive(deps: DriverDeps) {
                 .map((g) => `${g.q} = ${g.a}`)
                 .join("\n")}`,
             );
+          // A score check loaded during the fill: the step is classified again, so the hidden frame hands it to a tab.
+          if (!next && IN_HOST && !facts.scored && scoreCheck()) continue;
           // Invisible CAPTCHAs score the page as it submits: it gets its own built-ins back first (pageTimers.ts).
           if (!next) busy(false);
-          press(b);
+          // They weigh time on the page too: a form sent seconds after it loaded reads as a bot's.
+          // A check the fill loaded counts too (the frame case went back to be classified above).
+          const graded = scoreCheck();
+          setGraded(graded);
+          if (!next && graded) await dwell(facts.fields);
+          if (!(realFor("clicks") && (await realPress(b)))) press(b);
           if (!(await changed(before, 20_000))) continue;
           const errors = validationErrors();
           if (errors.length) {

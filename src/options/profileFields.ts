@@ -1,5 +1,11 @@
 // Declarative layout of the profile editor: one sub-page per top-level §7 group.
-import { EducationSchema, ExperienceSchema, ProjectSchema, WorkAuthEntrySchema } from "../shared/profileSchema";
+import {
+  EducationSchema,
+  ExperienceSchema,
+  ExtracurricularSchema,
+  ProjectSchema,
+  WorkAuthEntrySchema,
+} from "../shared/profileSchema";
 
 export type FieldSpec = { path: string; label: string; help: string; extra?: FieldSpec; wide?: true | "full" } & (
   | { k: "text" | "email" | "tel" | "url" | "date" | "month" | "textarea" | "yn" | "ynd" | "tags" | "bool" }
@@ -225,6 +231,33 @@ export const PROFILE_GROUPS: GroupSpec[] = [
           [t("name", "Name", "Project name."), t("url", "URL", "Link to code or demo.", "url")],
           t("tech", "Tech", "Languages and tools. Press Enter after each.", "tags"),
           { ...t("description", "Description", "What it does and your role.", "textarea"), wide: true },
+        ],
+      },
+    ],
+  },
+  {
+    id: "extracurriculars",
+    title: "Extracurriculars",
+    intro: "Clubs, teams, volunteering and other activities the AI may mention in essays.",
+    items: [
+      {
+        card: true,
+        path: "extracurriculars",
+        title: "Activity",
+        make: () => ExtracurricularSchema.parse({}),
+        fields: [
+          t("role", "Role", "e.g. President, Member, Volunteer."),
+          t("organization", "Organization", "Club, team or group name."),
+          t("location", "Location", "City, region."),
+          t("startDate", "Start", "Start month.", "month"),
+          {
+            ...t("endDate", "End", "End month (leave empty if ongoing).", "month"),
+            extra: t("current", "I'm currently involved", "", "bool"),
+          },
+          {
+            ...t("description", "Description", "What you did and achieved; essays draw from this.", "textarea"),
+            wide: true,
+          },
         ],
       },
     ],

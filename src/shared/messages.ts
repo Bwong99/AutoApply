@@ -17,7 +17,7 @@ import type {
   Settings,
   TabStatus,
 } from "./types";
-import type { Guess, YoloStatus } from "./yolo";
+import type { Guess, REAL_INPUT, YoloStatus } from "./yolo";
 
 /** What a YOLO driver reads off its page; the background decides what kind of step that is (yolo/classify.ts). */
 export interface PageFacts {
@@ -34,6 +34,11 @@ export interface PageFacts {
   codeInput: boolean;
   /** A visible CAPTCHA challenge. */
   captcha: boolean;
+  /**
+   * A bot check grades what the page submits: an invisible score check (reCAPTCHA, hCaptcha, Turnstile) is loaded, or a
+   * bot-detection service (Akamai, HUMAN, DataDome, Imperva, Kasada) set its cookie.
+   */
+  scored: boolean;
   /** An ATS form in an iframe the run could load on its own. */
   embedded: boolean;
   apply: boolean;
@@ -46,6 +51,9 @@ export interface PageFacts {
   /** A Next / Continue / Submit control. */
   onward: boolean;
 }
+
+/** A pointer moved to (or clicked at) a point, or text typed into the focused box. */
+export type RealOp = { kind: "move" | "click"; x: number; y: number } | { kind: "type"; text: string };
 
 export type StepKind =
   | "captcha"
@@ -68,7 +76,8 @@ export type YoloResult =
   | { status: "submitted"; doneUrl: string; guesses?: Guess[] }
   /** `retryAt`: the AI's quota or usage limit ran out; the job goes back in the queue until then. */
   | { status: "needs" | "failed" | "skipped" | "blocked"; reason: string; guesses?: Guess[]; retryAt?: number }
-  | { status: "scraped"; links: { href: string; text: string }[] };
+  /** `walled`: the page was a bot check (Cloudflare's "Just a moment…"), not the one asked for. */
+  | { status: "scraped"; links: { href: string; text: string }[]; walled?: boolean };
 
 /** Typed message protocol (§17). `C` = content script, `B` = background, `O` = options page. */
 export type Message =
@@ -77,6 +86,8 @@ export type Message =
   | { type: "GET_DOCUMENT"; id: string }
   | { type: "GET_DOC_JOB"; id: string }
   | { type: "SET_JOB_CONTEXT"; ctx: JobContext }
+  /** A job page opened in a new tab: keep the posting of the tab that opened it, while that tab still shows it. */
+  | { type: "BORROW_POSTING" }
   /** Which résumé variant to upload for the tab's job. */
   | { type: "PICK_RESUME" }
   /** `passive`: read on page load, outside a fill. */
@@ -100,6 +111,8 @@ export type Message =
   | { type: "COVER_LETTER_PDF"; question: string }
   /** The résumé to upload for the tab's job in AI tailor mode: tailored, else the untailored fallback. */
   | { type: "TAILOR_RESUME"; groupId: string }
+  /** Real (trusted) input through Chrome's debugger, in CSS pixels of the tab's viewport (background/yolo/realInput.ts). */
+  | { type: "REAL_INPUT"; op: RealOp }
   // B → C (a YOLO run in a tab), B → offscreen host
   | { type: "YOLO_ATTACH" }
   | { type: "YOLO_HOST_NAVIGATE"; url: string }
@@ -132,6 +145,7 @@ export type Message =
   | { type: "TRIGGER_FILL"; force: boolean; rerun?: boolean }
   | { type: "FOCUS_FIELD"; frameId: number; fieldId: string }
   | { type: "TOGGLE_OVERLAY" }
+  | { type: "READ_POSTING" }
   // popup → B
   | { type: "TAB_STATUS"; tabId: number }
   // O → B
@@ -161,6 +175,8 @@ export interface Responses {
   GET_DOCUMENT: { meta: DocumentMeta; base64: string } | null;
   GET_DOC_JOB: JobBrief | null;
   SET_JOB_CONTEXT: Ok;
+  BORROW_POSTING: Ok;
+  READ_POSTING: JobContext | null;
   PICK_RESUME: { id: string | null };
   SET_JOB_PAY: Ok;
   MAP_FIELDS: { decisions: Decision[]; usedModel: string } | Err;
@@ -192,6 +208,8 @@ export interface Responses {
     company: string;
     title: string;
     visible: boolean;
+    /** Real input for pages a bot check grades: "off" in the hidden frame, or without chrome.debugger. */
+    realInput: (typeof REAL_INPUT)[number];
     /** The posting the run went past straight to its form (Lever's /apply): read for its description and pay. */
     posting?: string;
   } | null;
@@ -199,6 +217,8 @@ export interface Responses {
   /** `needs`: a `stop` the user can finish (flagged as automated, or the application was already sent). */
   YOLO_STEP: { kind: StepKind; stop?: string; refused?: boolean; needs?: boolean };
   YOLO_RESULT: Ok;
+  /** `ok` false: not done (no debugger, the user cancelled the debugging bar): the caller uses script input. */
+  REAL_INPUT: { ok: boolean };
   YOLO_ANSWERS: Ok;
   YOLO_CREDENTIAL: { email: string; password: string; created: boolean } | null;
   YOLO_WAIT_EMAIL: { link?: string; code?: string } | Err;

@@ -2,7 +2,10 @@ import { useEffect, useState } from "preact/hooks";
 import { ensureContentScript, isErr, send, type TabStatusResponse } from "../shared/messages";
 import { formatTime } from "../shared/time";
 import type { StatusCounts } from "../shared/types";
+import { createStorage } from "../shared/storage";
 import type { YoloStatus } from "../shared/yolo";
+
+const store = createStorage("popup");
 
 export function statusText(r: TabStatusResponse | null): string {
   const frames = Object.values(r?.status?.frames ?? {});
@@ -54,7 +57,10 @@ export function Popup() {
 
   useEffect(() => {
     void chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => setTab(t ?? null));
-    void send({ type: "YOLO_STATUS" }).then(setYolo);
+    const loadYolo = () => void send({ type: "YOLO_STATUS" }).then(setYolo);
+    loadYolo();
+    // A source check finishing after turn-on lands here, so its warning shows while the popup is open.
+    return store.onChange(["yoloState"], loadYolo);
   }, []);
 
   const setYoloOn = async (enabled: boolean) => {
@@ -120,6 +126,11 @@ export function Popup() {
           <span id="yolo-help" class="help">
             {yolo.searches ? yoloText(yolo) : "Add a job search query to turn it on"}
           </span>
+          {yolo.warnings.map((w) => (
+            <span class="help err" role="alert">
+              {w}
+            </span>
+          ))}
         </button>
       )}
       <div class="links">

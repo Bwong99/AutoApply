@@ -116,12 +116,12 @@ test("waits out a rate limit on a drafted cover letter instead of handing the jo
       : null;
   await queue(sw, `${BASE}yolo-cover-letter.html`);
   await outcome(sw).toBe("submitted");
-  // The debug log names what was uploaded and keeps the letter's text.
-  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  // The debug log names what was uploaded and keeps the letter's PDF.
+  const log = (await storage<{ text: string; files?: { name: string; base64: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
   expect(log.text).toContain("Résumé: None");
-  expect(log.text).toMatch(/Cover letter: Generated \(\w+_Cover_Letter\.txt\)/);
-  expect(log.files).toEqual([{ name: expect.stringMatching(/_Cover_Letter\.txt$/), text: expect.any(String) }]);
-  expect(log.files![0].text.length).toBeGreaterThan(0);
+  expect(log.text).toMatch(/Cover letter: Generated \(\w+_Cover_Letter\.pdf\)/);
+  expect(log.files).toEqual([{ name: expect.stringMatching(/_Cover_Letter\.pdf$/), base64: expect.any(String) }]);
+  expect(atob(log.files![0].base64)).toMatch(/^%PDF/);
 });
 
 test("asks for pay from the posting's range after Apply leads to another page", async ({ sw, page }) => {
@@ -353,12 +353,12 @@ test("AI tailor: uploads the résumé tailored for the job, notes it on the appl
   const [a] = await storage<Application[]>(sw, "applications");
   expect(a.notes).toEqual([expect.stringMatching(/^Résumé tailored: \d+ changes? for this job$/)]);
   expect(mock.calls_("tailor")).toHaveLength(1);
-  // The debug log keeps the tailored .tex, not the PDF.
-  const log = (await storage<{ text: string; files?: { name: string; text: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
-  expect(log.text).toMatch(/Résumé: Tailored \(\w+_Resume\.tex\)/);
+  // The debug log keeps the tailored PDF that was uploaded.
+  const log = (await storage<{ text: string; files?: { name: string; base64: string }[] }[]>(sw, "yoloLogs")).at(-1)!;
+  expect(log.text).toMatch(/Résumé: Tailored \(\w+_Resume\.pdf\)/);
   expect(log.text).toContain("Cover letter: None");
   expect(log.files).toHaveLength(1);
-  expect(log.files![0].text).toContain("\\documentclass");
+  expect(atob(log.files![0].base64)).toMatch(/^%PDF/);
   await expect.poll(() => sw.evaluate(() => chrome.offscreen.hasDocument())).toBe(false);
 });
 
@@ -381,4 +381,34 @@ test("AI tailor without a LaTeX résumé: YOLO refuses to turn on, and a queued 
     })
     .toMatch(/AI tailor is selected for YOLO, but no LaTeX résumé/);
   expect(await storage<Application[] | undefined>(sw, "applications")).toBeFalsy();
+});
+
+test("shows in red in the popup, right after turn-on, a source YOLO can't read", async ({ context, sw, page }) => {
+  await seed(sw, { caps: true });
+  // Signed out of Jobright. (Indeed's check runs in the hidden page, whose requests Playwright can't route.)
+  await context.route("https://jobright.ai/swan/**", (r) =>
+    r.fulfill({ status: 401, contentType: "application/json", body: '{"success":false,"errorCode":41001}' }),
+  );
+  await sw.evaluate(async () => {
+    const { yolo } = await chrome.storage.local.get("yolo");
+    await chrome.storage.local.set({
+      yolo: {
+        ...(yolo as object),
+        queries: ["x"],
+        feeds: [],
+        careerSites: [],
+        boards: [],
+        jobright: ["recommendations"],
+      },
+    });
+  });
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("switch", { name: "YOLO Mode" }).click();
+  // Well before the first batch, 30 s on.
+  await expect(page.getByRole("alert")).toHaveText(["Jobright: sign in to jobright.ai in this browser"], {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("alert")).toHaveClass(/err/);
 });

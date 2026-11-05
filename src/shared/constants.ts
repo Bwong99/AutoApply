@@ -92,7 +92,10 @@ export const RE_COVER_LETTER = /cover letter/i;
 // ---------- Scanning (§11.3, §11.6, §18) ----------
 // Workday's sign-up bot trap: "Enter website. This input is for robots only, do not enter if you're human."
 export const RE_SKIP_LABEL =
-  /captcha|honeypot|leave this (field )?(blank|empty)|for robots|do not (enter|fill)[^.]*human|beecatcher/i;
+  /captcha|honeypot|leave this (field )?(blank|empty)|for robots|do not (enter|fill)[^.]*human|beecatcher|\bif you('re| are) (a )?(ro)?bot\b|\b(ro)?bots? only\b|\bhumans? (should|must) (leave|not)\b|\bif you('re| are) (a )?human,? (leave|do not|don't)\b|\banti-?spam\b|\bspam (trap|check|protection|prevention)\b|\bdo not (fill|enter|type|change|alter|touch) (in )?(this|anything)\b/i;
+/** Honeypot inputs by name or id: Formspree's _gotcha, Akismet's ak_hp_*, Rails' contact_me_by_fax_only, hp_* fields. */
+export const RE_TRAP_NAME =
+  /(^|[\s_-])(_?gotcha|honey_?pot\w*|honey|hpot|hp|ak_hp\w*|bot_?(field|check|trap|catcher)|leave_?(this_?)?(blank|empty)|(contact_me_by_)?fax_?only|no_?spam)(?=[\s_-]|$)/i;
 export const RE_COOKIE_CONTAINER = /cookie|consent-banner|onetrust|gdpr/i;
 export const RE_NEWSLETTER = /newsletter|subscribe/i;
 export const RE_SENSITIVE_LABEL =

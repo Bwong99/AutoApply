@@ -79,6 +79,15 @@ export const ExperienceSchema = o({
   description: s(),
 });
 export const ProjectSchema = o({ name: s(), url: s(), description: s(), tech: strs() });
+export const ExtracurricularSchema = o({
+  role: s(),
+  organization: s(),
+  location: s(),
+  startDate: s(),
+  endDate: s(),
+  current: z.boolean().catch(false),
+  description: s(),
+});
 
 export const ProfileSchema = o({
   personal: o({
@@ -126,6 +135,7 @@ export const ProfileSchema = o({
   }),
   experience: arr(ExperienceSchema),
   projects: arr(ProjectSchema),
+  extracurriculars: arr(ExtracurricularSchema),
   skills: o({
     technical: strs(),
     soft: strs(),
@@ -218,6 +228,7 @@ export function profileExampleJson(): string {
     education: [EducationSchema.parse({})],
     experience: [ExperienceSchema.parse({})],
     projects: [ProjectSchema.parse({})],
+    extracurriculars: [ExtracurricularSchema.parse({})],
   };
   return JSON.stringify(ex);
 }

@@ -19,9 +19,14 @@ const ExportSchema = z.object({
   // their key can't leave this browser.
   yolo: z.unknown().optional(),
   applications: z.unknown().optional(),
-  /** The LaTeX résumé for AI tailoring: its source and untailored PDF (base64), with the documents. */
+  /** The LaTeX résumé for AI tailoring: its source, untailored PDF and optional fallback PDF (base64). */
   tailorResume: z
-    .object({ info: LOCAL_SCHEMAS.tailorResume.unwrap(), tex: z.string(), pdf: z.string() })
+    .object({
+      info: LOCAL_SCHEMAS.tailorResume.unwrap(),
+      tex: z.string(),
+      pdf: z.string(),
+      fallbackPdf: z.string().optional(),
+    })
     .nullable()
     .optional(),
 });
@@ -54,6 +59,7 @@ export function Data() {
       info,
       tex: (await store.getDoc("tailor-tex")) ?? "",
       pdf: (await store.getDoc("tailor-pdf")) ?? "",
+      fallbackPdf: (await store.getDoc("tailor-fallback-pdf")) ?? undefined,
     };
     const data: Export = {
       app: "autoapply",
@@ -111,11 +117,15 @@ export function Data() {
     if (data.tailorResume !== undefined) {
       await store.removeDoc("tailor-tex");
       await store.removeDoc("tailor-pdf");
+      await store.removeDoc("tailor-fallback-pdf");
+      const fallbackPdf = data.tailorResume?.fallbackPdf;
       if (data.tailorResume) {
         await store.setDoc("tailor-tex", data.tailorResume.tex);
         await store.setDoc("tailor-pdf", data.tailorResume.pdf);
+        if (fallbackPdf) await store.setDoc("tailor-fallback-pdf", fallbackPdf);
       }
-      await store.set({ tailorResume: data.tailorResume?.info ?? null });
+      const info = data.tailorResume?.info;
+      await store.set({ tailorResume: info ? { ...info, fallback: fallbackPdf ? info.fallback : null } : null });
     }
     await store.set({ profile: ProfileSchema.parse(data.profile) });
     await save({

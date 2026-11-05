@@ -102,7 +102,7 @@ Each AI request starts `claude -p` once with every tool, MCP server, plugin, hoo
 
 ### Fill in your profile
 
-- **Setup → Upload résumé (PDF)**: it is attached to résumé/CV upload fields automatically, and its text (extracted locally with pdf.js) is given to Gemini as context. **Prefill profile from résumé** proposes values for empty profile fields only; tick what to keep.
+- **Setup → Upload résumé (PDF)**: it is attached to résumé/CV upload fields automatically, and its text (extracted locally with pdf.js) is given to Gemini as context. **Prefill Profile using extracted résumé** proposes values for empty profile fields only; tick what to keep. It reads the editable résumé text in **Documents**; there, **Reload** refills that text from your primary PDF résumé or, with an AI tailoring .tex résumé uploaded, from whichever one you pick.
 - **Profile**: contact details, work authorization per country, education, co-op, experience, projects, skills, preferences, background, referral, self-identification and essay guidance. Every field explains how it is used. Changes save automatically.
 - Yes/No questions have **Unset**, and sensitive ones also **Decline**: _Decline_ picks the "prefer not to say" option when the form offers it; _Unset_ means the field is flagged for you.
 - **Documents**: upload PDF/DOCX/TXT (≤ 5 MB) and mark one PDF as the primary résumé.
