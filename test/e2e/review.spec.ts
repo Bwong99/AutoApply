@@ -32,7 +32,8 @@ test("review traps: hidden instructions never reach the AI, honeypots and trap q
   await waitDone(page);
   await expect(page.locator("#fn")).toHaveValue("Ada");
   await expect(page.locator("#em")).toHaveValue("ada@example.com");
-  for (const id of ["#hp1", "#hp2", "#hp3", "#trap", "#blank"]) await expect(page.locator(id)).toHaveValue("");
+  for (const id of ["#hp1", "#hp2", "#hp3", "#hp4", "#hp5", "#hp6", "#trap", "#blank"])
+    await expect(page.locator(id)).toHaveValue("");
   await expect(page.locator("#status")).toHaveText("");
   const reviews = mock.calls_("review");
   expect(reviews.length).toBeGreaterThanOrEqual(1);

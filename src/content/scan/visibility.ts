@@ -35,6 +35,35 @@ export function concealed(el: Element): boolean {
   return false;
 }
 
+/**
+ * Clipped to nothing: inside a box of 1 px or less that hides its overflow (the screen-reader-only pattern), or cut by
+ * `clip: rect(0…)` / `clip-path: inset(50%)`. A scroll box or a collapsed "Show more" (bigger than that) doesn't count.
+ */
+export function clippedShut(el: Element): boolean {
+  for (let n: Element | null = el; n && n !== document.body; n = parentOf(n)) {
+    const cs = getComputedStyle(n);
+    if (/^rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)$/.test(cs.clip) || /inset\(\s*50%|circle\(\s*0/.test(cs.clipPath))
+      return true;
+    const hides = (o: string) => o === "hidden" || o === "clip";
+    const x = hides(cs.overflowX || cs.overflow);
+    const y = hides(cs.overflowY || cs.overflow);
+    if (!x && !y) continue;
+    const r = n.getBoundingClientRect();
+    if ((x && r.width <= 1) || (y && r.height <= 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * Unmistakably out of sight: 1 px or less, left of or above the page, or clipped shut. Unlike concealed(), never a box
+ * a bigger one merely scrolls or clips out of view (a scroll container's lower rows, a carousel's next step), which can
+ * be a real question; so this alone marks a required box as a honeypot.
+ */
+export function outOfSight(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width <= 1 || r.height <= 1 || r.right + scrollX <= 0 || r.bottom + scrollY <= 0 || clippedShut(el);
+}
+
 /** Parent element, crossing shadow-root boundaries. */
 export function parentOf(n: Element): Element | null {
   if (n.parentElement) return n.parentElement;

@@ -4,7 +4,7 @@ import { collapse } from "../../shared/normalize";
 import { stealthy } from "../jobContextExtract";
 import { labelElementFor } from "../scan/labels";
 import { HOST_TAG, shadowOf } from "../scan/traverse";
-import { concealed, parentOf } from "../scan/visibility";
+import { clippedShut, concealed } from "../scan/visibility";
 
 export interface SnapshotDeps {
   /** The scan's field id for an element (its control, a choice, its search box), if it is one. */
@@ -94,25 +94,6 @@ function rendered(el: Element): boolean {
   if (typeof el.checkVisibility === "function")
     return el.checkVisibility({ visibilityProperty: true, opacityProperty: true } as CheckVisibilityOptions);
   return el.getClientRects().length > 0;
-}
-
-/**
- * Clipped to nothing: inside a box of 1 px or less that hides its overflow (the screen-reader-only pattern), or cut by
- * `clip: rect(0…)` / `clip-path: inset(50%)`. A scroll box or a collapsed "Show more" (bigger than that) doesn't count.
- */
-function clippedShut(el: Element): boolean {
-  for (let n: Element | null = el; n && n !== document.body; n = parentOf(n)) {
-    const cs = getComputedStyle(n);
-    if (/^rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)$/.test(cs.clip) || /inset\(\s*50%|circle\(\s*0/.test(cs.clipPath))
-      return true;
-    const hides = (o: string) => o === "hidden" || o === "clip";
-    const x = hides(cs.overflowX || cs.overflow);
-    const y = hides(cs.overflowY || cs.overflow);
-    if (!x && !y) continue;
-    const r = n.getBoundingClientRect();
-    if ((x && r.width <= 1) || (y && r.height <= 1)) return true;
-  }
-  return false;
 }
 
 /** Laid out at all (descendants of an element hidden by visibility can still show). */
@@ -241,7 +222,7 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
     return collapse(out);
   };
   /** A control nobody could see or reach: a choice box counts by its visible label (custom-styled ones hide it). */
-  const outOfSight = (el: HTMLElement): boolean => {
+  const unreachable = (el: HTMLElement): boolean => {
     if (el instanceof HTMLInputElement && /^(radio|checkbox|file)$/.test(el.type)) {
       const label = labelElementFor(el);
       const shown = label ? !unseen(label) && !honeypot(label) : rendered(el) && !honeypot(el);
@@ -336,7 +317,7 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
     const role = roleOf(el) ?? (field ? "control" : null);
     if (role) {
       // A field we scanned shows either way; anything else only if people could see and reach it (no honeypots).
-      if (!field && outOfSight(el)) return;
+      if (!field && unreachable(el)) return;
       control(el, role, chrome);
       // A group's choices and a list's options are controls of their own; anything else's text was its caption.
       if (role !== "radiogroup" && role !== "listbox") {
