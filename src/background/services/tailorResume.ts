@@ -1,13 +1,15 @@
 // AI résumé tailoring: the user's LaTeX résumé edited for one job, compiled in the offscreen document. Every failure
 // (no job description, an AI error, edits that don't fit, a compile error, a longer résumé, a timeout) gives the
-// untailored PDF made when the .tex was uploaded instead; an application is never held up by it.
-import { applyOps, describe, errorLines, parseTex, type TailorOps } from "../../shared/latex";
+// untailored PDF made when the .tex was uploaded instead; an application is never held up by it. With the one-page
+// limit on (settings.tailorOnePage), the AI also ranks what to cut, the fewest of those cuts that fit are applied, and
+// no résumé over one page is ever uploaded: not the tailored one, nor a fallback.
+import { applyOps, describe, errorLines, parseTex, planCuts, type TailorOps } from "../../shared/latex";
 import type { createStorage } from "../../shared/storage";
 import { session } from "../../shared/storage";
 import type { DocumentMeta, JobContext, Profile } from "../../shared/types";
 import { BadOutputError, BlockedError } from "../gemini/errors";
-import { TAILOR_PROMPT } from "../gemini/prompts";
-import { TAILOR_SCHEMA, TailorZ } from "../gemini/schemas";
+import { tailorSystem } from "../gemini/prompts";
+import { TAILOR_CUT_SCHEMA, TAILOR_SCHEMA, TailorZ } from "../gemini/schemas";
 import { releaseOffscreen, useOffscreen } from "../offscreen";
 import { jobBrief } from "./jobBrief";
 import { compactProfile, type ServiceCtx } from "./mapFields";
@@ -27,12 +29,18 @@ export interface TailorOutcome {
 
 const COMPILE_MS = 30_000;
 
-/** The AI's edits to `tex` for `job`, compiled. */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/**
+ * The AI's edits to `tex` for `job`, compiled. `onePage`: the result is one page or nothing, the AI's ranked cuts
+ * applied as far as needed; otherwise it may be as long as the original (`pages`).
+ */
 export async function tailor(
   ctx: ServiceCtx,
-  input: { tex: string; pages: number; prompt: string; job: JobContext | null; profile: Profile },
+  input: { tex: string; pages: number; prompt: string; job: JobContext | null; profile: Profile; onePage?: boolean },
   compile: Compile,
 ): Promise<TailorOutcome> {
+  const onePage = !!input.onePage;
   const parsed = parseTex(input.tex);
   if (!parsed?.units.size) return { note: "The résumé's sections couldn't be read" };
   if (!input.job?.text && !input.job?.header) return { note: "No job description found on the page" };
@@ -41,14 +49,14 @@ export async function tailor(
   try {
     const r = await ctx.ai.call(
       {
-        system: TAILOR_PROMPT,
+        system: tailorSystem(onePage),
         // The user's instructions and résumé are the same for every job: ahead of the job, for prompt caching.
-        context: { instructions: input.prompt, resume, groups },
+        context: { instructions: input.prompt, resume, groups, ...(onePage ? { pages: input.pages } : {}) },
         payload: compactProfile({
           job: { ...jobBrief(input.job), location: input.job.location },
           profileSkills: input.profile.skills.technical,
         }),
-        schema: TAILOR_SCHEMA,
+        schema: onePage ? TAILOR_CUT_SCHEMA : TAILOR_SCHEMA,
         validate: (d) => TailorZ.parse(d),
         essay: true,
         timeoutMs: ctx.settings.requestTimeoutMs * 2,
@@ -65,20 +73,78 @@ export async function tailor(
   }
 
   let a = applyOps(parsed, ops);
-  if (!a.applied)
+  // A résumé over one page is worth compiling for its cuts alone.
+  const cutsOnly = onePage && input.pages > 1 && planCuts(parsed, ops).length > 0;
+  if (!a.applied && !cutsOnly)
     return { note: a.dropped ? "None of the AI's edits fit the résumé's format" : "The AI changed nothing" };
+  let skip = new Set<string>();
   let c = await compile(a.tex, COMPILE_MS);
   if (!c.pdf) {
     // Undo the edits the error points at, once.
     const blamed = new Set(errorLines(c.log).flatMap((l) => [a.origin.get(l)].filter((k): k is string => !!k)));
     if (!blamed.size) return { note: "The tailored résumé didn't compile" };
+    skip = blamed;
     a = applyOps(parsed, ops, blamed);
-    if (!a.applied) return { note: "The tailored résumé didn't compile" };
+    if (!a.applied && !cutsOnly) return { note: "The tailored résumé didn't compile" };
     c = await compile(a.tex, COMPILE_MS);
     if (!c.pdf) return { note: "The tailored résumé didn't compile" };
   }
-  if (c.pages > input.pages) return { note: `The tailored résumé ran to ${c.pages} pages instead of ${input.pages}` };
-  return { pdf: c.pdf, tex: a.tex, note: `${a.applied} change${a.applied === 1 ? "" : "s"} for this job` };
+  if (!onePage) {
+    if (c.pages > input.pages) return { note: `The tailored résumé ran to ${c.pages} pages instead of ${input.pages}` };
+    return { pdf: c.pdf, tex: a.tex, note: `${a.applied} change${a.applied === 1 ? "" : "s"} for this job` };
+  }
+
+  let cuts = 0;
+  if (c.pages > 1) {
+    const plan = planCuts(parsed, ops, skip);
+    const fit = await fewestCuts(
+      plan.length,
+      async (k) => {
+        const ak = applyOps(parsed, ops, skip, plan.slice(0, k));
+        return { a: ak, c: await compile(ak.tex, COMPILE_MS) };
+      },
+      ctx.signal,
+    );
+    if (ctx.signal?.aborted) return { note: "Stopped", transient: true };
+    if (!fit)
+      return {
+        note: `The tailored résumé ran to ${c.pages} pages${plan.length ? ` even after ${plural(plan.length, "cut")}` : ""}, over the one-page limit`,
+      };
+    ({ a, c } = fit);
+    cuts = fit.k;
+  }
+  const changes = a.applied ? `${plural(a.applied, "change")} for this job` : "";
+  const cut = cuts ? `${plural(cuts, "cut")} to fit one page` : "";
+  return { pdf: c.pdf, tex: a.tex, note: [changes, cut].filter(Boolean).join("; ") || "Fits on one page as it is" };
+}
+
+/**
+ * The fewest of `n` ranked cuts whose compile fits on one page, or null when even all of them don't: tries 1, 2, 4…
+ * then halves the gap, so a small overflow costs one or two compiles and ten cuts at most six.
+ */
+async function fewestCuts<T extends { c: { pdf: string; pages: number } }>(
+  n: number,
+  attempt: (k: number) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<(T & { k: number }) | null> {
+  const fits = (r: T) => !!r.c.pdf && r.c.pages <= 1;
+  let lo = 0;
+  let best: (T & { k: number }) | null = null;
+  for (let k = 1; k <= n && !signal?.aborted; k = k === n ? n + 1 : Math.min(k * 2, n)) {
+    const r = await attempt(k);
+    if (fits(r)) {
+      best = { ...r, k };
+      break;
+    }
+    lo = k;
+  }
+  while (best && best.k - lo > 1 && !signal?.aborted) {
+    const m = (lo + best.k) >> 1;
+    const r = await attempt(m);
+    if (fits(r)) best = { ...r, k: m };
+    else lo = m;
+  }
+  return best;
 }
 
 /** Compiles in the offscreen document, which stays open from the first compile to the `done` call. */
@@ -100,7 +166,7 @@ export function offscreenCompiler(): { compile: Compile; done: () => Promise<voi
 // ---------- the résumé a fill uploads ----------
 type Store = ReturnType<typeof createStorage>;
 export const FALLBACK = "tailor-fallback";
-const inFlight = new Map<string, Promise<TailoredDoc>>();
+const inFlight = new Map<string, Promise<TailoredDoc | { error: string; transient?: boolean }>>();
 
 export interface TailoredDoc {
   meta: DocumentMeta;
@@ -154,27 +220,39 @@ export async function tailoredResume(
     store.get("settings"),
     store.get("profile"),
   ]);
-  const untailored = await fallbackPdf(store);
+  const own = await store.getDoc("tailor-fallback-pdf");
+  const untailored = own ?? (await store.getDoc("tailor-pdf"));
   if (!info || !tex || !untailored) return { error: "No LaTeX résumé is uploaded" };
+  const onePage = settings.tailorOnePage;
+  // The fallback's pages: an uploaded PDF's are counted in Documents (unknown for one uploaded before that).
+  const fallbackPages = own ? info.fallback?.pages : info.pages;
   const key = await digest(
     tex,
     settings.tailorPrompt,
     job?.company ?? "",
     job?.jobTitle ?? "",
     (job?.text ?? "").slice(0, 4000),
+    ...(onePage ? ["one page", own ? String(fallbackPages) : ""] : []),
   );
-  const cached = await session.get<TailoredDoc>(`tailored:${key}`);
+  const cached = await session.get<TailoredDoc | { error: string }>(`tailored:${key}`);
   if (cached) return cached;
   let p = inFlight.get(key);
   if (!p) {
     p = (async () => {
       const fileName = resumeName(profile);
-      const fallback = (note: string, transient = false): TailoredDoc => ({
-        meta: pdfMeta(FALLBACK, fileName, untailored),
-        tailored: false,
-        note,
-        ...(transient ? { transient } : {}),
-      });
+      const fallback = (note: string, transient = false): TailoredDoc | { error: string; transient?: boolean } =>
+        // The one-page limit: a fallback over one page (or of unknown length) is never uploaded either.
+        onePage && !(fallbackPages !== undefined && fallbackPages <= 1)
+          ? {
+              error: `Résumé not uploaded: ${note}, and the ${own ? "fallback PDF" : "untailored résumé"} ${fallbackPages ? `is ${plural(fallbackPages, "page")}, over the one-page limit` : "couldn't be read to check the one-page limit"}`,
+              ...(transient ? { transient } : {}),
+            }
+          : {
+              meta: pdfMeta(FALLBACK, fileName, untailored),
+              tailored: false,
+              note,
+              ...(transient ? { transient } : {}),
+            };
       const ctx = await serviceCtx();
       if ("error" in ctx) return fallback(ctx.error.message, true);
       const c = offscreenCompiler();
@@ -182,7 +260,7 @@ export async function tailoredResume(
         const source = new TextDecoder().decode(Uint8Array.from(atob(tex), (ch) => ch.charCodeAt(0)));
         const r = await tailor(
           ctx,
-          { tex: source, pages: info.pages, prompt: settings.tailorPrompt, job, profile },
+          { tex: source, pages: info.pages, prompt: settings.tailorPrompt, job, profile, onePage },
           c.compile,
         );
         if (!r.pdf) return fallback(r.note, r.transient);
@@ -206,5 +284,5 @@ export async function tailoredResume(
   const r = await p;
   // A passing failure (an AI error, a stopped fill) isn't this job's answer: the next fill tries again.
   if (!r.transient) await session.set(`tailored:${key}`, r);
-  return r;
+  return "error" in r ? { error: r.error } : r;
 }

@@ -37,7 +37,7 @@ import {
 import { closeFrame } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
 import { indeedSearch, JOBRIGHT_PING } from "./sources";
-import { textPdf } from "./pdf";
+import { letterText, textPdf } from "./pdf";
 import {
   credit,
   end,
@@ -753,10 +753,22 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     if ("error" in ctx) return ctx;
     const profile = await store.get("profile");
     const job = tab?.id !== undefined ? await getJobContext(tab.id) : null;
-    const [e] = await draftEssays(ctx, [{ fieldId: "cl", question, kind: "cover_letter" }], profile, job);
-    if (!e?.text) return { error: { kind: "other", message: e?.note ?? "No cover letter drafted" } };
+    const letter = await letterText(
+      async (words) =>
+        (
+          await draftEssays(
+            { ...ctx, settings: { ...ctx.settings, coverLetterDefaultWords: words } },
+            [{ fieldId: "cl", question, kind: "cover_letter" }],
+            profile,
+            job,
+          )
+        )[0],
+      ctx.settings.coverLetterDefaultWords,
+      ctx.settings.coverLetterOnePage,
+    );
+    if ("error" in letter) return { error: { kind: "other", message: letter.error } };
     const id = `yolo-${crypto.randomUUID()}`;
-    const base64 = textPdf(e.text);
+    const base64 = textPdf(letter.text);
     const name = `${profile.personal.firstName} ${profile.personal.lastName}`.trim().replace(/\s+/g, "_") || "Cover";
     const meta: DocumentMeta = {
       id,

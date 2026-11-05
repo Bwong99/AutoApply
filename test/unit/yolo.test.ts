@@ -15,7 +15,8 @@ import { boardOf, findOnEmployerBoard, jobLinks, sameTitle, workdayPosted } from
 import { locationMatches, rejectReason, titleMatches } from "../../src/background/yolo/filter";
 import { loadPlaces, PLACES_FILE } from "../../src/background/yolo/places";
 import { connectGmail, extract, feedTexts, GmailAuthError, gmailToken, siteOf } from "../../src/background/yolo/gmail";
-import { textPdf, wrap } from "../../src/background/yolo/pdf";
+import { letterText, LINES_PER_PAGE, textLines, textPdf, wrap } from "../../src/background/yolo/pdf";
+import { ONE_PAGE_WORDS } from "../../src/shared/constants";
 import { decrypt, encrypt, newPassword } from "../../src/background/yolo/vault";
 import { applied, discover, inQueueOrder, RETRY } from "../../src/background/yolo/discover";
 import { credit, overdue, woke, type Run } from "../../src/background/yolo/runner";
@@ -500,6 +501,43 @@ describe("cover letter PDF", () => {
     offsets.forEach((o, i) => expect(pdf.slice(o).startsWith(`${i + 1} 0 obj<<`)).toBe(true));
     expect(Number(/startxref\n(\d+)/.exec(pdf)![1])).toBe(pdf.indexOf("xref\n"));
     expect(/\/Count (\d+)/.exec(pdf)![1]).not.toBe("1"); // long letters span pages
+  });
+
+  const pages = (text: string) => Number(/\/Count (\d+)/.exec(atob(textPdf(text)))![1]);
+  const letter = (lines: number) => Array.from({ length: lines }, (_, i) => `Line ${i}.`).join("\n");
+
+  it("knows before writing the PDF whether it fits on one page", () => {
+    expect(textLines(letter(LINES_PER_PAGE))).toBe(LINES_PER_PAGE);
+    expect(pages(letter(LINES_PER_PAGE))).toBe(1);
+    expect(pages(letter(LINES_PER_PAGE + 1))).toBe(2);
+  });
+
+  it("with the one-page limit, caps the target, rewrites a letter that runs over once, and never passes a long one", async () => {
+    const asked: number[] = [];
+    const drafts =
+      (...texts: string[]) =>
+      async (words: number) => (asked.push(words), { text: texts.shift() ?? "" });
+    const long = letter(60);
+
+    // Off: the target as set, any length.
+    expect(await letterText(drafts(long), 900, false)).toEqual({ text: long });
+    expect(asked).toEqual([900]);
+
+    asked.length = 0;
+    expect(await letterText(drafts(letter(30)), 900, true)).toEqual({ text: letter(30) });
+    expect(await letterText(drafts(letter(30)), 250, true)).toEqual({ text: letter(30) });
+    expect(asked).toEqual([ONE_PAGE_WORDS, 250]);
+
+    asked.length = 0;
+    expect(await letterText(drafts(long, letter(40)), 300, true)).toEqual({ text: letter(40) });
+    expect(asked[1]).toBeLessThan(120); // 120 words over 60 lines: about 44/60 of that, less a margin
+
+    expect(await letterText(drafts(long, long), 300, true)).toEqual({
+      error: "The cover letter ran over the one-page limit",
+    });
+    expect(await letterText(async () => ({ text: null, note: "Draft failed" }), 300, true)).toEqual({
+      error: "Draft failed",
+    });
   });
 });
 

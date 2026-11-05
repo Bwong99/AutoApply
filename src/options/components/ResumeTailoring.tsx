@@ -1,13 +1,14 @@
 // Documents: how résumé uploads are answered (Behavior / YOLO → Upload résumés), and AI tailor's LaTeX résumé and
 // prompt.
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { toBase64 } from "../../shared/base64";
 import { compileErrors, parseTex, unsupported } from "../../shared/latex";
 import { resumeProblem } from "../../shared/resumeMode";
 import { DEFAULT_TAILOR_PROMPT } from "../../shared/settings";
 import type { Settings } from "../../shared/types";
 import { compileTex } from "../../latex/engine";
-import { pdfText } from "../pdf";
+import { pdfPages, pdfText } from "../pdf";
+import { Toggle } from "./controls";
 import { markSaved, save, store, useProfile, useStored } from "../store";
 
 const MAX_TEX = 1024 * 1024;
@@ -83,6 +84,16 @@ export function TailorUpload() {
   const [fallbackErr, setFallbackErr] = useState("");
   const used = s?.resumeUpload === "tailor" || y?.resumeUpload === "tailor";
 
+  // A fallback PDF uploaded before pages were counted is counted once, for the one-page limit.
+  useEffect(() => {
+    if (!tailor?.fallback || tailor.fallback.pages !== undefined) return;
+    void (async () => {
+      const b64 = await store.getDoc("tailor-fallback-pdf");
+      const pages = b64 ? await pdfPages(bytesOf(b64).buffer).catch(() => undefined) : undefined;
+      if (pages) await save({ tailorResume: { ...tailor, fallback: { ...tailor.fallback!, pages } } });
+    })();
+  }, [tailor]);
+
   const upload = async (file: File) => {
     setErrors([]);
     if (!/\.tex$/i.test(file.name)) return setErrors(["Upload a .tex file."]);
@@ -136,9 +147,15 @@ export function TailorUpload() {
     if (!/\.pdf$/i.test(file.name)) return setFallbackErr("Upload a PDF file.");
     if (file.size > MAX_PDF) return setFallbackErr("The PDF must be 5 MB or smaller.");
     try {
-      await store.setDoc("tailor-fallback-pdf", toBase64(new Uint8Array(await file.arrayBuffer())));
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      // pdf.js may take the buffer: counted on a copy.
+      const pages = await pdfPages(bytes.slice().buffer).catch(() => undefined);
+      await store.setDoc("tailor-fallback-pdf", toBase64(bytes));
       await save({
-        tailorResume: { ...tailor, fallback: { fileName: file.name, size: file.size, uploadedAt: Date.now() } },
+        tailorResume: {
+          ...tailor,
+          fallback: { fileName: file.name, size: file.size, uploadedAt: Date.now(), ...(pages ? { pages } : {}) },
+        },
       });
     } catch (e) {
       setFallbackErr(`Could not save the file: ${(e as Error).message}`);
@@ -151,6 +168,18 @@ export function TailorUpload() {
     await save({ tailorResume: { ...tailor, fallback: null } });
     markSaved();
   };
+
+  // The one-page limit's consequences for this résumé and its fallback.
+  const onePage = used && !!s?.tailorOnePage && !!tailor;
+  const fallbackPages = tailor?.fallback ? tailor.fallback.pages : tailor?.pages;
+  const fallbackName = tailor?.fallback ? "Your fallback PDF" : "The untailored PDF";
+  const fallbackNote = !onePage
+    ? ""
+    : fallbackPages === undefined
+      ? `${fallbackName} couldn't be read to count its pages, so it is never uploaded while “Keep the tailored résumé to one page” is on: when tailoring fails, the résumé upload is left for you.`
+      : fallbackPages > 1
+        ? `${fallbackName} is ${fallbackPages} pages, so it is never uploaded while “Keep the tailored résumé to one page” is on: when tailoring fails, the résumé upload is left for you. Upload a one-page fallback PDF to use it instead.`
+        : "";
 
   return (
     <div class="panel-box">
@@ -198,6 +227,12 @@ export function TailorUpload() {
         />
       </label>
       {busy && <span class="muted">Checking and compiling…</span>}
+      {onePage && tailor!.pages > 1 && (
+        <p class="muted">
+          This résumé is {tailor!.pages} pages: with “Keep the tailored résumé to one page” on, the AI cuts it to one
+          for each job.
+        </p>
+      )}
       {errors.length > 0 && (
         <div class="err" role="alert">
           <p>This file wasn’t uploaded:</p>
@@ -269,6 +304,11 @@ export function TailorUpload() {
               {fallbackErr}
             </p>
           )}
+          {fallbackNote && (
+            <p class="note" role="alert">
+              {fallbackNote}
+            </p>
+          )}
         </>
       )}
     </div>
@@ -287,6 +327,13 @@ export function TailorPrompt() {
     <div class="panel-box">
       <h2>AI tailoring prompt</h2>
       {!used && <p class="muted">Set Upload résumés to AI tailor (Behavior or YOLO) to use this prompt.</p>}
+      <Toggle
+        label="Keep the tailored résumé to one page"
+        help="Autofill and YOLO. The AI also ranks what it would cut; after compiling, the fewest of those cuts that make the résumé fit are made (a few seconds more, only when it runs over). A résumé still over one page is never uploaded: your fallback PDF is used if it is one page, else the résumé upload is left for you. Off: the tailored résumé may be as long as your .tex."
+        checked={s.tailorOnePage}
+        disabled={!used}
+        onChange={(tailorOnePage) => set({ tailorOnePage })}
+      />
       <div class="field full">
         <label for="tailor-prompt">What the AI is told about tailoring your résumé</label>
         <p class="help above">

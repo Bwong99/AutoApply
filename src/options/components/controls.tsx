@@ -145,7 +145,13 @@ export function TagInput(props: {
   );
 }
 
-export function Toggle(props: { label: string; help?: string; checked: boolean; onChange: (v: boolean) => void }) {
+export function Toggle(props: {
+  label: string;
+  help?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
   const id = useId();
   return (
     <div class="field toggle">
@@ -153,6 +159,7 @@ export function Toggle(props: { label: string; help?: string; checked: boolean; 
         id={id}
         type="checkbox"
         checked={props.checked}
+        disabled={props.disabled}
         onChange={(e) => props.onChange(e.currentTarget.checked)}
       />
       <label for={id}>{props.label}</label>

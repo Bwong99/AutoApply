@@ -173,9 +173,16 @@ export const TAILOR_SCHEMA = {
   },
   required: ["edits", "add", "remove", "order"],
 };
+/** TAILOR_SCHEMA with the one-page "cut" list (settings.tailorOnePage). */
+export const TAILOR_CUT_SCHEMA = {
+  ...TAILOR_SCHEMA,
+  properties: { ...TAILOR_SCHEMA.properties, cut: { type: "ARRAY", items: { type: "STRING" } } },
+  required: [...TAILOR_SCHEMA.required, "cut"],
+};
 export const TailorZ = z.object({
   edits: z.array(z.object({ id: z.string(), text: z.string() })).catch([]),
   add: z.array(z.object({ after: z.string(), text: z.string() })).catch([]),
   remove: z.array(z.string()).catch([]),
   order: z.array(z.object({ group: z.string(), items: z.array(z.string()) })).catch([]),
+  cut: z.array(z.string()).catch([]),
 });

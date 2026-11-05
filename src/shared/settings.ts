@@ -16,18 +16,11 @@ const claudeTask = z
   .catch({ model: "", effort: "" });
 const claudeTasks = z.object({ fill: claudeTask, write: claudeTask, resume: claudeTask });
 
-/** What the AI is told about tailoring a LaTeX résumé (Documents → AI tailoring prompt). The user may edit it. */
-export const DEFAULT_TAILOR_PROMPT = `Tailor this résumé to the job. It should read as the same résumé sharpened for this role, not a rewrite: make the few changes that matter most.
-
-You must:
-- Keep the résumé to one page.
-  - If it runs over, remove whole entries until it fits, starting with the entry least relevant to this job, regardless of section. When entries are about equally relevant, remove Extracurriculars before Projects, and Projects before Work Experience.
-
-You may:
+const TAILOR_PROMPT_MAY = `You may:
 - Reword bullets to use the job's own terms for skills and tools the résumé already shows. Keep each bullet's meaning, tense and voice, and its length within about 15%.
-- Reorder bullets within an entry, and sections, so the most relevant come first. Reorder entries only in sections not ordered by date (such as projects).
-- Drop up to 2 bullets that matter least for this job, but never an entire entry, except to meet the one-page limit.
-- Add up to 2 bullets to existing experiences or projects that expand on details the résumé already states about them.
+- Reorder bullets within an entry, and sections, so the most relevant come first. Reorder entries only in sections not ordered by date (such as projects).`;
+
+const TAILOR_PROMPT_REST = `- Add up to 2 bullets to existing experiences or projects that expand on details the résumé already states about them.
 - Add skills to the skills section only if the job asks for it and it is in the candidate's Profile skills.
 - Lightly reword a summary or objective to fit the role.
 
@@ -36,6 +29,29 @@ You must not:
 - Change names, contact details, dates, company or school names, job titles, degrees or grades.
 - Make the résumé longer: balance any added text with shorter or dropped bullets.
 - Change its spelling conventions (US or UK English), capitalization or punctuation style.`;
+
+const TAILOR_PROMPT_HEAD = `Tailor this résumé to the job. It should read as the same résumé sharpened for this role, not a rewrite: make the few changes that matter most.`;
+
+/**
+ * What the AI is told about tailoring a LaTeX résumé (Documents → AI tailoring prompt). The user may edit it. The
+ * one-page limit isn't part of it: the "Keep the tailored résumé to one page" setting adds it (gemini/prompts.ts).
+ */
+export const DEFAULT_TAILOR_PROMPT = `${TAILOR_PROMPT_HEAD}
+
+${TAILOR_PROMPT_MAY}
+- Drop up to 2 bullets that matter least for this job, but never an entire entry.
+${TAILOR_PROMPT_REST}`;
+
+/** The default prompt before the one-page limit became a setting: a prompt still equal to it gets the new default. */
+export const LEGACY_TAILOR_PROMPT = `${TAILOR_PROMPT_HEAD}
+
+You must:
+- Keep the résumé to one page.
+  - If it runs over, remove whole entries until it fits, starting with the entry least relevant to this job, regardless of section. When entries are about equally relevant, remove Extracurriculars before Projects, and Projects before Work Experience.
+
+${TAILOR_PROMPT_MAY}
+- Drop up to 2 bullets that matter least for this job, but never an entire entry, except to meet the one-page limit.
+${TAILOR_PROMPT_REST}`;
 
 const base = z.object({
   /** Gemini with API keys, or Claude through the user's own Claude Code and plan (background/claude). */
@@ -50,13 +66,20 @@ const base = z.object({
   coverLetterDefaultWords: n(300, 10, 2000),
   /** If no cover letter is uploaded in Documents, generate a tailored cover letter. YOLO sets its own. */
   coverLetterPdfs: b(false),
+  /** Generated cover letter PDFs (autofill and YOLO) never run past one page; one that would isn't uploaded. */
+  coverLetterOnePage: b(true),
   /**
    * Résumé upload fields: the résumé variant that best fits the job (Documents), the LaTeX résumé tailored to it by
    * the AI, or left for the user. YOLO sets its own.
    */
   resumeUpload: z.enum(["variants", "tailor", "flag"]).catch("variants"),
   /** The AI tailor's instructions; one for autofill and YOLO. */
-  tailorPrompt: z.string().catch(DEFAULT_TAILOR_PROMPT),
+  tailorPrompt: z
+    .string()
+    .transform((p) => (p === LEGACY_TAILOR_PROMPT ? DEFAULT_TAILOR_PROMPT : p))
+    .catch(DEFAULT_TAILOR_PROMPT),
+  /** AI tailor (autofill and YOLO) never uploads a résumé over one page: tailored, or the fallback. */
+  tailorOnePage: b(true),
   showBadges: b(true),
   learnPrompts: b(false),
   excludedHosts: z.array(z.string()).catch([]),

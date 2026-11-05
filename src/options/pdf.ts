@@ -20,3 +20,13 @@ export async function pdfText(data: ArrayBuffer): Promise<string> {
   await task.destroy();
   return pages.join("\n");
 }
+
+/** The PDF's page count, for the one-page limit on AI tailor's fallback PDF. */
+export async function pdfPages(data: ArrayBuffer): Promise<number> {
+  const task = getDocument({ data });
+  try {
+    return (await task.promise).numPages;
+  } finally {
+    await task.destroy();
+  }
+}

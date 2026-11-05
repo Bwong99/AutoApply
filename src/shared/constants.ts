@@ -612,3 +612,10 @@ export const HUB_REGIONS: Record<string, string> = {
   denver: "CO",
   atlanta: "GA",
 };
+
+/**
+ * A generated cover letter's word target with the one-page limit on (settings.coverLetterOnePage): four or five
+ * paragraphs this long fill about 34 of the PDF's 44 lines (background/yolo/pdf.ts), leaving room for an address
+ * block and the AI running over its target.
+ */
+export const ONE_PAGE_WORDS = 400;
