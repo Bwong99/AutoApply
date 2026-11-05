@@ -33,6 +33,19 @@ export interface ReviewInput {
 }
 
 const SINGLE_CHOICE = new Set<FieldKind>(["select", "radio_group", "dropdown"]);
+/** Kinds a fill can empty: text boxes, native selects and single boxes (FillOp "clear" / unchecked). */
+const CLEARABLE = new Set<FieldKind>([
+  "text",
+  "email",
+  "tel",
+  "url",
+  "number",
+  "date",
+  "month",
+  "textarea",
+  "select",
+  "checkbox",
+]);
 const CHOICE = new Set<FieldKind>(["select", "multiselect", "radio_group", "checkbox_group", "dropdown"]);
 
 const descOf = (f: ReviewField, question = f.question): FieldDescriptor => ({
@@ -154,8 +167,14 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
   const seen = new Set<string>();
   for (const v of r.data.fields) {
     const f = byId.get(v.fieldId);
-    if (!f || seen.has(f.id) || v.verdict === "ok" || v.verdict === "leave_blank") continue;
+    if (!f || seen.has(f.id) || v.verdict === "ok") continue;
     seen.add(f.id);
+    // "Leave it empty" about a field that holds a value means empty it (an optional box, list or tick only).
+    if (v.verdict === "leave_blank") {
+      if (!f.shown || f.required || !CLEARABLE.has(f.kind)) continue;
+      v.verdict = "wrong";
+      v.answer = "";
+    }
     const fix = checkFix(
       {
         fieldId: f.id,
