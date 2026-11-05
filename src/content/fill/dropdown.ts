@@ -356,7 +356,27 @@ export async function searchOptions(h: FieldHandle, query: string): Promise<stri
   return texts.length ? texts : null;
 }
 
-const shows = (h: FieldHandle, text: string) => sameValue(text, dropdownText(h), "contains");
+/**
+ * A short answer shown as a word of its own: "No" is not picked when the box shows "Not applicable" or "None". The
+ * next letter may be a capital (a remove button's text run on: "NoRemove").
+ */
+export function showsWord(shown: string, text: string): boolean {
+  const t = collapse(text).toLowerCase();
+  const lower = shown.toLowerCase();
+  if (!t) return false;
+  for (let i = lower.indexOf(t); i >= 0; i = lower.indexOf(t, i + 1)) {
+    const before = shown[i - 1] ?? " ";
+    const after = shown[i + t.length] ?? " ";
+    if (!/[\p{L}\p{N}]/u.test(before) && !/[\p{Ll}\p{N}]/u.test(after)) return true;
+  }
+  return false;
+}
+
+const shows = (h: FieldHandle, text: string) => {
+  const shown = dropdownText(h);
+  if (!sameValue(text, shown, "contains")) return false;
+  return collapse(text).length > 3 || showsWord(shown, text);
+};
 // Some widgets display only part of the picked option: Greenhouse's phone country shows "+1" for "Canada +1".
 const showsPart = (h: FieldHandle, text: string) => {
   const shown = dropdownText(h);
