@@ -2,7 +2,9 @@
 // field list. Every control on the page gets a ref, scanned or not, so the review can name what the scan missed.
 import { collapse } from "../../shared/normalize";
 import { stealthy } from "../jobContextExtract";
+import { labelElementFor } from "../scan/labels";
 import { HOST_TAG, shadowOf } from "../scan/traverse";
+import { concealed, parentOf } from "../scan/visibility";
 
 export interface SnapshotDeps {
   /** The scan's field id for an element (its control, a choice, its search box), if it is one. */
@@ -92,6 +94,25 @@ function rendered(el: Element): boolean {
   if (typeof el.checkVisibility === "function")
     return el.checkVisibility({ visibilityProperty: true, opacityProperty: true } as CheckVisibilityOptions);
   return el.getClientRects().length > 0;
+}
+
+/**
+ * Clipped to nothing: inside a box of 1 px or less that hides its overflow (the screen-reader-only pattern), or cut by
+ * `clip: rect(0…)` / `clip-path: inset(50%)`. A scroll box or a collapsed "Show more" (bigger than that) doesn't count.
+ */
+function clippedShut(el: Element): boolean {
+  for (let n: Element | null = el; n && n !== document.body; n = parentOf(n)) {
+    const cs = getComputedStyle(n);
+    if (/^rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)$/.test(cs.clip) || /inset\(\s*50%|circle\(\s*0/.test(cs.clipPath))
+      return true;
+    const hides = (o: string) => o === "hidden" || o === "clip";
+    const x = hides(cs.overflowX || cs.overflow);
+    const y = hides(cs.overflowY || cs.overflow);
+    if (!x && !y) continue;
+    const r = n.getBoundingClientRect();
+    if ((x && r.width <= 1) || (y && r.height <= 1)) return true;
+  }
+  return false;
 }
 
 /** Laid out at all (descendants of an element hidden by visibility can still show). */
@@ -189,7 +210,45 @@ function hintsOf(el: HTMLElement): string[] {
   return out;
 }
 
+/**
+ * A box only a bot would fill: positioned or sized out of sight (concealed), or kept from keyboard and screen reader
+ * alike (tabindex -1 inside aria-hidden). Honeypots look like this; real questions don't.
+ */
+export function honeypot(el: HTMLElement): boolean {
+  if (el.getAttribute("tabindex") === "-1" && el.closest('[aria-hidden="true"]')) return true;
+  return concealed(el) || clippedShut(el);
+}
+
 export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | null = document.body): Snapshot {
+  // Text people can't see (planted instructions for AI, hidden requirements) never reaches the review.
+  const memo = new Map<Element, boolean>();
+  const unseen = (el: Element): boolean => {
+    let h = memo.get(el);
+    if (h === undefined) memo.set(el, (h = !rendered(el) || stealthy(el, document.body) || clippedShut(el)));
+    return h;
+  };
+  /** An element's text as shown: its text nodes whose element people can see. */
+  const seenText = (el: Element): string => {
+    let out = "";
+    const walk = (n: Node) => {
+      for (const k of n.childNodes) {
+        if (k.nodeType === Node.TEXT_NODE) {
+          if (k.parentElement && !unseen(k.parentElement)) out += k.textContent ?? "";
+        } else if (k instanceof Element && !SKIP.has(k.tagName.toUpperCase())) walk(k);
+      }
+    };
+    walk(el);
+    return collapse(out);
+  };
+  /** A control nobody could see or reach: a choice box counts by its visible label (custom-styled ones hide it). */
+  const outOfSight = (el: HTMLElement): boolean => {
+    if (el instanceof HTMLInputElement && /^(radio|checkbox|file)$/.test(el.type)) {
+      const label = labelElementFor(el);
+      const shown = label ? !unseen(label) && !honeypot(label) : rendered(el) && !honeypot(el);
+      return !shown || (el.getAttribute("tabindex") === "-1" && !!el.closest('[aria-hidden="true"]'));
+    }
+    return !rendered(el) || honeypot(el);
+  };
   const refs = new Map<string, HTMLElement>();
   const fieldRefs = new Map<string, string[]>();
   const unscanned: string[] = [];
@@ -206,7 +265,8 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
   const shownFor = new Set<string>();
 
   const control = (el: HTMLElement, role: string, inChrome: boolean) => {
-    const text = role === "button" || role === "link" || role === "clickable" ? ownText(el) : "";
+    const caption = () => (el instanceof HTMLInputElement ? ownText(el) : seenText(el) || ownText(el));
+    const text = role === "button" || role === "link" || role === "clickable" ? caption() : "";
     if (inChrome && (role === "link" || role === "button") && !RE_CHROME_ACTION.test(text)) {
       line += ` ${text}`;
       return;
@@ -218,7 +278,7 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
     if (el instanceof HTMLInputElement && role === "textbox" && el.type !== "text") parts.push(`type=${el.type}`);
     if (text) parts.push(q(text));
     if (role === "radio" || role === "checkbox" || role === "option" || role === "switch") {
-      const t = el instanceof HTMLInputElement ? "" : ownText(el);
+      const t = el instanceof HTMLInputElement ? "" : caption();
       if (t) parts.push(q(t));
     }
     parts.push(...stateOf(el));
@@ -275,32 +335,28 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
     const field = deps.fieldOf(el);
     const role = roleOf(el) ?? (field ? "control" : null);
     if (role) {
-      // Custom-styled choices hide their native box (opacity 0, clipped); a field we scanned shows either way.
-      const native = el instanceof HTMLInputElement && /^(radio|checkbox|file)$/.test(el.type);
-      if (!rendered(el) && !native && !field) return;
+      // A field we scanned shows either way; anything else only if people could see and reach it (no honeypots).
+      if (!field && outOfSight(el)) return;
       control(el, role, chrome);
       // A group's choices and a list's options are controls of their own; anything else's text was its caption.
       if (role !== "radiogroup" && role !== "listbox") {
         if (block) flush();
         return;
       }
-    } else if (clickable(el, pointer) && rendered(el)) {
+    } else if (clickable(el, pointer) && rendered(el) && !honeypot(el) && !unseen(el)) {
       control(el, "clickable", chrome);
       if (block) flush();
       return;
     }
     // An error message: not a wrapper that holds the field it is about ("has-error" form groups).
-    if (
-      el.matches(ALERT) &&
-      rendered(el) &&
-      (el.innerText ?? "").trim().length > 1 &&
-      (el.innerText ?? "").length < 300 &&
-      !el.querySelector("input,select,textarea,button,[role],[contenteditable]")
-    ) {
-      flush();
-      line = `! ${el.innerText}`;
-      flush();
-      return;
+    if (el.matches(ALERT) && !el.querySelector("input,select,textarea,button,[role],[contenteditable]")) {
+      const t = rendered(el) ? seenText(el) : "";
+      if (t.length > 1 && t.length < 300) {
+        flush();
+        line = `! ${t}`;
+        flush();
+        return;
+      }
     }
     const pointerHere = pointer || (!!el.parentElement && getComputedStyle(el).cursor === "pointer");
     const sr = shadowOf(el);
@@ -308,7 +364,7 @@ export function snapshot(deps: SnapshotDeps, maxChars = 60_000, root: Element | 
     for (const k of [...(sr ? sr.childNodes : []), ...el.childNodes]) {
       if (k.nodeType === Node.TEXT_NODE) {
         const t = k.textContent ?? "";
-        if (!t.trim() || !rendered(el) || stealthy(el, document.body)) continue;
+        if (!t.trim() || unseen(el)) continue;
         line += ` ${chrome ? clip(collapse(t), 80) : t}`;
       } else if (k instanceof Element) visit(k, pointerHere, chrome);
     }

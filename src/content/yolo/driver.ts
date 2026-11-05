@@ -7,7 +7,7 @@ import type { NavReply } from "../../background/gemini/schemas";
 import { collapse } from "../../shared/normalize";
 import type { Guess } from "../../shared/yolo";
 import { sleep, waitFor } from "../fill/events";
-import { deepQueryAll, HOST_TAG } from "../scan/traverse";
+import { deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { acceptNotices, emailSignIn, findSignup, forgotPassword, handleAuth, handleVerify, setLogin } from "./auth";
 import { botWall, captchaShown, embeddedForm, pageFacts, pageText, scoreCheck } from "./classify";
@@ -21,6 +21,7 @@ import {
   findSubmit,
   labelOf,
   press,
+  pressable,
   RE_APPLY,
   validationErrors,
 } from "./nav";
@@ -56,9 +57,6 @@ export interface DriverDeps {
   navigate(why: string, facts: PageFacts): Promise<{ reply: NavReply; el?: HTMLElement } | null>;
 }
 
-/** What the navigator may never press: other sites' sign-ins and Easy Apply, parsers, ways back or out. */
-const RE_NAV_AVOID =
-  /\b(withdraw|delete|remove|sign ?out|log ?out|cancel|unsubscribe|back|previous)\b|save (for later|as (a )?draft|draft)|\b(sign|log) ?(in|up)? with\b|\b(apply|continue|connect) with\b|easy apply|quick apply|autofill|auto-fill|use my last|job alert/i;
 /** Navigator calls per page load: it is the way out of a stuck step, not a loop of its own. */
 const MAX_NAV = 6;
 
@@ -178,7 +176,7 @@ export async function drive(deps: DriverDeps) {
       }
       return null;
     }
-    if (!el?.isConnected || el.closest(HOST_TAG) || !isVisible(el) || RE_NAV_AVOID.test(labelOf(el))) return null;
+    if (!pressable(el)) return null;
     if (reply.purpose === "final_submit") {
       if (DRY) {
         dryStop(labelOf(el));

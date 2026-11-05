@@ -1052,6 +1052,7 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
     }
     let changed = false;
     const jobs: Promise<void>[] = [];
+    const essays: EssayItem[] = [];
     for (const fix of r.fixes) {
       const h = handles.get(fix.fieldId);
       const s = h && states.get(h.id);
@@ -1087,6 +1088,17 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         jobs.push(reviewUpload(h, groupId, ctrl, why));
         continue;
       }
+      // Prose is the essay writer's (its rules against AI-sounding text, the question's limits), not the review's.
+      if ((h.desc.kind === "textarea" || h.desc.kind === "contenteditable") && fix.answer.length > 200) {
+        if (!config.settings.draftEssays) {
+          setStatus(h, "needs", "Write this yourself");
+          continue;
+        }
+        const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
+        const kind = RE_COVER_LETTER.test(h.desc.label) ? "cover_letter" : "essay";
+        essays.push({ fieldId: h.id, question: h.desc.label, hint: h.desc.hint, ...limits, kind });
+        continue;
+      }
       // A custom list read before the answer it now needs was there (provinces before the country): read it again.
       const read = harvested.get(h.id);
       if (h.desc.kind === "dropdown" && read && !read.some((o) => normalize(o) === normalize(fix.answer!)))
@@ -1099,10 +1111,11 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
       // A YOLO best guess is logged and badged like the mapping's guesses.
       jobs.push(doFill(h, op, "ai", yolo && fix.sources.includes("guess") ? "guess" : why, ctrl));
     }
+    if (essays.length) jobs.push(draftEssays(essays, groupId, ctrl, () => undefined));
     await Promise.all(jobs);
     let found = false;
     for (const m of r.missed) {
-      const a = adoption(m, snap.refs);
+      const a = adoption(m, snap.refs, (el) => scanState.excluded.get(el));
       if (!a || owner.has(a[0]) || scanState.adopted.has(a[0])) continue;
       scanState.adopted.set(a[0], a[1]);
       found = true;

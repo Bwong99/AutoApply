@@ -1,5 +1,8 @@
 // YOLO's navigation: finding and pressing Apply / Next / Submit, the clicks a normal fill never makes.
+import { RE_SKIP_LABEL } from "../../shared/constants";
+import { defang, trapLabel } from "../../shared/injection";
 import { collapse } from "../../shared/normalize";
+import { honeypot } from "../review/snapshot";
 import { pointerClick } from "../fill/events";
 import { HOST_TAG, deepQueryAll } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
@@ -137,4 +140,27 @@ export function validationErrors(): HTMLElement[] {
     const t = labelOf(el);
     return t.length > 2 && t.length < 300 && /required|invalid|error|must|please|enter|select|missing|problem/i.test(t);
   });
+}
+
+/** What the navigator may never press: other sites' sign-ins and Easy Apply, parsers, ways back or out. */
+const RE_NAV_AVOID =
+  /\b(withdraw|delete|remove|sign ?out|log ?out|cancel|unsubscribe|back|previous)\b|save (for later|as (a )?draft|draft)|\b(sign|log) ?(in|up)? with\b|\b(apply|continue|connect) with\b|easy apply|quick apply|autofill|auto-fill|use my last|job alert/i;
+/**
+ * What the navigator names, pressed only if a person could: on the page, seen (not a honeypot button hidden for bots),
+ * and not worded for bots or AI ("Automated applicants click here"), another site's sign-in or a way out.
+ */
+/** A control worded for bots or AI ("Automated applicants click here", "AI agents: apply"), not "Apply for AI Engineer". */
+export const RE_FOR_BOTS =
+  /\b(?:ai|a\.i\.|llms?|bots?|robots?|crawlers?|scrapers?)(?:\s+(?:agents?|tools?|assistants?|models?|applicants?))?\s*[:—–]|\b(?:automated|ai|bot|robot)\s+(?:applicants?|agents?|submissions?|applications?)\b|\bfor\s+(?:ai|bots?|robots?|machines?|automated\s+\w+)(?:\s+(?:agents?|tools?|only|use))?\s*(?:[.!:)]|$)|\bnot for humans\b|\bhumans?\s+(?:should(?:n'?t| not)|must not|do not|don'?t)\b/i;
+
+export function pressable(el: HTMLElement | undefined): el is HTMLElement {
+  if (!el?.isConnected || el.closest(HOST_TAG) || !isVisible(el) || honeypot(el)) return false;
+  const label = labelOf(el);
+  return (
+    !RE_NAV_AVOID.test(label) &&
+    !RE_SKIP_LABEL.test(label) &&
+    !RE_FOR_BOTS.test(label) &&
+    !trapLabel(label) &&
+    defang(label) === label
+  );
 }
