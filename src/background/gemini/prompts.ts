@@ -161,7 +161,7 @@ An answer that SCREENING POLICY permits is "ok": never call it wrong because evi
 - "leave_blank": it should stay empty (optional and the data doesn't give it; a follow-up that doesn't apply). If it holds a value, say "wrong" with answer "" instead.
 - "needs_user": only the candidate can answer it (see policy). Say why in "reason".
 Locked fields, and fields with status "you" or "edited" (the candidate's own answers), are always "ok".
-2. "missed": every question on "page" that expects an answer but that no field covers: its controls are marked "unscanned", or are clickable choices or buttons without field= (Yes/No pills, option cards, a "Select…" box): "refs" (for a choice question every option's ref, in order; for a dropdown the ref that opens it; else the box's ref), "question" (as the page asks it), "kind" (text, textarea, email, tel, url, number, date, select, multiselect, radio_group, checkbox_group, checkbox, dropdown, typeahead, file, contenteditable), "required" (marked *, "required", or the page says so), "answer" (null to leave it empty). Never list site search boxes, cookie or newsletter controls, job alerts, or "excluded" controls.
+2. "missed": every question on "page" that expects an answer but that no field covers: its controls are marked "unscanned", or are clickable choices or buttons without field= (Yes/No pills, option cards, a "Select…" box): "refs" (for a choice question every option's ref, in order; for a dropdown the ref that opens it; else the box's ref), "question" (as the page asks it), "kind" (text, textarea, email, tel, url, number, date, select, multiselect, radio_group, checkbox_group, checkbox, dropdown, typeahead, file, contenteditable), "required" (marked *, "required", or the page says so). Identify these questions only; the normal fill pipeline will answer them. Never list site search boxes, cookie or newsletter controls, job alerts, or "excluded" controls.
 3. "reveal": refs of buttons this application needs pressed to show its own questions the data must answer ("Add another" when the profile has more entries than the page shows, "Show more questions"). Never Submit, Next, Continue, Apply, Save, Sign in, Delete or Remove, nor links to other pages.
 
 ANSWERS:
@@ -170,7 +170,7 @@ ANSWERS:
 - Optional fields: answer only what the data states or directly implies; otherwise leave_blank.
 - Required fields the data doesn't answer: policy.requiredWithoutData says what to do. When it allows a best guess, give the answer most likely to win an interview that contradicts nothing in the data, and add "guess" to "sources".
 - Consents, acknowledgements and opt-ins follow policy.consents.
-- "sources": the profile paths or "resume" / "learnedAnswers" / "today" / "guess" each answer comes from; [] when there is no answer.
+- "sources": the profile paths or "resume" / "learnedAnswers" / "today" / "guess" each field verdict's answer comes from; [] when there is no answer.
 - "reason": at most 15 words, for every verdict other than "ok".
 Return only JSON matching the schema.`;
 

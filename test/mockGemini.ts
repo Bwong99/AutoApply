@@ -192,7 +192,7 @@ export class MockGemini {
 
   /**
    * The AI review: every field "ok", except the profile's names and email shown wrong ("wrong" with the profile's),
-   * and Yes/No pills or boxes the scan missed under a question the decision table answers ("missed").
+   * and Yes/No pills or boxes the scan missed ("missed"). Their answers come from the normal fill pipeline.
    */
   review(payload: Json): Json {
     const want: [RegExp, string][] = [
@@ -213,19 +213,13 @@ export class MockGemini {
       const boxes = [...line.matchAll(/\[(c\d+) [a-z]+ unscanned[^\]]*\]/g)];
       const question = (line.replace(/\[[^\]]*\]/g, "").trim() || lines[i - 1] || "").replace(/^#\s*/, "");
       if (pills.length >= 2) {
-        const d = decide({ id: "x", kind: "radio_group", label: question, options: ["0: Yes", "1: No"] });
-        const answer = d.action === "fill" ? ["Yes", "No"][(d.optionIndexes as number[])[0]] : null;
         missed.push({
           refs: pills.map((p) => p[1]),
           question,
           kind: "radio_group",
           required: true,
-          answer,
-          sources: [],
         });
-      } else
-        for (const b of boxes)
-          missed.push({ refs: [b[1]], question, kind: "text", required: false, answer: null, sources: [] });
+      } else for (const b of boxes) missed.push({ refs: [b[1]], question, kind: "text", required: false });
     });
     return { fields, missed, reveal: [] };
   }

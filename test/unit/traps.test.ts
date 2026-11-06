@@ -40,8 +40,6 @@ const missed = (refs: string[], question = "Email", kind: ReviewMissed["kind"] =
   question,
   kind,
   required: true,
-  answer: "x",
-  reason: "",
 });
 
 describe("the review never sees text people can't see", () => {

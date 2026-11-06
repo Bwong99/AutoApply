@@ -3,7 +3,7 @@ import { checkFix, covered, reviewForm, type ReviewInput } from "../../src/backg
 import type { ServiceCtx } from "../../src/background/services/mapFields";
 import type { CallSpec } from "../../src/background/gemini/client";
 import { BadOutputError } from "../../src/background/gemini/errors";
-import type { ReviewReply } from "../../src/background/gemini/schemas";
+import { REVIEW_SCHEMA, ReviewZ, type ReviewReply } from "../../src/background/gemini/schemas";
 import { adoption, opForAnswer, revealable } from "../../src/content/review/reconcile";
 import { newScanState, scan, type FieldHandle } from "../../src/content/scan/fields";
 import { emptyProfile } from "../../src/shared/profileSchema";
@@ -201,9 +201,7 @@ describe("reviewForm", () => {
                 { fieldId: "f3", verdict: "leave_blank", reason: "No current employer", sources: [] },
                 { fieldId: "nope", verdict: "fill", answer: "x", sources: ["resume"] },
               ],
-              missed: [
-                { refs: ["c4"], question: "Pronouns", kind: "text", required: false, answer: null, sources: [] },
-              ],
+              missed: [{ refs: ["c4"], question: "Pronouns", kind: "text", required: false }],
               reveal: ["c9"],
             },
             usedModel: "m",
@@ -247,7 +245,7 @@ describe("reviewForm", () => {
   });
 
   it("recovers only omitted verdicts with the original context and preserves discoveries and checked answers", async () => {
-    const discovery = { refs: ["c4"], question: "Pronouns", kind: "text", required: false, answer: null };
+    const discovery = { refs: ["c4"], question: "Pronouns", kind: "text", required: false };
     const { ctx, calls } = harness(
       { data: { ...reply([{ fieldId: "f1", verdict: "ok" }]), missed: [discovery], reveal: ["c9"] } },
       {
@@ -286,7 +284,7 @@ describe("reviewForm", () => {
     ]);
     expect(r).toEqual({
       fixes: [fix({ fieldId: "f2", question: "Preferred name" })],
-      missed: [{ ...discovery, reason: "" }],
+      missed: [discovery],
       reveal: ["c9"],
       usedModel: "fallback",
     });
@@ -351,10 +349,33 @@ describe("reviewForm", () => {
   });
 
   it("keeps discovery-only reviews working without a recovery call", async () => {
-    const discovery = { refs: ["c1"], question: "Preferred name", kind: "text", required: false, answer: "Ada" };
+    const discovery = { refs: ["c1"], question: "Preferred name", kind: "text", required: false };
     const { ctx, calls } = harness({ data: { ...reply(), missed: [discovery] } });
-    expect((await reviewForm(ctx, input([]))).missed).toEqual([{ ...discovery, reason: "" }]);
+    expect((await reviewForm(ctx, input([]))).missed).toEqual([discovery]);
     expect(calls).toHaveLength(1);
+  });
+
+  it("requests only missed-control metadata and tolerates legacy answers without using them", async () => {
+    const discovery = { refs: ["c1"], question: "Preferred name", kind: "text", required: false };
+    const data = {
+      ...reply([fix({})]),
+      missed: [{ ...discovery, answer: "Unused answer", reason: "Unused reason", sources: ["guess"] }],
+    };
+    const parsed = ReviewZ.parse(data);
+    expect(parsed.missed).toEqual([discovery]);
+    // Answers and evidence for existing fields are still part of the review.
+    expect(parsed.fields).toEqual([fix({})]);
+    const { ctx, calls } = harness({ data });
+    const r = await reviewForm(ctx, input([field({})]));
+    expect(r.missed).toEqual([discovery]);
+    expect(r.fixes).toEqual([fix({ question: "Preferred name" })]);
+    expect(calls[0].spec.schema).toBe(REVIEW_SCHEMA);
+    expect(Object.keys(REVIEW_SCHEMA.properties.missed.items.properties)).toEqual([
+      "refs",
+      "question",
+      "kind",
+      "required",
+    ]);
   });
 
   it("does not start recovery after cancellation", async () => {
@@ -399,7 +420,7 @@ describe("reconcile", () => {
       ["c2", document.getElementById("n")!],
       ["c3", document.getElementById("s")!],
     ]);
-    const m = { question: "Authorized?", kind: "radio_group" as const, required: true, answer: "Yes", reason: "" };
+    const m = { question: "Authorized?", kind: "radio_group" as const, required: true };
     const a = adoption({ ...m, refs: ["c1", "c2"] }, refs);
     expect(a?.[1]).toMatchObject({ kind: "radio_group", label: "Authorized?", required: true });
     expect(a?.[1].members?.map((e) => e.id)).toEqual(["y", "n"]);

@@ -1012,7 +1012,7 @@ function reviewField(h: FieldHandle): ReviewField {
 }
 
 /** A file the review says is missing: the same résumé or cover letter a fill would upload. */
-async function reviewUpload(h: FieldHandle, groupId: string, ctrl: AbortController, why: string) {
+function reviewUpload(h: FieldHandle, groupId: string, ctrl: AbortController, why: string): Promise<void> | undefined {
   if (isResumeUpload(h) && config.settings.resumeUpload === "tailor") return tailoredUpload(h, groupId, ctrl);
   const doc = primaryDocFor(h);
   if (doc) return doFill(h, { type: "file", documentId: doc }, "filled", why, ctrl);
@@ -1067,9 +1067,11 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
       const h = handles.get(fix.fieldId);
       const s = h && states.get(h.id);
       if (!h || s?.userOwned) continue;
+      let relabeled = false;
       if (fix.verdict === "relabel" && fix.question && fix.question !== h.desc.label) {
         scanState.relabeled.set(h.el, fix.question);
         h.desc.label = fix.question;
+        relabeled = true;
       }
       const why = `Review: ${fix.reason || "corrected"}`;
       const suggestion = fix.answer ? `Suggested: ${fix.answer}` : undefined;
@@ -1093,9 +1095,13 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         setStatus(h, yolo && readValue(h) ? "check" : "needs", left, suggestion);
         continue;
       }
-      changed = true;
+      changed ||= relabeled;
       if (h.desc.kind === "file") {
-        jobs.push(reviewUpload(h, groupId, ctrl, why));
+        const upload = reviewUpload(h, groupId, ctrl, why);
+        if (upload) {
+          changed = true;
+          jobs.push(upload);
+        }
         continue;
       }
       // Prose is the essay writer's (its rules against AI-sounding text, the question's limits), not the review's.
@@ -1108,6 +1114,7 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         }
         const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
         const kind = RE_COVER_LETTER.test(h.desc.label) ? "cover_letter" : "essay";
+        changed = true;
         essays.push({ fieldId: h.id, question: h.desc.label, hint: h.desc.hint, ...limits, kind });
         continue;
       }
@@ -1123,6 +1130,8 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
       // A YOLO best guess is logged and badged like the mapping's guesses.
       // A YOLO best guess, or an answer the screening policy permits, is logged and badged like the mapping's.
       const tooltip = screening ? SCREENING_SOURCE : yolo && fix.sources.includes("guess") ? "guess" : why;
+      // An attempted write still needs checking: even a failed widget can change the page or reveal questions.
+      changed = true;
       jobs.push(doFill(h, op, "ai", tooltip, ctrl));
     }
     if (essays.length) jobs.push(draftEssays(essays, groupId, ctrl, () => undefined));

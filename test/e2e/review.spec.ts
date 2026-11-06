@@ -1,5 +1,6 @@
 // The AI review after a fill: it corrects a value the page changed and fills a question the scan missed.
-import { BASE, expect, fillPage, seed, test, waitDone } from "./extension";
+import type { ReviewField } from "../../src/shared/review";
+import { BASE, badge, expect, fillPage, seed, test, waitDone } from "./extension";
 
 test("review corrects a wrong value and answers a question the scan missed", async ({ page, sw, mock }) => {
   await seed(sw, { caps: true });
@@ -51,6 +52,133 @@ test("review off: the fill is as before, with no review call", async ({ page, sw
   await expect(page.locator("#ln")).toHaveValue("Parsed-Surname");
   await expect(page.locator("#status")).toHaveText("");
   expect(mock.calls_("review")).toHaveLength(0);
+});
+
+for (const { name, question, control, answer } of [
+  {
+    name: "essay drafting is disabled",
+    question: "Additional information",
+    control: '<textarea id="target" required></textarea>',
+    answer: "A detailed answer about the candidate. ".repeat(8),
+  },
+  {
+    name: "a checkbox answer cannot be applied",
+    question: "Fieldwork availability",
+    control: '<input id="target" type="checkbox" required>',
+    answer: "Sometimes",
+  },
+  {
+    name: "an upload has no matching document",
+    question: "Transcript",
+    control: '<input id="target" type="file" accept="application/pdf" required>',
+    answer: "Transcript",
+  },
+]) {
+  test(`review stops after a skipped correction when ${name}`, async ({ page, sw, mock }) => {
+    mock.review = (payload) => ({
+      fields: (payload.fields as ReviewField[]).map((f) =>
+        f.question.startsWith(question) && !f.locked
+          ? { fieldId: f.id, verdict: "fill", answer, reason: "Profile", sources: ["resume"] }
+          : { fieldId: f.id, verdict: "ok" },
+      ),
+      missed: [],
+      reveal: [],
+    });
+    await seed(sw, { caps: true, settings: { draftEssays: false } });
+    await page.goto(BASE + "review.html");
+    await page
+      .locator("#apply")
+      .evaluate(
+        (form, html) => (form.innerHTML = html),
+        `<div class="row"><label for="target">${question} *</label>${control}</div>`,
+      );
+    await fillPage(page, sw);
+    await waitDone(page);
+    const reviews = mock.calls_("review");
+    expect(reviews).toHaveLength(1);
+    const fields = reviews[0].payload?.fields as ReviewField[];
+    expect(fields).toHaveLength(1);
+    expect(fields[0].locked).not.toBe(true);
+    await expect(badge(page, question)).toHaveAttribute("data-color", "yellow");
+    if (name === "a checkbox answer cannot be applied") await expect(page.locator("#target")).not.toBeChecked();
+    else await expect(page.locator("#target")).toHaveValue("");
+    expect(mock.calls_("essay")).toHaveLength(0);
+  });
+}
+
+test("review still rescans when an attempted correction is rejected and reveals a question", async ({
+  page,
+  sw,
+  mock,
+}) => {
+  mock.review = (payload) => ({
+    fields: (payload.fields as ReviewField[]).map((f) =>
+      f.question.startsWith("Fieldwork details") && !f.shown
+        ? { fieldId: f.id, verdict: "fill", answer: "Reviewed answer", reason: "Profile", sources: ["resume"] }
+        : { fieldId: f.id, verdict: "ok" },
+    ),
+    missed: [],
+    reveal: [],
+  });
+  await seed(sw, { caps: true });
+  await page.goto(BASE + "review.html");
+  await page.locator("#apply").evaluate((form) => {
+    form.innerHTML =
+      '<div class="row"><label for="target">Fieldwork details *</label><input id="target" required></div>';
+    const input = form.querySelector<HTMLInputElement>("#target")!;
+    input.addEventListener("input", () => {
+      if (input.value !== "Reviewed answer") return;
+      input.value = "Rejected answer";
+      if (!form.querySelector("#follow"))
+        form.insertAdjacentHTML(
+          "beforeend",
+          '<div class="row"><label for="follow">First name *</label><input id="follow" required></div>',
+        );
+    });
+  });
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(page.locator("#target")).toHaveValue("Rejected answer");
+  await expect(page.locator("#follow")).toHaveValue("Ada");
+  const reviews = mock.calls_("review");
+  expect(reviews).toHaveLength(2);
+  const fields = reviews[1].payload?.fields as ReviewField[];
+  expect(fields.find((f) => f.question.startsWith("Fieldwork details"))).toMatchObject({
+    status: "check",
+    shown: "Rejected answer",
+  });
+  expect(fields.find((f) => f.question.startsWith("First name"))).toMatchObject({ shown: "Ada" });
+});
+
+test("review retains a follow-up check when a skipped correction also relabels a field", async ({ page, sw, mock }) => {
+  mock.review = (payload) => ({
+    fields: (payload.fields as ReviewField[]).map((f) =>
+      f.question.startsWith("Fieldwork availability")
+        ? {
+            fieldId: f.id,
+            verdict: "relabel",
+            question: "Travel availability",
+            answer: "Sometimes",
+            reason: "Label corrected",
+            sources: ["resume"],
+          }
+        : { fieldId: f.id, verdict: "ok" },
+    ),
+    missed: [],
+    reveal: [],
+  });
+  await seed(sw, { caps: true });
+  await page.goto(BASE + "review.html");
+  await page.locator("#apply").evaluate((form) => {
+    form.innerHTML =
+      '<div class="row"><label for="target">Fieldwork availability *</label><input id="target" type="checkbox" required></div>';
+  });
+  await fillPage(page, sw);
+  await waitDone(page);
+  const reviews = mock.calls_("review");
+  expect(reviews).toHaveLength(2);
+  expect((reviews[1].payload?.fields as ReviewField[])[0]).toMatchObject({ question: "Travel availability" });
+  await expect(page.locator("#target")).not.toBeChecked();
 });
 
 test("review traps: hidden instructions never reach the AI, honeypots and trap questions stay empty", async ({

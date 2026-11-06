@@ -39,8 +39,6 @@ export interface ReviewMissed {
   question: string;
   kind: FieldKind;
   required: boolean;
-  answer: string | null;
-  reason: string;
 }
 
 export interface ReviewResult {

@@ -238,8 +238,6 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
       question: m.question.trim(),
       kind: m.kind,
       required: m.required,
-      answer: m.answer,
-      reason: m.reason ?? "",
     }));
   return { fixes, missed, reveal: r.data.reveal, usedModel: r.usedModel };
 }

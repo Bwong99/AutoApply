@@ -221,9 +221,6 @@ const MISSED_PROPS = {
   question: { type: "STRING" },
   kind: { type: "STRING", enum: [...KINDS] },
   required: { type: "BOOLEAN" },
-  reason: nullableStr,
-  answer: nullableStr,
-  sources: { type: "ARRAY", items: { type: "STRING" } },
 };
 export const REVIEW_SCHEMA = {
   type: "OBJECT",
@@ -278,12 +275,6 @@ export const ReviewZ = z.object({
         question: z.string(),
         kind: z.enum(KINDS).catch("text"),
         required: z.boolean().catch(false),
-        reason: str,
-        answer: z
-          .string()
-          .nullish()
-          .transform((v) => v ?? null),
-        sources: z.array(z.string()).catch([]),
       }),
     )
     .catch([]),
