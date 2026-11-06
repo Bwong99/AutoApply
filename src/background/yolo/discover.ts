@@ -2,6 +2,7 @@
 import { createStorage } from "../../shared/storage";
 import {
   SOURCE_GROUPS,
+  sourceGroup,
   type Application,
   type Listing,
   type QueueItem,
@@ -76,14 +77,7 @@ export function applied(apps: Application[], key: string, alt: string, reapplyMa
 
 /** A requeued job's `postedAt`: it runs next, whatever the order. */
 export const RETRY = Number.MAX_SAFE_INTEGER;
-// careerSite's sources: its ATS APIs' names, or "careers" for a rendered page.
-const CAREERS = new Set(["careers", "greenhouse", "lever", "ashby", "smartrecruiters", "workday"]);
-const groupOf = (source: string): SourceGroup =>
-  (SOURCE_GROUPS as readonly string[]).includes(source)
-    ? (source as SourceGroup)
-    : CAREERS.has(source)
-      ? "careers"
-      : "feeds";
+const groupOf = sourceGroup;
 
 type Ranked = Pick<Listing, "source" | "postedAt"> & { addedAt?: number };
 
@@ -266,6 +260,19 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       await safely(() => careerSite(d.fetch, d.scrape ?? (async () => []), url, q));
   }
 
+  // Merge provenance only: the representative listing, filtering and order stay unchanged.
+  const origins = new Map<string, Set<SourceGroup>>();
+  for (const l of [...s.yoloQueue, ...found]) {
+    for (const k of [jobKey(l.url), altKey(l.company, l.title)]) {
+      if (!k) continue;
+      const groups = origins.get(k) ?? new Set<SourceGroup>();
+      for (const g of l.sourceGroups?.length ? l.sourceGroups : [sourceGroup(l.source)]) groups.add(g);
+      origins.set(k, groups);
+    }
+  }
+  const groupsFor = (l: Listing) => [
+    ...new Set([...(origins.get(jobKey(l.url)) ?? []), ...(origins.get(altKey(l.company, l.title)) ?? [])]),
+  ];
   // New postings that fit, each looked at once.
   const fresh: Listing[] = [];
   const keys = new Set<string>();
@@ -318,6 +325,7 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       title: l.title,
       location: l.location,
       source: l.source,
+      sourceGroups: groupsFor(l),
       postedAt: l.postedAt ?? now,
       addedAt: now,
     });
@@ -326,7 +334,7 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   for (const [k, at] of Object.entries(seen)) if (now - at > SEEN_DAYS * 86400e3) delete seen[k];
   await store.set({
     yoloSeen: seen,
-    yoloQueue: [...s.yoloQueue, ...items],
+    yoloQueue: [...s.yoloQueue.map((l) => ({ ...l, sourceGroups: groupsFor(l) })), ...items],
     feedCache: s.feedCache,
     employerBoards: s.employerBoards,
   });

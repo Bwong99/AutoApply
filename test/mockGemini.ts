@@ -189,6 +189,7 @@ export class MockGemini {
   delayMs = 0;
   /** The résumé tailor's edit operations; by default, the first bullet group reversed and its first bullet reworded. */
   tailorOps: ((payload: Json) => Json) | null = null;
+  navigation: ((payload: Json) => Json) | null = null;
 
   /**
    * The AI review: every field "ok", except the profile's names and email shown wrong ("wrong" with the profile's),
@@ -342,6 +343,7 @@ export class MockGemini {
     if (kind === "review") return send(200, reply(this.review(payload)), call);
     // The navigator: the way in a posting words oddly ("Begin your journey"), else no way on.
     if (kind === "navigate") {
+      if (this.navigation) return send(200, reply(this.navigation(payload)), call);
       const ref = /\[(c\d+) link "Begin your journey[^"]*"/.exec(String(payload.page))?.[1];
       return send(
         200,

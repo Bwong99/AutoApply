@@ -23,6 +23,8 @@ import {
   press,
   pressable,
   RE_APPLY,
+  RE_NEXT,
+  RE_SUBMIT,
   validationErrors,
 } from "./nav";
 
@@ -43,6 +45,8 @@ export interface DriverDeps {
   /** Fields inside these validation messages' containers are filled again on the next pass. */
   refill(errors: HTMLElement[]): void;
   guesses(): Guess[];
+  hasGuessedAnswers?(): boolean;
+  handoff?(): void;
   /** The address the run applies with. */
   email(): string;
   /** Every field shown on the page and its answer, blank or not, keyed by document and field. */
@@ -128,9 +132,28 @@ export async function drive(deps: DriverDeps) {
   const hello = await send({ type: "YOLO_HELLO", url: location.href }).catch(() => null);
   if (!hello) return void (driving = false);
   setRealMode(hello.realInput);
-  const result = (r: YoloResult) => void send({ type: "YOLO_RESULT", result: r }).catch(() => undefined);
+  const result = (r: YoloResult) =>
+    void send({ type: "YOLO_RESULT", result: r, runId: hello.runId }).catch(() => undefined);
   // The fill pipeline marks its own end; the run is still working after it.
   const fill = () => deps.fill().finally(() => busy(true));
+  /** Every protected final action must receive explicit permission from the current run. */
+  const beforeSubmit = async (ambiguous = false): Promise<boolean> => {
+    if (!hello.submissionReview) return true;
+    const permission = await send({
+      type: "YOLO_BEFORE_SUBMIT",
+      runId: hello.runId,
+      ambiguous,
+      hasGuessedAnswers: deps.hasGuessedAnswers?.() ?? false,
+      guesses: deps.guesses(),
+    }).catch(() => null);
+    if (permission?.action === "submit") return true;
+    busy(false);
+    setRealMode("off");
+    deps.handoff?.();
+    if (permission?.action !== "held")
+      result({ status: "needs", reason: "Submission permission could not be verified; nothing was submitted." });
+    return false;
+  };
   const dryStop = (label: string) =>
     result({
       status: "needs",
@@ -177,6 +200,15 @@ export async function drive(deps: DriverDeps) {
       return null;
     }
     if (!pressable(el)) return null;
+    const account = reply.state === "account" || reply.state === "verify" || facts.passwords > 0;
+    const final = reply.purpose === "final_submit" || (!account && RE_SUBMIT.test(labelOf(el)));
+    const ambiguous =
+      !account &&
+      !final &&
+      reply.purpose !== "dismiss" &&
+      !(reply.purpose === "open_application" && reply.state === "posting") &&
+      !RE_NEXT.test(labelOf(el));
+    if ((final || ambiguous) && !(await beforeSubmit(ambiguous))) return "end";
     if (reply.purpose === "final_submit") {
       if (DRY) {
         dryStop(labelOf(el));
@@ -348,6 +380,7 @@ export async function drive(deps: DriverDeps) {
             type: "YOLO_ANSWERS",
             answers: deps.debug ? deps.answers() : {},
             guesses: deps.guesses(),
+            hasGuessedAnswers: deps.hasGuessedAnswers?.() ?? false,
           }).catch(() => undefined);
           if (rep.retryAt) return result({ status: "failed", reason: "AI usage limit reached", retryAt: rep.retryAt });
           if (rep.fatal) return needs(rep.fatal);
@@ -380,6 +413,10 @@ export async function drive(deps: DriverDeps) {
                 .map((g) => `${g.q} = ${g.a}`)
                 .join("\n")}`,
             );
+          // A stable Next selector can also identify the final button; inspect its actual label too.
+          const final = !next || (!signupForm && RE_SUBMIT.test(labelOf(b)));
+          const ambiguous = !!next && !signupForm && /\bsubmit\b/i.test(labelOf(b)) && !RE_SUBMIT.test(labelOf(b));
+          if ((final || ambiguous) && !(await beforeSubmit(ambiguous))) return;
           // A score check loaded during the fill: the step is classified again, so the hidden frame hands it to a tab.
           if (!next && IN_HOST && !facts.scored && scoreCheck()) continue;
           // Invisible CAPTCHAs score the page as it submits: it gets its own built-ins back first (pageTimers.ts).

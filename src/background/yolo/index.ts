@@ -8,6 +8,7 @@ import type { AiTask } from "../../shared/settings";
 import type { ApiError, DocumentMeta, Settings } from "../../shared/types";
 import {
   defaultYolo,
+  hasReviewRules,
   type Application,
   type Guess,
   type Listing,
@@ -22,7 +23,22 @@ import { FALLBACK, tailoredDoc } from "../services/tailorResume";
 import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
-import { realInput, realInputReady } from "./realInput";
+import { realInput, realInputReady, releaseRealInput } from "./realInput";
+import { recordApplication, updateApplications } from "./applicationStore";
+import { completedSince, needsReviewTab, pendingReview, reviewReasons } from "./submissionReview";
+import {
+  dismissReview,
+  initReviewTabs,
+  nextReviewRefill,
+  openReview,
+  queueReviewRefill,
+  releaseReview,
+  retainReview,
+  reviewAttempt,
+  reviewList,
+  reviewRefillStarted,
+  submitReview,
+} from "./reviewTabs";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, indeedSignedOutNow, inQueueOrder, readIndeed, RETRY } from "./discover";
 import {
@@ -100,8 +116,7 @@ const mergeGuesses = (a: Guess[], b: Guess[] = []) => [...a.filter((g) => !b.som
 
 /** One record per posting: a later outcome (the user resuming a "needs you") replaces the earlier one. */
 async function record(a: Application) {
-  const apps = (await store.get("applications")).filter((x) => x.key !== a.key);
-  await store.set({ applications: [...apps, a] });
+  await recordApplication(a);
 }
 
 // ---------- timer ----------
@@ -112,7 +127,7 @@ async function schedule() {
   if (!on) {
     if (a) await chrome.alarms.clearAll();
     const run = await getRun();
-    if (run) await end(run.id);
+    if (run && !run.reviewKey) await end(run.id);
     await closeFrame().catch(() => undefined);
     return;
   }
@@ -163,7 +178,7 @@ function cycle(topUp = false): Promise<void> {
         scrape: busy ? undefined : scrape,
         indeedTab,
         relevance: yolo.aiRelevanceCheck ? relevance : undefined,
-        want: yolo.batchSize - submittedSince(apps, state.batchAt) - queue.length,
+        want: yolo.batchSize - completedSince(apps, state.batchAt) - queue.length,
         jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
         indeedSignedOut: (out) => setState({ indeedSignedOut: out }),
         indeedBlocked: (blocked) => setState({ indeedBlocked: blocked }),
@@ -219,7 +234,7 @@ async function topUp(): Promise<boolean> {
   // Not when the next batch, which discovers anyway, is due within minutes (or YOLO was just turned on).
   if (!next || next.scheduledTime - Date.now() < 5 * 60e3) return false;
   if (cycling || !yolo.queries.length || state.batchAt === dryBatch || state.pausedUntil > Date.now()) return false;
-  if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) return false;
+  if (completedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) return false;
   void cycle(true);
   return true;
 }
@@ -271,12 +286,37 @@ async function pump() {
   if (pumping) return;
   pumping = true;
   try {
-    if (!yolo.enabled || (await getRun())) return;
-    const queue = await store.get("yoloQueue");
-    if (!queue.length) return void ((await topUp()) || (await closeFrame().catch(() => undefined)));
+    if (await getRun()) return;
     const state = await store.get("yoloState");
     if (state.pausedUntil > Date.now()) return;
-    if (submittedSince(await store.get("applications"), state.batchAt) >= yolo.batchSize) {
+    const refill = await nextReviewRefill();
+    if (refill) {
+      await releaseReview(refill.key, true);
+      await start({ ...refill, listing: "", postedAt: 0, addedAt: Date.now() }, "apply", "visible", {
+        policy: { ...yolo.submissionReview, mode: "all" },
+        key: refill.key,
+        tab: true,
+      });
+      await reviewRefillStarted();
+      return;
+    }
+    if (!yolo.enabled) return;
+    const apps = await store.get("applications");
+    const policy = yolo.submissionReview;
+    if (policy.mode === "matching" && !hasReviewRules(policy)) {
+      await setState({ pauseReason: "Select at least one review rule in YOLO settings" });
+      return;
+    }
+    if (policy.mode !== "off" && apps.filter(pendingReview).length >= policy.maxPending) {
+      await setState({
+        pauseReason: `Review limit reached (${policy.maxPending}). Submit or dismiss a pending review.`,
+      });
+      await closeFrame().catch(() => undefined);
+      return;
+    }
+    const queue = await store.get("yoloQueue");
+    if (!queue.length) return void ((await topUp()) || (await closeFrame().catch(() => undefined)));
+    if (completedSince(apps, state.batchAt) >= yolo.batchSize) {
       await setState({ pauseReason: "Batch done" });
       return void (await closeFrame().catch(() => undefined));
     }
@@ -288,7 +328,13 @@ async function pump() {
     await store.set({ yoloQueue: rest });
     await setState({ pauseReason: "" });
     const tab = yolo.tabFallback && (await store.get("yoloTabHosts")).includes(hostOf(applyUrl(item.url)));
-    await start(item, "apply", tab ? "tab" : "frame");
+    const reviewTab = needsReviewTab(policy, item);
+    await start(
+      item,
+      "apply",
+      tab || reviewTab ? "tab" : "frame",
+      policy.mode === "off" ? undefined : { policy, tab: reviewTab },
+    );
   } finally {
     pumping = false;
   }
@@ -300,6 +346,11 @@ async function pause(until: number, reason: string) {
 }
 
 async function requeue(item: QueueItem) {
+  const held = (await store.get("applications")).find((a) => a.key === item.key && pendingReview(a));
+  if (held) {
+    await queueReviewRefill(held.key);
+    return;
+  }
   await store.set({ yoloQueue: [{ ...item, postedAt: RETRY }, ...(await store.get("yoloQueue"))] });
 }
 
@@ -339,6 +390,13 @@ async function recoverLost() {
   const item = await store.get("yoloInFlight");
   if (!item || (await getRun())) return;
   await store.set({ yoloInFlight: null });
+  // A worker may have stopped after saving the handoff and before clearing its in-flight marker.
+  if (
+    (await store.get("applications")).some(
+      (a) => a.review && (a.key === item.key || (!!item.alt && a.alt === item.alt)),
+    )
+  )
+    return;
   if ((item.retries ?? 0) >= 2) return;
   await requeue({ ...item, retries: (item.retries ?? 0) + 1 });
   if (yolo.enabled) await whenOnline("pump");
@@ -349,6 +407,10 @@ async function recoverLost() {
  * refused, re-queued on a quota stop, else logged.
  */
 async function finish(run: Run, r: YoloResult) {
+  if (run.reviewTab && run.tabId !== undefined && (r.status === "needs" || r.status === "failed") && !r.retryAt) {
+    await holdForReview(run, "needs", r.reason);
+    return;
+  }
   if (await sleptThrough(run, r)) {
     if (!(await end(run.id))) return;
     const limit = deps.logLimit();
@@ -361,7 +423,18 @@ async function finish(run: Run, r: YoloResult) {
   const limit = deps.logLimit();
   if (limit) await logRun(run, r, limit);
   if (r.status === "blocked" && run.host === "frame" && yolo.tabFallback) {
-    await start(run.item, "apply", "tab");
+    await start(
+      run.item,
+      "apply",
+      "tab",
+      run.reviewPolicy
+        ? {
+            policy: run.reviewPolicy,
+            key: run.reviewKey,
+            tab: !!run.reviewTab,
+          }
+        : undefined,
+    );
     return;
   }
   if (r.status !== "submitted" && r.status !== "scraped" && r.retryAt) {
@@ -370,25 +443,62 @@ async function finish(run: Run, r: YoloResult) {
     return;
   }
   const { item } = run;
+  const previous = run.reviewKey ? (await store.get("applications")).find((a) => a.key === run.reviewKey) : undefined;
   const a: Application = {
-    key: run.atsUrl ? jobKey(run.atsUrl) : item.key,
+    key: previous?.key ?? (run.atsUrl ? jobKey(run.atsUrl) : item.key),
     alt: item.alt,
     url: run.atsUrl ?? applyUrl(item.url),
     company: item.company,
     title: item.title,
     location: item.location,
     source: item.source,
+    sourceGroups: item.sourceGroups,
+    ...(previous?.review ? { review: previous.review } : {}),
+    ...(previous?.review && r.status === "submitted" ? { submittedBy: "user" as const } : {}),
     doneUrl: r.status === "submitted" ? r.doneUrl : "",
     mode: "yolo",
     status: r.status === "blocked" || r.status === "scraped" ? "failed" : r.status,
     reason: "reason" in r ? r.reason : "",
-    guesses: mergeGuesses(run.guesses, "guesses" in r ? r.guesses : []),
-    notes: run.notes ?? [],
+    guesses: mergeGuesses(mergeGuesses(previous?.guesses ?? [], run.guesses), "guesses" in r ? r.guesses : []),
+    notes: [...new Set([...(previous?.notes ?? []), ...(run.notes ?? [])])],
     at: Date.now(),
   };
   await record(a);
   if (a.status === "needs" && run.host !== "visible")
     notify(`yolo:${a.key}`, "AutoApply needs you", `${a.company} – ${a.title}: ${a.reason}`);
+  void pump();
+}
+
+/** Save first, then stop driving, retaining the actual document and its uploads. */
+async function holdForReview(run: Run, status: "review" | "needs", reason = "") {
+  if (run.tabId === undefined || (await getRun())?.id !== run.id) return;
+  const old = (await store.get("applications")).find((a) => a.key === run.reviewKey);
+  const key = old?.key ?? (run.atsUrl ? jobKey(run.atsUrl) : run.item.key);
+  const reasons =
+    old?.review?.reasons ?? reviewReasons(run.reviewPolicy ?? yolo.submissionReview, run.item, run.hasGuessedAnswers);
+  const a: Application = {
+    ...run.item,
+    key,
+    url: run.atsUrl ?? applyUrl(run.item.url),
+    doneUrl: "",
+    mode: "yolo",
+    status,
+    reason,
+    guesses: mergeGuesses(old?.guesses ?? [], run.guesses),
+    notes: [...new Set([...(old?.notes ?? []), ...(run.notes ?? [])])],
+    review: {
+      reasons: reasons.length ? reasons : ["Review preparation needs your help"],
+      preparedAt: old?.review?.preparedAt || (status === "review" ? Date.now() : 0),
+    },
+    at: Date.now(),
+  };
+  await record(a);
+  if (!(await end(run.id, true))) return;
+  await releaseRealInput(run.tabId);
+  await retainReview(key, run.tabId, run.documentId);
+  const limit = deps.logLimit();
+  if (limit) await logRun(run, { status: "needs", reason: reason || "Ready for your review" }, limit);
+  await setState({ reviewUpdatedAt: Date.now() });
   void pump();
 }
 
@@ -454,9 +564,24 @@ async function watchdog(due: number) {
 async function resume(key: string): Promise<Responses["YOLO_RESUME"]> {
   const a = (await store.get("applications")).find((x) => x.key === key);
   if (!a) return { error: { kind: "other", message: "Unknown application" } };
+  if (a.review) {
+    if (!(await openReview(key))) {
+      await queueReviewRefill(key);
+      void pump();
+    }
+    return { ok: true };
+  }
   const run = await getRun();
   if (run && (await end(run.id)) && run.mode === "apply") await requeue(run.item);
-  await start({ ...a, listing: "", postedAt: 0, addedAt: Date.now() }, "apply", "visible");
+  const policy = yolo.submissionReview;
+  await start(
+    { ...a, listing: "", postedAt: 0, addedAt: Date.now() },
+    "apply",
+    "visible",
+    policy.mode === "off"
+      ? undefined
+      : { policy, tab: needsReviewTab(policy, { ...a, listing: "", postedAt: 0, addedAt: 0 }) },
+  );
   return { ok: true };
 }
 
@@ -571,6 +696,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       batchSize: yolo.batchSize,
       queued: queue.length,
       needsYou: apps.filter((a) => a.status === "needs").length,
+      pendingReviews: apps.filter(pendingReview).length,
+      preparedBatch: apps.filter((a) => a.review?.preparedAt && a.review.preparedAt >= state.batchAt).length,
       nextCheckAt: alarm?.scheduledTime ?? null,
       running: run?.mode === "apply" ? `${run.item.company} – ${run.item.title}` : null,
       paused: state.gmailNeedsAuth ? "Reconnect Gmail in Settings" : state.pauseReason,
@@ -623,10 +750,45 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
 
   YOLO_RESUME: ({ key }) => resume(key),
 
+  async YOLO_REVIEW_LIST() {
+    const list = await reviewList();
+    const run = await getRun();
+    if (run?.reviewKey) list.refilling.push(run.reviewKey);
+    return list;
+  },
+  async YOLO_REVIEW_OPEN({ key }) {
+    return (await openReview(key))
+      ? { ok: true }
+      : {
+          error: {
+            kind: "other",
+            message: "The filled tab is no longer available. Use Refill for review; earlier edits may be lost.",
+          },
+        };
+  },
+  async YOLO_REVIEW_REFILL({ key }) {
+    if (!(await store.get("applications")).some((a) => a.key === key && pendingReview(a)))
+      return { error: { kind: "other", message: "This application is no longer awaiting review." } };
+    if ((await getRun())?.reviewKey !== key) await queueReviewRefill(key);
+    void pump();
+    return { ok: true };
+  },
+  async YOLO_REVIEW_DISMISS({ key }) {
+    await dismissReview(key);
+    return { ok: true };
+  },
+  async YOLO_REVIEW_MARK_SUBMITTED({ key }) {
+    await submitReview(key);
+    return { ok: true };
+  },
+
   async YOLO_FORGET({ key }) {
-    const [apps, seen] = await Promise.all([store.get("applications"), store.get("yoloSeen")]);
+    const seen = await store.get("yoloSeen");
     delete seen[key];
-    await store.set({ applications: apps.filter((a) => a.key !== key), yoloSeen: seen });
+    await releaseReview(key);
+    await updateApplications((apps) => apps.filter((a) => a.key !== key));
+    await store.set({ yoloSeen: seen });
+    void pump();
     return { ok: true };
   },
 
@@ -676,8 +838,11 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     if (!fromRun(run, sender)) return null;
     const skipped = run.mode === "apply" && !run.helloAt && applyUrl(run.item.url) !== run.item.url;
     run.helloAt = run.stepAt = Date.now();
+    run.documentId = sender.documentId;
     await saveRun(run);
     return {
+      runId: run.id,
+      submissionReview: run.reviewPolicy?.mode !== undefined && run.reviewPolicy.mode !== "off",
       mode: run.mode,
       company: run.item.company,
       title: run.item.title,
@@ -723,7 +888,14 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     // Reached the employer's own posting from a board link: it may be one applied to through another source.
     if (!run.atsUrl && /^(form|signin|signup)$/.test(kind) && hostOf(url) !== hostOf(run.item.url)) {
       run.atsUrl = url;
-      if (applied(await store.get("applications"), jobKey(url), run.item.alt, yolo.reapplyManual))
+      if (
+        applied(
+          (await store.get("applications")).filter((a) => a.key !== run.reviewKey),
+          jobKey(url),
+          run.item.alt,
+          yolo.reapplyManual,
+        )
+      )
         stop = "Already applied through another link";
     }
     if (run.steps.filter((s) => s === sig).length >= 3)
@@ -750,17 +922,54 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     return { ok: await realInput(tabId, op) };
   },
 
-  async YOLO_RESULT({ result }, sender) {
+  async YOLO_RESULT({ result, runId }, sender) {
     const run = await getRun();
-    if (fromRun(run, sender)) await finish(run, result);
+    if (
+      fromRun(run, sender) &&
+      (!runId || run.id === runId) &&
+      (!run.documentId || run.documentId === sender.documentId)
+    )
+      await finish(run, result);
     return { ok: true };
   },
 
-  async YOLO_ANSWERS({ answers, guesses }, sender) {
+  async YOLO_BEFORE_SUBMIT({ runId, hasGuessedAnswers, guesses, ambiguous }, sender) {
+    const run = await getRun();
+    if (
+      !fromRun(run, sender) ||
+      run.id !== runId ||
+      run.mode !== "apply" ||
+      (run.host !== "frame" && (sender.frameId ?? 0) !== 0) ||
+      (!!run.documentId && run.documentId !== sender.documentId)
+    )
+      return { action: "stop" };
+    run.hasGuessedAnswers ||= hasGuessedAnswers;
+    run.guesses = mergeGuesses(run.guesses, guesses);
+    await saveRun(run);
+    if (
+      !run.reviewKey &&
+      (!run.reviewPolicy || !reviewReasons(run.reviewPolicy, run.item, run.hasGuessedAnswers).length)
+    )
+      return { action: "submit" };
+    if (run.tabId === undefined) return { action: "stop" };
+    await holdForReview(
+      run,
+      ambiguous ? "needs" : "review",
+      ambiguous ? "Check this action before continuing: it may submit the application." : "",
+    );
+    return { action: "held" };
+  },
+
+  async YOLO_ANSWERS({ answers, guesses, hasGuessedAnswers }, sender) {
     const run = await getRun();
     // A later pass over the same field (a refill) replaces its answer.
     if (fromRun(run, sender))
-      await saveRun({ ...run, answers: { ...run.answers, ...answers }, guesses: mergeGuesses(run.guesses, guesses) });
+      await saveRun({
+        ...run,
+        answers: { ...run.answers, ...answers },
+        guesses: mergeGuesses(run.guesses, guesses),
+        hasGuessedAnswers: run.hasGuessedAnswers || hasGuessedAnswers,
+      });
     return { ok: true };
   },
 
@@ -853,6 +1062,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   },
 
   async APPLY_ATTEMPT({ job, doneUrl }, sender) {
+    if (await reviewAttempt(sender, doneUrl)) return { ok: true };
     const save = (done: string) =>
       record({
         key: jobKey(job.url),
@@ -894,7 +1104,11 @@ export function initYolo(d: YoloDeps) {
   const ready = store.get("yolo").then(async (y) => {
     yolo = y;
     loaded = true;
+    await initReviewTabs(() => {
+      void setState({ reviewUpdatedAt: Date.now() }).then(() => pump());
+    });
     await recoverLost();
+    if ((await reviewList()).refilling.length) void pump();
   });
   store.onChange(["yolo"], (c) => {
     const prev = yolo;

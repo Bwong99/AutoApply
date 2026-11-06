@@ -29,7 +29,10 @@ export function yoloText(y: YoloStatus): string {
   if (!y.enabled) return "Finds new jobs matching your searches and applies to them in the background.";
   return [
     y.running ? `Applying: ${y.running}` : y.nextCheckAt ? `Next batch ${formatTime(y.nextCheckAt)}` : "",
-    `${y.appliedBatch}/${y.batchSize} applied this batch`,
+    y.preparedBatch
+      ? `${y.appliedBatch} submitted · ${y.preparedBatch} prepared for review this batch`
+      : `${y.appliedBatch}/${y.batchSize} applied this batch`,
+    y.pendingReviews ? `${y.pendingReviews} awaiting your review` : "",
     y.queued ? `${y.queued} queued` : "",
     y.needsYou ? `${y.needsYou} need you` : "",
     y.paused,

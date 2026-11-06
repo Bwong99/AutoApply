@@ -24,6 +24,36 @@ export const MAX_BATCH_APPLICATIONS = 500;
 
 export const REAL_INPUT = ["off", "clicks", "typing", "both"] as const;
 
+const reviewBase = z.object({
+  mode: z.enum(["off", "all", "matching"]).catch("off"),
+  sources: z.array(z.enum(SOURCE_GROUPS)).catch([]),
+  fortune: z.enum(["off", "500", "1000"]).catch("off"),
+  companies: strs(),
+  guessedAnswers: b(false),
+  maxPending: n(10, 1, 50),
+});
+export const SubmissionReviewSchema = reviewBase.catch(() => reviewBase.parse({}));
+export type SubmissionReview = z.infer<typeof SubmissionReviewSchema>;
+
+/** Legacy source labels include the ATS used to read a company career site. */
+export function sourceGroup(source: string): SourceGroup {
+  if ((SOURCE_GROUPS as readonly string[]).includes(source)) return source as SourceGroup;
+  return ["greenhouse", "lever", "ashby", "smartrecruiters", "workday"].includes(source) ? "careers" : "feeds";
+}
+
+export const SOURCE_NAMES: Record<SourceGroup, string> = {
+  careers: "Company career sites",
+  feeds: "GitHub job lists",
+  linkedin: "LinkedIn",
+  indeed: "Indeed",
+  glassdoor: "Glassdoor",
+  jobright: "Jobright",
+};
+
+export function hasReviewRules(r: SubmissionReview): boolean {
+  return r.sources.length > 0 || r.fortune !== "off" || r.companies.some((c) => c.trim()) || r.guessedAnswers;
+}
+
 const base = z.object({
   enabled: b(false),
   /** Minutes between batches: each finds new jobs, then applies to up to `batchSize` of the queue. */
@@ -74,6 +104,8 @@ const base = z.object({
   reviewFills: b(true),
   /** Use AI to find the next step when the usual navigation gets stuck. */
   aiNavigation: b(true),
+  /** Human review before the final application submission, independently of AI form review. */
+  submissionReview: SubmissionReviewSchema,
 });
 export const YoloSchema = base.catch(() => base.parse({}));
 export type Yolo = z.infer<typeof YoloSchema>;
@@ -93,6 +125,7 @@ export interface Listing {
   location: string;
   postedAt?: number;
   source: string;
+  sourceGroups?: SourceGroup[];
   /** Applied to on the board itself (LinkedIn Easy Apply, Indeed Apply): not supported yet, so never queued. */
   easyApply?: boolean;
 }
@@ -107,6 +140,7 @@ export const QueueItemSchema = z.object({
   title: z.string().catch(""),
   location: z.string().catch(""),
   source: z.string().catch(""),
+  sourceGroups: z.array(z.enum(SOURCE_GROUPS)).optional().catch(undefined),
   postedAt: z.number().catch(0),
   addedAt: z.number().catch(0),
   /** Times the job was restarted after the computer slept or the browser restarted mid-application. */
@@ -123,7 +157,16 @@ export const ApplicationSchema = QueueItemSchema.omit({
   /** The confirmation page a submission ended on. */
   doneUrl: z.string().catch(""),
   mode: z.enum(["yolo", "manual"]).catch("yolo"),
-  status: z.enum(["submitted", "needs", "failed", "skipped"]).catch("failed"),
+  status: z.enum(["submitted", "needs", "failed", "skipped", "review"]).catch("failed"),
+  review: z
+    .object({
+      reasons: strs(),
+      /** First successful preparation: remains unchanged after refill or manual submission. */
+      preparedAt: z.number().catch(0),
+    })
+    .optional()
+    .catch(undefined),
+  submittedBy: z.enum(["user", "auto"]).optional().catch(undefined),
   reason: z.string().catch(""),
   /** Answers YOLO made up where the profile had none, for the user to review. */
   guesses: z.array(z.object({ q: z.string(), a: z.string() })).catch([]),
@@ -142,6 +185,7 @@ export const VaultEntrySchema = z.object({
 });
 
 export const YoloStateSchema = z.object({
+  reviewUpdatedAt: z.number().catch(0),
   lastCheckAt: z.number().catch(0),
   /** When the current batch started: its submissions are the ones since. */
   batchAt: z.number().catch(0),
@@ -167,6 +211,8 @@ export interface YoloStatus {
   batchSize: number;
   queued: number;
   needsYou: number;
+  pendingReviews?: number;
+  preparedBatch?: number;
   nextCheckAt: number | null;
   running: string | null;
   paused: string;

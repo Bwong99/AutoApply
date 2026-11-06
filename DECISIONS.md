@@ -1,5 +1,12 @@
 # AutoApply — Decisions
 
+## Human review before YOLO submission
+
+- Off by default, independently of AI form review. All applications, or any matching source, US Fortune tier, named company, or guessed/screening answer can require human submission. Rules are snapshotted per run; held applications stay manual after settings changes.
+- Review-capable jobs start in inactive tabs. A live document and its file inputs cannot be transferred safely from the hidden frame; a guessed-answer rule therefore uses tabs for all candidates. Handoff ends the driver/watchdog, restores page modifications and releases trusted input. Only session storage keeps tab identifiers; no DOM snapshots or uploads are exported for this feature.
+- A pending-review limit of 10 (1–50) pauses new applications without changing queue order. Ready applications spend a batch slot once at their first preparation; later manual submission/dismissal preserves that timestamp. Missing or refreshed tabs require an explicit refill, which also works with YOLO off and never submits.
+- The full 2026 Fortune 1000 is bundled from the public ranking's structured data, preserving tied ranks; `node scripts/update-fortune.mjs` validates and updates it. Subsidiary/brand aliases carry corporate source URLs, with no fuzzy ownership inference or runtime network/AI lookups. Company-name rules cover other subsidiaries.
+
 Choices made where PROMPT.md was silent or where the environment forced a deviation. Product name is **AutoApply**; the in-page host element is `<autoapply-root>`.
 
 ## Seed (Appendix D)

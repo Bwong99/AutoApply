@@ -101,12 +101,20 @@ export type Message =
   | { type: "YOLO_HELLO"; url: string }
   /** `guesses`: this page's made-up answers so far; the run keeps every page's. */
   | { type: "YOLO_STEP"; facts: PageFacts; url: string; guesses: Guess[] }
-  | { type: "YOLO_RESULT"; result: YoloResult }
+  | { type: "YOLO_RESULT"; result: YoloResult; runId?: string }
   /**
    * After a fill, before the page moves on: its made-up answers, and with debug logging each field on the page and
    * its answer, keyed by document and field.
    */
-  | { type: "YOLO_ANSWERS"; answers: Record<string, Guess>; guesses: Guess[] }
+  | { type: "YOLO_ANSWERS"; answers: Record<string, Guess>; guesses: Guess[]; hasGuessedAnswers?: boolean }
+  | { type: "YOLO_BEFORE_SUBMIT"; runId: string; ambiguous?: boolean; hasGuessedAnswers: boolean; guesses: Guess[] }
+  | { type: "YOLO_REVIEW_CONTEXT"; key: string; ready: boolean }
+  | { type: "YOLO_REVIEW_PING"; key: string }
+  | { type: "YOLO_REVIEW_LIST" }
+  | { type: "YOLO_REVIEW_OPEN"; key: string }
+  | { type: "YOLO_REVIEW_REFILL"; key: string }
+  | { type: "YOLO_REVIEW_DISMISS"; key: string }
+  | { type: "YOLO_REVIEW_MARK_SUBMITTED"; key: string }
   | { type: "YOLO_CREDENTIAL"; site: string; create: boolean }
   | { type: "YOLO_WAIT_EMAIL"; since: number; want: "link" | "code" }
   | { type: "COVER_LETTER_PDF"; question: string }
@@ -210,6 +218,8 @@ export interface Responses {
   CLAUDE_MODELS: Ok | Err;
   APPLY_ATTEMPT: Ok;
   YOLO_HELLO: {
+    runId: string;
+    submissionReview: boolean;
     mode: "apply" | "scrape";
     company: string;
     title: string;
@@ -228,6 +238,14 @@ export interface Responses {
   /** `ok` false: not done (no debugger, the user cancelled the debugging bar): the caller uses script input. */
   REAL_INPUT: { ok: boolean };
   YOLO_ANSWERS: Ok;
+  YOLO_BEFORE_SUBMIT: { action: "submit" | "held" | "stop" };
+  YOLO_REVIEW_CONTEXT: Ok;
+  YOLO_REVIEW_PING: { ready: boolean };
+  YOLO_REVIEW_LIST: { live: string[]; refilling: string[] };
+  YOLO_REVIEW_OPEN: Ok | Err;
+  YOLO_REVIEW_REFILL: Ok | Err;
+  YOLO_REVIEW_DISMISS: Ok | Err;
+  YOLO_REVIEW_MARK_SUBMITTED: Ok | Err;
   YOLO_CREDENTIAL: { email: string; password: string; created: boolean } | null;
   YOLO_WAIT_EMAIL: { link?: string; code?: string } | Err;
   COVER_LETTER_PDF: { meta: DocumentMeta } | Err;

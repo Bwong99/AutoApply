@@ -1,0 +1,33 @@
+[
+  {
+    "name": "Google",
+    "parent": "Alphabet",
+    "source": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/googexhibit2101q42025.htm"
+  },
+  {
+    "name": "Google LLC",
+    "parent": "Alphabet",
+    "source": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000018/googexhibit2101q42025.htm"
+  },
+  { "name": "Amazon.com", "parent": "Amazon", "source": "https://fortune.com/company/amazon-com/" },
+  { "name": "Amazon Web Services", "parent": "Amazon", "source": "https://aws.amazon.com/privacy/" },
+  { "name": "AWS", "parent": "Amazon", "source": "https://aws.amazon.com/privacy/" },
+  {
+    "name": "GitHub",
+    "parent": "Microsoft",
+    "source": "https://www.microsoft.com/licensing/docs/documents/download/Unified_Enterprise_Support_USSD%28ENG%29%28Nov2025%29.pdf"
+  },
+  { "name": "LinkedIn", "parent": "Microsoft", "source": "https://www.microsoft.com/investor/reports/ar26/index.html" },
+  { "name": "Meta", "parent": "Meta Platforms", "source": "https://www.meta.com/about/company-info/" },
+  { "name": "Facebook", "parent": "Meta Platforms", "source": "https://www.meta.com/about/company-info/" },
+  { "name": "Instagram", "parent": "Meta Platforms", "source": "https://www.meta.com/actions/building-to-compete/" },
+  { "name": "WhatsApp", "parent": "Meta Platforms", "source": "https://www.meta.com/actions/building-to-compete/" },
+  { "name": "IBM", "parent": "International Business Machines", "source": "https://www.redhat.com/en/about" },
+  {
+    "name": "Red Hat",
+    "parent": "International Business Machines",
+    "source": "https://www.sec.gov/Archives/edgar/data/1087423/000095014219001516/eh1900894_8k-rh.htm"
+  },
+  { "name": "Google Cloud", "parent": "Alphabet", "source": "https://about.google/company-info/" },
+  { "name": "Google DeepMind", "parent": "Alphabet", "source": "https://about.google/company-info/" }
+]

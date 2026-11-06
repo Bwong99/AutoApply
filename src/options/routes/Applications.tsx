@@ -1,5 +1,5 @@
-import { useState } from "preact/hooks";
-import { send } from "../../shared/messages";
+import { useEffect, useState } from "preact/hooks";
+import { isErr, send } from "../../shared/messages";
 import { normalize } from "../../shared/normalize";
 import { formatDateTime } from "../../shared/time";
 import type { Application } from "../../shared/yolo";
@@ -10,6 +10,7 @@ const STATUS: Record<Application["status"], string> = {
   needs: "Needs you",
   failed: "Failed",
   skipped: "Skipped",
+  review: "Ready for your review",
 };
 
 /** Saves a file a debug log kept: the PDF uploaded, or text in older logs. */
@@ -25,9 +26,43 @@ export function Applications() {
   const queue = useStored("yoloQueue");
   const settings = useStored("settings");
   const logs = useStored("yoloLogs");
+  const yoloState = useStored("yoloState");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [showLogs, setShowLogs] = useState(false);
+  const [reviewTabs, setReviewTabs] = useState<{ live: string[]; refilling: string[] }>({ live: [], refilling: [] });
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState("");
+  const loadReviews = () =>
+    void send({ type: "YOLO_REVIEW_LIST" })
+      .then(setReviewTabs)
+      .catch(() => undefined);
+  useEffect(() => {
+    if (!apps?.some((a) => a.review)) return;
+    loadReviews();
+    window.addEventListener("focus", loadReviews);
+    return () => window.removeEventListener("focus", loadReviews);
+  }, [apps, yoloState?.reviewUpdatedAt]);
+  const reviewAction = async (
+    type: "YOLO_REVIEW_OPEN" | "YOLO_REVIEW_REFILL" | "YOLO_REVIEW_DISMISS" | "YOLO_REVIEW_MARK_SUBMITTED",
+    key: string,
+  ) => {
+    setBusy(key);
+    setMessage("");
+    try {
+      const r = await send({ type, key });
+      if (isErr(r)) setMessage(r.error.message);
+      else if (type === "YOLO_REVIEW_REFILL")
+        setMessage(
+          "Refill requested. It will start after the current application finishes and will stop before submission.",
+        );
+      loadReviews();
+    } catch {
+      setMessage("Couldn't reach AutoApply. Please try again.");
+    } finally {
+      setBusy("");
+    }
+  };
   if (!apps || !queue || !settings || !logs) return <p>Loading…</p>;
   const nq = normalize(q);
   const rows = [...apps]
@@ -38,6 +73,7 @@ export function Applications() {
         (!nq || normalize(`${a.company} ${a.title} ${a.reason} ${a.source}`).includes(nq)),
     );
   const today = apps.filter((a) => a.status === "submitted" && a.at >= new Date().setHours(0, 0, 0, 0)).length;
+  const pending = apps.filter((a) => a.review && ["review", "needs", "failed"].includes(a.status)).length;
   return (
     <section>
       <h1>Applications</h1>
@@ -45,6 +81,20 @@ export function Applications() {
         Every application YOLO made, and the ones you submitted yourself after a fill: none of these is applied to
         again. {today} submitted today.
       </p>
+      {pending > 0 && (
+        <p class="review-summary">
+          {pending} application{pending === 1 ? " is" : "s are"} waiting for your review. Open the filled tab, check
+          your answers, and submit using the site's button.{" "}
+          <button class="btn small" onClick={() => setStatus("review")}>
+            Show ready applications
+          </button>
+        </p>
+      )}
+      {message && (
+        <p role="status" class="help">
+          {message}
+        </p>
+      )}
       <div class="row">
         <input
           type="search"
@@ -126,7 +176,17 @@ export function Applications() {
               <tr>
                 <td class="muted">{formatDateTime(a.at)}</td>
                 <td>
-                  <a href={a.doneUrl || a.url} target="_blank" rel="noreferrer">
+                  <a
+                    href={a.doneUrl || a.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => {
+                      if (a.review && ["review", "needs", "failed"].includes(a.status)) {
+                        e.preventDefault();
+                        void reviewAction("YOLO_REVIEW_OPEN", a.key);
+                      }
+                    }}
+                  >
                     {a.company} – {a.title || "(untitled)"}
                   </a>
                   {a.guesses.length > 0 && (
@@ -144,32 +204,81 @@ export function Applications() {
                   {a.notes?.map((n) => (
                     <div class="muted">{n}</div>
                   ))}
+                  {a.review && <div class="muted">Review rules: {a.review.reasons.join("; ")}</div>}
                 </td>
                 <td>
                   {STATUS[a.status]}
-                  {a.mode === "manual" ? " (by you)" : ""}
+                  {a.mode === "manual" || a.submittedBy === "user" ? " (by you)" : ""}
                   {a.reason && <div class="muted">{a.reason}</div>}
                 </td>
                 <td class="muted">{a.source}</td>
                 <td>
-                  {(a.status === "needs" || a.status === "failed") && (
+                  {a.review && ["review", "needs", "failed"].includes(a.status) ? (
+                    <div class="review-actions">
+                      <button
+                        type="button"
+                        class="btn small primary"
+                        disabled={busy === a.key || reviewTabs.refilling.includes(a.key)}
+                        onClick={() =>
+                          void reviewAction(
+                            reviewTabs.live.includes(a.key) ? "YOLO_REVIEW_OPEN" : "YOLO_REVIEW_REFILL",
+                            a.key,
+                          )
+                        }
+                      >
+                        {reviewTabs.refilling.includes(a.key)
+                          ? "Refill pending…"
+                          : reviewTabs.live.includes(a.key)
+                            ? "Review application"
+                            : "Refill for review"}
+                      </button>
+                      {!reviewTabs.live.includes(a.key) && (
+                        <span class="help">
+                          The original filled page is unavailable. Refilling may lose earlier edits.
+                        </span>
+                      )}
+                      <details>
+                        <summary class="muted">More actions</summary>
+                        <button
+                          type="button"
+                          class="btn small"
+                          disabled={busy === a.key || reviewTabs.refilling.includes(a.key)}
+                          onClick={() => void reviewAction("YOLO_REVIEW_MARK_SUBMITTED", a.key)}
+                        >
+                          Mark submitted
+                        </button>{" "}
+                        <button
+                          type="button"
+                          class="btn small danger"
+                          disabled={busy === a.key || reviewTabs.refilling.includes(a.key)}
+                          onClick={() => void reviewAction("YOLO_REVIEW_DISMISS", a.key)}
+                        >
+                          Dismiss &amp; close tab
+                        </button>
+                      </details>
+                    </div>
+                  ) : (
+                    (a.status === "needs" || a.status === "failed") && (
+                      <button
+                        type="button"
+                        class="btn small"
+                        title="Opens it in a tab and continues there"
+                        onClick={() => void send({ type: "YOLO_RESUME", key: a.key })}
+                      >
+                        Resume
+                      </button>
+                    )
+                  )}{" "}
+                  {!(a.review && ["review", "needs", "failed"].includes(a.status)) && (
                     <button
                       type="button"
-                      class="btn small"
-                      title="Opens it in a tab and continues there"
-                      onClick={() => void send({ type: "YOLO_RESUME", key: a.key })}
+                      class="btn small danger"
+                      title="Remove from the log, so YOLO may apply to it again"
+                      onClick={() => void send({ type: "YOLO_FORGET", key: a.key })}
                     >
-                      Resume
+                      Forget
                     </button>
-                  )}{" "}
-                  <button
-                    type="button"
-                    class="btn small danger"
-                    title="Remove from the log, so YOLO may apply to it again"
-                    onClick={() => void send({ type: "YOLO_FORGET", key: a.key })}
-                  >
-                    Forget
-                  </button>
+                  )}
                 </td>
               </tr>
             ))}

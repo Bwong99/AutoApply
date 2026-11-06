@@ -4,7 +4,7 @@
 import { CAPTCHA_WAIT_MS, EMAIL_WAIT_MS } from "../../shared/constants";
 import type { YoloResult } from "../../shared/messages";
 import { createStorage, session } from "../../shared/storage";
-import type { Guess, QueueItem } from "../../shared/yolo";
+import type { Guess, QueueItem, SubmissionReview } from "../../shared/yolo";
 import { closeTab, openFrame, openTab } from "./host";
 import { applyUrl } from "./jobKey";
 import type { Link } from "./sources";
@@ -37,6 +37,11 @@ export interface Run {
   linkSites?: string[];
   /** When the computer last woke from sleeping during the run. */
   wokeAt?: number;
+  reviewPolicy?: SubmissionReview;
+  reviewKey?: string;
+  hasGuessedAnswers?: boolean;
+  reviewTab?: boolean;
+  documentId?: string;
 }
 
 const KEY = "yoloRun";
@@ -60,7 +65,16 @@ export function fromRun(run: Run | null, s: chrome.runtime.MessageSender): run i
 
 const scrapes = new Map<string, (links: Link[] | null) => void>();
 
-export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"]): Promise<Run> {
+export async function start(
+  item: QueueItem,
+  mode: Run["mode"],
+  host: Run["host"],
+  review?: {
+    policy: SubmissionReview;
+    key?: string;
+    tab: boolean;
+  },
+): Promise<Run> {
   const now = Date.now();
   const run: Run = {
     id: crypto.randomUUID(),
@@ -72,6 +86,7 @@ export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"
     helloAt: 0,
     steps: [],
     guesses: [],
+    ...(review ? { reviewPolicy: review.policy, reviewKey: review.key, reviewTab: review.tab } : {}),
   };
   const url = mode === "apply" ? applyUrl(item.url) : item.url;
   // Saved before the page loads: its driver says hello as soon as it starts.
@@ -81,6 +96,7 @@ export async function start(item: QueueItem, mode: Run["mode"], host: Run["host"
   if (host === "frame") await openFrame(url);
   else {
     run.tabId = await openTab(url, host === "visible");
+    if (review?.tab) await chrome.tabs.update(run.tabId, { autoDiscardable: false });
     await saveRun(run);
     watchTab(run);
   }
@@ -102,7 +118,7 @@ export async function scrape(url: string, timeoutMs = 40_000): Promise<Link[] | 
 }
 
 /** Clears the run if it is still `id`; returns it, so its result is handled once. */
-export async function end(id: string): Promise<Run | null> {
+export async function end(id: string, keepTab = false): Promise<Run | null> {
   const run = await getRun();
   if (run?.id !== id) return null;
   // Before the run: a worker dying in between leaves no marker to requeue a finished job by.
@@ -110,7 +126,8 @@ export async function end(id: string): Promise<Run | null> {
   await session.remove(KEY);
   unwatchTab();
   await chrome.alarms.clear(WATCHDOG);
-  if (run.host === "tab" && run.tabId !== undefined) await closeTab(run.tabId);
+  if (!keepTab && (run.host === "tab" || (run.reviewKey && run.reviewTab)) && run.tabId !== undefined)
+    await closeTab(run.tabId);
   return run;
 }
 

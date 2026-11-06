@@ -145,6 +145,8 @@ let listening = false;
 const life = new AbortController();
 /** This page belongs to a YOLO run: every field gets an answer, and nothing is left for the user. */
 let yolo = false;
+let reviewContext: { key: string; ready: boolean } | undefined;
+let hasGuessedAnswers = false;
 /** Why the run can't go on, from the last fill (a required ID number, no résumé). */
 let yoloFatal: string | undefined;
 /** Résumés and cover letters uploaded per field, for the overlay to preview. */
@@ -213,7 +215,7 @@ function renderOverlay() {
   const childError = [...childFrames.values()].find((f) => f.error)?.error;
   const error =
     lastError ?? (childError ? { kind: "other", message: childError } : !frames.length && noForm ? NO_FORM : null);
-  if (!frames.length && !error) return;
+  if (!frames.length && !error && !reviewContext) return;
   overlay ??= createOverlay(
     {
       onRerun: () => void send({ type: "BROADCAST_FILL", rerun: true }).catch(() => undefined),
@@ -252,6 +254,8 @@ function renderOverlay() {
     debug: config?.settings.debugLogging ? timings.map(([k, v]) => `${k.padEnd(10)} ${v} ms`).join("\n") : "",
     notice:
       [
+        reviewContext &&
+          "Review your answers, then submit using this site's button. AutoApply will not submit this application.",
         config?.appliedBefore &&
           `YOLO already applied to this job on ${new Date(config.appliedBefore.at).toLocaleDateString()}`,
         resumeNotice,
@@ -543,11 +547,13 @@ const applied = new Map<string, [FillOp, Status, string]>();
 async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: string, ctrl: AbortController) {
   if (states.get(h.id)?.userOwned) return;
   if (tooltip === "guess") {
+    hasGuessedAnswers = true;
     okStatus = "check";
     tooltip = "Best guess (YOLO)";
     guesses.set(h.id, { q: h.desc.label, a: opText(op) });
   }
   if (tooltip.split(/,\s*/).includes(SCREENING_SOURCE)) {
+    hasGuessedAnswers = true;
     screened.add(h.id);
     okStatus = "check";
     tooltip = "Meets the job's screening requirement; review this answer";
@@ -1390,9 +1396,9 @@ async function sharePosting(doc: Document, loc: Location) {
 }
 
 async function startYolo() {
-  if (yolo) return;
+  if (yolo || reviewContext) return;
   yolo = true;
-  if (throttled()) endTransitions();
+  const restoreTransitions = throttled() ? endTransitions() : () => undefined;
   config = await send({ type: "GET_RUNTIME_CONFIG", yolo: true });
   listen();
   await drive({
@@ -1410,6 +1416,11 @@ async function startYolo() {
       return { reply: r, el: r.ref ? snap.refs.get(r.ref) : undefined };
     },
     guesses: () => [...guesses.values()],
+    hasGuessedAnswers: () => hasGuessedAnswers,
+    handoff: () => {
+      yolo = false;
+      restoreTransitions();
+    },
     email: () => config.profileSnapshotForDeterministic.personal.email,
     answers,
     debug: config.settings.debugLogging,
@@ -1423,17 +1434,29 @@ async function startYolo() {
         await sharePosting(new DOMParser().parseFromString(html, "text/html"), new URL(url) as unknown as Location);
     },
   });
+  if (reviewContext) {
+    yolo = false;
+    restoreTransitions();
+  }
 }
 
 // ---------- the user's own submissions (for "already applied") ----------
 let attempted = false;
 /** After a fill, the user pressing the form's submit: logged as applied once the page confirms it. */
 function onSubmitAttempt(e: Event) {
-  if (!e.isTrusted || yolo || attempted || !states.size) return;
-  if (e.type === "click") {
-    const b = (e.target as Element | null)?.closest?.("button,input[type=submit],[role=button]");
+  if (!e.isTrusted || yolo || attempted || (!states.size && !reviewContext)) return;
+  if (e.type === "click" || (reviewContext && e.type === "submit")) {
+    const b =
+      e.type === "submit"
+        ? (e as SubmitEvent).submitter
+        : (e.target as Element | null)?.closest?.("button,input[type=submit],[role=button]");
     const t = b instanceof HTMLElement ? labelOf(b) : "";
-    if (!/submit|apply|send|finish|complete/i.test(t) || /next|continue|save|back|cancel|review/i.test(t)) return;
+    if (
+      e.type === "click" &&
+      (!/submit|apply|send|finish|complete/i.test(t) || /next|continue|save|back|cancel|review/i.test(t))
+    )
+      return;
+    if (e.type === "submit" && /next|continue|save|back|cancel|review/i.test(t)) return;
   }
   attempted = true;
   const ctx = extractJobContext();
@@ -1442,12 +1465,29 @@ function onSubmitAttempt(e: Event) {
   if (RE_APPLIED.test(document.body?.innerText ?? "")) return; // said so already: no proof either way
   void waitFor(() => RE_APPLIED.test(document.body?.innerText ?? "") && location.href, 20_000).then((doneUrl) => {
     if (doneUrl) send({ type: "APPLY_ATTEMPT", job, doneUrl }).catch(() => undefined);
+    else if (reviewContext) attempted = false;
   });
 }
 
 // ---------- messages ----------
 function onMessage(msg: Message, _sender: unknown, sendResponse: (r: unknown) => void) {
   switch (msg.type) {
+    case "YOLO_REVIEW_CONTEXT":
+      reviewContext = { key: msg.key, ready: msg.ready };
+      yolo = false;
+      listen();
+      if (config) renderOverlay();
+      else
+        void send({ type: "GET_RUNTIME_CONFIG" })
+          .then((c) => {
+            config = c;
+            renderOverlay();
+          })
+          .catch(() => undefined);
+      break;
+    case "YOLO_REVIEW_PING":
+      sendResponse({ ready: reviewContext?.key === msg.key && reviewContext.ready });
+      return false;
     case "TRIGGER_FILL":
       void runPipeline({ rerun: msg.rerun ?? msg.force });
       break;

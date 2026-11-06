@@ -828,6 +828,8 @@ describe("discovery", () => {
       boards: ["glassdoor" as const],
     };
     expect(await discover({ yolo: y, fetch: f })).toBe(1);
+    const queued = (await chrome.storage.local.get("yoloQueue")).yoloQueue as { sourceGroups: string[] }[];
+    expect(queued[0].sourceGroups).toEqual(expect.arrayContaining(["feeds", "glassdoor"]));
   });
 
   it("asks the AI about the batch and drops what it rejects", async () => {

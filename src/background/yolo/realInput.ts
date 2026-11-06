@@ -124,3 +124,12 @@ export async function realInput(tabId: number, op: RealOp): Promise<boolean> {
 
 /** Whether real input can run in this worker. */
 export const realInputReady = () => !!chrome.debugger;
+
+/** Stop all trusted input before a review tab belongs to the user. */
+export async function releaseRealInput(tabId: number) {
+  const pending = sessions.get(tabId);
+  sessions.delete(tabId);
+  const s = await pending?.catch(() => null);
+  if (s) clearTimeout(s.idle);
+  if (chrome.debugger) await chrome.debugger.detach({ tabId }).catch(() => undefined);
+}

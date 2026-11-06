@@ -647,3 +647,39 @@ label.inline {
     padding: 16px;
   }
 }
+/* Human review controls use native checkboxes and the existing form rhythm. */
+.review-rules fieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 0 0 20px;
+}
+.review-rules legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+.review-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  cursor: pointer;
+}
+.review-check input {
+  width: auto;
+  margin: 0;
+}
+.review-summary {
+  padding: 12px 16px;
+  border-left: 3px solid var(--accent, #6366f1);
+  background: var(--panel, #f3f5fb);
+  border-radius: 4px;
+}
+.review-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 150px;
+}
+.review-actions summary {
+  cursor: pointer;
+}

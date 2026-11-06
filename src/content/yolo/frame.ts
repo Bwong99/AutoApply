@@ -17,4 +17,5 @@ export function endTransitions() {
   s.textContent =
     "*,*::before,*::after{transition:none!important;animation-duration:0s!important;animation-delay:0s!important}";
   (document.head ?? document.documentElement).append(s);
+  return () => s.remove();
 }

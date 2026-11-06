@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { Field, NumberInput, SelectInput, TagInput, TextInput, Toggle } from "../components/controls";
 import { save, useStored } from "../store";
 import { isErr, send, type Responses } from "../../shared/messages";
+import { SubmissionReview } from "../components/SubmissionReview";
 import { formatDateTime } from "../../shared/time";
 import {
   BOARDS,
@@ -277,8 +278,9 @@ export function Yolo() {
       <p class="intro">
         While on, AutoApply runs a batch on a timer: it checks your searches and applies to new matching jobs by itself:
         it creates site accounts when needed, fills every field (with its best guess where your profile has no answer),
-        and submits. It works in a hidden page, so nothing opens on screen. Everything it does is listed under
-        Applications, with the answers it guessed. Turn it on or off from the toolbar popup.
+        and submits unless your review rules hold the final step for you. Automatic submissions use a hidden page;
+        applications that may need your review use inactive tabs. Everything it does is listed under Applications, with
+        the answers it guessed. Turn it on or off from the toolbar popup.
       </p>
       <h2>Schedule</h2>
       <div class="form">
@@ -291,7 +293,7 @@ export function Yolo() {
         />
         <NumberInput
           label="Applications per batch"
-          help={`Each batch submits up to this many, in your queue order. With this schedule, at most ${Math.floor(1440 / y.intervalMin) * y.batchSize} a day. Higher numbers mean more AI usage, a bigger chance a job site flags or bans your account, and more bad submissions before you notice a mistake. 0 finds jobs without applying.`}
+          help={`Each batch prepares for review or submits up to this many, in your queue order. With this schedule, at most ${Math.floor(1440 / y.intervalMin) * y.batchSize} a day. Higher numbers mean more AI usage, a bigger chance a job site flags or bans your account, and more bad submissions before you notice a mistake. 0 finds jobs without applying.`}
           value={y.batchSize}
           min={0}
           max={MAX_BATCH_APPLICATIONS}
@@ -388,6 +390,7 @@ export function Yolo() {
         />
         <QueueOrder y={y} set={set} />
       </div>
+      <SubmissionReview y={y} set={set} />
       <h2>Applying</h2>
       <div class="form">
         <TextInput
