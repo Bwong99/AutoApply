@@ -4,6 +4,7 @@ import { normalize } from "../../shared/normalize";
 import { formatDateTime } from "../../shared/time";
 import type { Application } from "../../shared/yolo";
 import { store, useStored } from "../store";
+import { SourceCheck } from "../components/SourceCheck";
 
 const STATUS: Record<Application["status"], string> = {
   submitted: "Submitted",
@@ -95,6 +96,7 @@ export function Applications() {
           {message}
         </p>
       )}
+      <SourceCheck />
       <div class="row">
         <input
           type="search"

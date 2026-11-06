@@ -25,7 +25,7 @@ import { mapFields } from "../../src/background/services/mapFields";
 import type { Gemini } from "../../src/background/gemini/client";
 import { defaultSettings } from "../../src/shared/settings";
 import { emptyProfile } from "../../src/shared/profileSchema";
-import { defaultYolo, YoloSchema, type Application, type Listing } from "../../src/shared/yolo";
+import { defaultYolo, YoloSchema, type Application, type Listing, type SourceCheck } from "../../src/shared/yolo";
 import type { FieldDescriptor } from "../../src/shared/types";
 
 beforeAll(() => loadPlaces(() => readFile(`public/${PLACES_FILE}`, "utf8")));
@@ -1055,6 +1055,101 @@ describe("discovery", () => {
     linkedin.length = 0;
     await discover({ yolo: y(["recommendations"]), fetch: f, want: 1 });
     expect(linkedin).toEqual([0]);
+  });
+});
+
+describe("source check", () => {
+  beforeEach(() => installChromeMock());
+  const feed = "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/listings.json";
+  const now = Date.UTC(2026, 9, 26);
+  const row = (company: string, title: string, id: string) => ({
+    company_name: company,
+    title,
+    url: `https://jobs.lever.co/${company.toLowerCase()}/${id}`,
+    locations: ["Toronto, ON"],
+    date_posted: now / 1000,
+  });
+  const report = async () =>
+    ((await chrome.storage.local.get("yoloSourceCheck")) as { yoloSourceCheck: SourceCheck }).yoloSourceCheck;
+  const byGroup = (c: SourceCheck) => Object.fromEntries(c.groups.map((g) => [g.group, g]));
+
+  it("reports each enabled source's funnel and what went wrong, and only the enabled ones", async () => {
+    const later = globalThis.setTimeout;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void) => later(fn, 0)) as typeof setTimeout);
+    onTestFinished(() => void vi.restoreAllMocks());
+    const rows = [row("Lyft", "Software Engineer Intern", "a1"), row("Acme", "Mechanical Intern", "b2")];
+    const f = async (url: string, init?: RequestInit) => {
+      if (url === feed)
+        return (init?.headers as Record<string, string>)?.["if-none-match"]
+          ? new Response(null, { status: 304 })
+          : new Response(JSON.stringify(rows), { headers: { etag: '"v1"' } });
+      if (url.includes("jobright.ai")) return new Response("", { status: 401 });
+      if (url.includes("linkedin.com"))
+        return new URL(url).searchParams.get("start") === "0"
+          ? new Response(`<li data-entity-urn="urn:li:jobPosting:7"><h3 class="base-search-card__title">Software Engineer Intern</h3>
+              <h4 class="base-search-card__subtitle">Nobody</h4><span class="job-search-card__location">Toronto, ON</span></li>`)
+          : new Response("", { status: 429 });
+      return new Response("", { status: 404 });
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      locations: ["Canada"],
+      feeds: [feed],
+      boards: ["linkedin" as const],
+      jobright: ["recommendations"],
+      careerSites: ["https://boards.greenhouse.io/missing", "https://example.com/careers"],
+    };
+    const scrape = async () => [{ href: "https://example.com/about", text: "About us" }];
+    expect(await discover({ yolo: y, fetch: f, scrape, want: 50, now })).toBe(1);
+    const c = await report();
+    expect(c.doneAt).toBeGreaterThan(0);
+    expect(c.groups.map((g) => g.group)).toEqual(["linkedin", "jobright", "feeds", "careers"]);
+    const g = byGroup(c);
+    expect(g.feeds).toMatchObject({
+      level: "ok",
+      found: 2,
+      fresh: 2,
+      matched: 1,
+      queued: 1,
+      drops: { "Title doesn't match a search": 1 },
+    });
+    expect(g.linkedin).toMatchObject({
+      level: "warn",
+      problem: "Rate limited by LinkedIn (HTTP 429) after 1 page",
+      found: 1,
+      matched: 1,
+      queued: 0,
+      drops: { "No posting on the employer's own site": 1 },
+    });
+    expect(g.jobright).toMatchObject({ level: "error", problem: "Signed out: sign in to jobright.ai in this browser" });
+    expect(g.careers.level).toBe("error");
+    expect(g.careers.rows.map((r) => [r.label, r.problem])).toEqual([
+      ["boards.greenhouse.io/missing", "No Greenhouse job board answered at this URL: check it"],
+      [
+        "example.com/careers",
+        "No job links found on the page: no openings, or not the page that lists jobs (a search URL with {q} works)",
+      ],
+    ]);
+    expect(g.careers.problem).toMatch(/^boards\.greenhouse\.io\/missing: .* \(\+1 more\)$/);
+
+    // Read again: the list hasn't changed, so it's a note rather than a problem.
+    await discover({ yolo: { ...y, boards: [], jobright: [], careerSites: [] }, fetch: f, now, topUp: true });
+    const again = await report();
+    expect(again.topUp).toBe(true);
+    expect(again.groups.map((x) => [x.group, x.level, x.problem])).toEqual([
+      ["feeds", "info", "Unchanged since its last read: its jobs were already looked at"],
+    ]);
+  });
+
+  it("says why a source that read jobs queued none", async () => {
+    const f = async () => new Response(JSON.stringify([row("Acme", "Mechanical Intern", "b2")]));
+    const y = { ...defaultYolo(), queries: ["Software Engineer Intern"], feeds: [feed], boards: [] };
+    expect(await discover({ yolo: y, fetch: f, now })).toBe(0);
+    expect(byGroup(await report()).feeds).toMatchObject({
+      level: "info",
+      problem: "Nothing queued: Title doesn't match a search (1 of 1)",
+    });
   });
 });
 

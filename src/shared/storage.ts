@@ -6,6 +6,7 @@ import {
   ApplicationSchema,
   migrateYoloReview,
   QueueItemSchema,
+  SourceCheckSchema,
   VaultEntrySchema,
   YoloSchema,
   YoloStateSchema,
@@ -138,6 +139,8 @@ export const LOCAL_SCHEMAS = {
         .optional(),
     }),
   ),
+  /** The latest discovery's per-source report (yolo/sourceCheck.ts), shown whatever Debug logging is set to. */
+  yoloSourceCheck: SourceCheckSchema.nullable().catch(null),
   /** Job keys already looked at → when first seen. */
   yoloSeen: rec(z.number()),
   /** Hosts whose bot checks stopped YOLO's hidden frame, latest last: their jobs start in a background tab. */

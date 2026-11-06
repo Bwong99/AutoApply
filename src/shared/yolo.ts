@@ -177,6 +177,48 @@ export const ApplicationSchema = QueueItemSchema.omit({
 export type Application = z.infer<typeof ApplicationSchema>;
 export type Guess = Application["guesses"][number];
 
+/** How a source fared in a check, worst last. */
+export const SOURCE_LEVELS = ["ok", "info", "warn", "error"] as const;
+export type SourceLevel = (typeof SOURCE_LEVELS)[number];
+const level = z.enum(SOURCE_LEVELS).catch("ok");
+const SourceRowSchema = z.object({
+  /** One feed, career site, or "query · location" search. */
+  label: z.string().catch(""),
+  found: z.number().catch(0),
+  problem: z.string().catch(""),
+  level,
+});
+const SourceGroupCheckSchema = z.object({
+  group: z.enum(SOURCE_GROUPS),
+  /** Read; the counts past `found` are filled in when the check finishes. */
+  done: b(false),
+  found: z.number().catch(0),
+  /** Passed the user's filters. */
+  matched: z.number().catch(0),
+  /** Of those, not looked at, queued or applied to before. */
+  fresh: z.number().catch(0),
+  queued: z.number().catch(0),
+  /** Why found postings weren't queued → how many. */
+  drops: z.record(z.string(), z.number()).catch({}),
+  rows: z.array(SourceRowSchema).catch([]),
+  problem: z.string().catch(""),
+  level,
+});
+/** The latest discovery's report, per enabled source: what each read and why it queued what it did. */
+export const SourceCheckSchema = z.object({
+  at: z.number().catch(0),
+  /** A mid-batch top-up rather than a batch's start. */
+  topUp: b(false),
+  /** 0 while sources are being read. */
+  doneAt: z.number().catch(0),
+  /** Why discovery stopped early, if it did. */
+  error: z.string().catch(""),
+  groups: z.array(SourceGroupCheckSchema).catch([]),
+});
+export type SourceCheck = z.infer<typeof SourceCheckSchema>;
+export type SourceGroupCheck = SourceCheck["groups"][number];
+export type SourceRow = SourceGroupCheck["rows"][number];
+
 export const VaultEntrySchema = z.object({
   email: z.string(),
   iv: z.string(),
@@ -218,4 +260,6 @@ export interface YoloStatus {
   paused: string;
   /** Sources YOLO is on for but can't read right now, for the user to tend to (empty while YOLO is off). */
   warnings: string[];
+  /** Sources that had problems in the latest finished source check (0 while YOLO is off). */
+  sourceProblems?: number;
 }

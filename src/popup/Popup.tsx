@@ -154,6 +154,20 @@ export function Popup() {
           ))}
         </button>
       )}
+      {yolo?.enabled && !!yolo.sourceProblems && (
+        <p class="help err">
+          {yolo.sourceProblems} source{yolo.sourceProblems === 1 ? "" : "s"} had problems at the last check.{" "}
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              openOptions("/applications");
+            }}
+          >
+            See report
+          </a>
+        </p>
+      )}
       {yolo?.enabled && yolo.searches > 0 && (
         <div class="yolo-actions">
           <button

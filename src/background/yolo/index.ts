@@ -53,6 +53,7 @@ import {
 import { closeFrame, readInTab } from "./host";
 import { altKey, applyUrl, jobKey } from "./jobKey";
 import { indeedCardsInPage, JOBRIGHT_PING } from "./sources";
+import { failSourceCheck, plainError } from "./sourceCheck";
 import { letterText, textPdf } from "./pdf";
 import {
   credit,
@@ -182,10 +183,12 @@ function cycle(topUp = false): Promise<void> {
         jobrightSignedOut: (out) => setState({ jobrightSignedOut: out }),
         indeedSignedOut: (out) => setState({ indeedSignedOut: out }),
         indeedBlocked: (blocked) => setState({ indeedBlocked: blocked }),
+        topUp,
       });
       await setState({ lastCheckAt: Date.now() });
     } catch (e) {
       console.warn("[AutoApply] YOLO check failed:", (e as Error)?.message);
+      await failSourceCheck(plainError(e)).catch(() => undefined);
     } finally {
       cycling = null;
     }
@@ -682,12 +685,13 @@ export const yoloDoc = (id: string) => session.get<{ meta: DocumentMeta; base64:
 // ---------- messages ----------
 export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   async YOLO_STATUS() {
-    const [apps, queue, state, run, alarm] = await Promise.all([
+    const [apps, queue, state, run, alarm, check] = await Promise.all([
       store.get("applications"),
       store.get("yoloQueue"),
       store.get("yoloState"),
       getRun(),
       chrome.alarms.get(CHECK),
+      store.get("yoloSourceCheck"),
     ]);
     return {
       enabled: yolo.enabled,
@@ -713,6 +717,10 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
               : "",
           ].filter(Boolean)
         : [],
+      sourceProblems:
+        yolo.enabled && check?.doneAt
+          ? check.groups.filter((g) => g.level === "warn" || g.level === "error").length
+          : 0,
     };
   },
 

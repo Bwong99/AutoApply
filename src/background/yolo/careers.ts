@@ -122,21 +122,43 @@ const companyOf = (host: string) => {
   return parts.length > 2 ? parts[parts.length - 3] : parts[0];
 };
 
+const ATS_NAMES: Record<Board["ats"], string> = {
+  greenhouse: "Greenhouse",
+  lever: "Lever",
+  ashby: "Ashby",
+  smartrecruiters: "SmartRecruiters",
+  workday: "Workday",
+};
+
 /**
  * A user's career-site URL: its board's API when it has one (one request for all postings), else the page rendered
- * in the hidden host with its job links read off it. "{q}" in the URL is replaced by each search query.
+ * in the hidden host with its job links read off it. "{q}" in the URL is replaced by each search query. `onProblem`
+ * hears why the site gave no jobs, when that's a fault rather than no openings.
  */
 export async function careerSite(
   f: Fetcher,
   scrape: (url: string) => Promise<Link[] | null>,
   raw: string,
   query: string,
+  onProblem?: (problem: string) => void,
 ): Promise<Listing[]> {
   const url = raw.replace(/\{q\}/g, encodeURIComponent(query));
   const b = boardOf(url);
-  if (b) return (await boardJobs(f, b, b.slug, query)) ?? [];
+  if (b) {
+    const jobs = await boardJobs(f, b, b.slug, query);
+    if (!jobs) onProblem?.(`No ${ATS_NAMES[b.ats]} job board answered at this URL: check it`);
+    return jobs ?? [];
+  }
   const host = new URL(url).hostname;
-  return jobLinks((await scrape(url)) ?? [], companyOf(host), url);
+  const links = await scrape(url);
+  const jobs = jobLinks(links ?? [], companyOf(host), url);
+  if (!links) onProblem?.("A bot check stood in for the page");
+  else if (!links.length) onProblem?.("The page didn't load in the hidden page, or had no links");
+  else if (!jobs.length)
+    onProblem?.(
+      "No job links found on the page: no openings, or not the page that lists jobs (a search URL with {q} works)",
+    );
+  return jobs;
 }
 
 const RE_JOB_LINK =

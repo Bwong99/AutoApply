@@ -8,12 +8,14 @@ import {
   type QueueItem,
   type QueueSort,
   type SourceGroup,
+  type SourceRow,
   type Yolo,
 } from "../../shared/yolo";
 import { boardOf, careerSite, findOnEmployerBoard, type Fetcher } from "./careers";
 import { rejectReason } from "./filter";
 import { altKey, jobKey } from "./jobKey";
 import { loadPlaces } from "./places";
+import { plainError, startSourceCheck } from "./sourceCheck";
 import {
   glassdoorSearch,
   INDEED_ACCOUNT,
@@ -39,6 +41,7 @@ const LINKEDIN_PAGES = 30;
 const LINKEDIN_GAP_MS = 1000;
 /** Jobright recommendation pages of 20 (~240 kB each) read per cycle; the feed held 160 jobs (live, 2026-11-03). */
 const JOBRIGHT_PAGES = 15;
+const NO_OWN = "No posting on the employer's own site";
 
 export interface DiscoverDeps {
   yolo: Yolo;
@@ -63,6 +66,8 @@ export interface DiscoverDeps {
   indeedSignedOut?: (out: boolean) => unknown;
   /** Told whether Indeed's search showed a bot check instead of results, each time it's read. */
   indeedBlocked?: (blocked: boolean) => unknown;
+  /** A mid-batch top-up, as the source check reports it. */
+  topUp?: boolean;
   now?: number;
 }
 
@@ -140,22 +145,40 @@ const sourceName = (url: string) => {
   const m = /github(?:usercontent)?\.com\/([^/]+)\/([^/]+)/.exec(url);
   return m ? `${m[1]}/${m[2]}` : new URL(url).hostname;
 };
+/** A URL as the source check names it: never throws. */
+const labelOf = (url: string, name: (u: string) => string) => {
+  try {
+    return name(url);
+  } catch {
+    return url;
+  }
+};
+const sitePath = (url: string) => {
+  const u = new URL(url);
+  return (u.host + u.pathname).replace(/\/$/, "");
+};
+const pages = (n: number) => (n ? ` after ${n} page${n === 1 ? "" : "s"}` : "");
 
 export async function discover(d: DiscoverDeps): Promise<number> {
   const { yolo: y } = d;
   const now = d.now ?? Date.now();
   const s = await store.getMany(["yoloSeen", "applications", "yoloQueue", "feedCache", "employerBoards"]);
   const found: Listing[] = [];
-  const safely = async (fn: () => Promise<Listing[]>) => {
+  const t = await startSourceCheck(y, !!d.topUp, now);
+  const safely = async (row: SourceRow, fn: () => Promise<Listing[]>) => {
     try {
-      found.push(...(await fn()));
+      const list = await fn();
+      t.read(row, list);
+      found.push(...list);
     } catch (e) {
       console.warn("[AutoApply] YOLO source failed:", (e as Error)?.message);
+      t.problem(row, plainError(e), "error");
     }
   };
 
-  const readFeed = (url: string, parse: (body: string) => Listing[]) =>
-    safely(async () => {
+  const readFeed = (url: string, parse: (body: string) => Listing[]) => {
+    const row = t.row("feeds", labelOf(url, sourceName));
+    return safely(row, async () => {
       // Conditional: GitHub answers 304 while the file is unchanged (most polls), so only changes are downloaded.
       const c = s.feedCache[url];
       const r = await d.fetch(url, {
@@ -164,24 +187,45 @@ export async function discover(d: DiscoverDeps): Promise<number> {
           ...(c?.modified ? { "if-modified-since": c.modified } : {}),
         },
       });
+      if (r.status === 304) t.problem(row, "Unchanged since its last read: its jobs were already looked at", "info");
+      else if (!r.ok) t.problem(row, `The list answered HTTP ${r.status}: check the URL`, "error");
       if (r.status === 304 || !r.ok) return [];
       s.feedCache[url] = { etag: r.headers.get("etag") ?? "", modified: r.headers.get("last-modified") ?? "" };
-      return parse(await r.text());
+      const list = parse(await r.text());
+      if (!list.length) t.problem(row, "No jobs read from it (not a listings.json or a job table?)", "warn");
+      return list;
     });
+  };
   for (const url of y.feeds) await readFeed(url, (body) => parseFeed(body, sourceName(url)));
-  if (y.jobright.length)
-    await safely(async () => {
+  await t.done("feeds");
+  if (y.jobright.length) {
+    const row = t.row("jobright", "Your recommendations");
+    await safely(row, async () => {
       const out: Listing[] = [];
-      for (let page = 0; page < JOBRIGHT_PAGES; page++) {
+      let page = 0;
+      for (; page < JOBRIGHT_PAGES; page++) {
         // The user's cookies: the feed is theirs, filtered by their Jobright preferences.
         const r = await d.fetch(jobrightFeed(page), { credentials: "include" });
         if (page === 0) await d.jobrightSignedOut?.(r.status === 401);
+        if (r.status === 401) t.problem(row, "Signed out: sign in to jobright.ai in this browser", "error");
+        else if (!r.ok) t.problem(row, `Jobright answered HTTP ${r.status}${pages(page)}`, page ? "warn" : "error");
         const list = r.ok ? ((await r.json()) as { result?: { jobList?: [] } }).result?.jobList : undefined;
-        if (!list?.length) break;
-        out.push(...parseJobrightFeed(list));
+        if (!list?.length) {
+          if (r.ok && !page) t.problem(row, "Jobright recommended no jobs: check your Jobright preferences", "warn");
+          break;
+        }
+        const jobs = parseJobrightFeed(list);
+        // Counted as found: the ones linking back to LinkedIn or Jobright are dropped here, not by the filters.
+        row.found += list.length - jobs.length;
+        t.drop("jobright", "No link to the employer's own site", list.length - jobs.length);
+        out.push(...jobs);
       }
+      if (page === JOBRIGHT_PAGES)
+        t.problem(row, `Read the first ${JOBRIGHT_PAGES * 20} recommendations (the most per check)`, "info");
       return out;
     });
+    await t.done("jobright");
+  }
 
   await loadPlaces();
   const seen = s.yoloSeen;
@@ -205,22 +249,43 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   const days = y.postedWithinDays;
   // Indeed is searched only as the signed-in user: signed out, it's skipped and the user told.
   let indeed = false;
+  /** Indeed's search showed a bot check this cycle: the searches after it are skipped. */
+  let indeedWall = false;
   if (y.boards.includes("indeed")) {
     const out = await indeedSignedOutNow(d.fetch);
     if (out !== null) await d.indeedSignedOut?.(out);
     indeed = out === false;
+    if (!indeed)
+      t.problem(
+        t.row("indeed", "Sign-in check"),
+        out ? "Signed out: sign in to indeed.com in this browser" : "Couldn't reach Indeed to check the sign-in",
+        "error",
+      );
   }
   for (const q of y.queries)
     for (const loc of y.locations.length ? y.locations : [""]) {
-      if (y.boards.includes("linkedin"))
+      const label = `"${q}"${loc ? ` · ${loc}` : ""}`;
+      if (y.boards.includes("linkedin")) {
+        const row = t.row("linkedin", label);
+        let read = 0;
         for (let page = 0; page < (d.want ? LINKEDIN_PAGES : 1); page++) {
           let more = false;
-          await safely(async () => {
+          await safely(row, async () => {
             const wait = linkedinAt + LINKEDIN_GAP_MS - Date.now();
             if (linkedinAt && wait > 0) await new Promise((r) => setTimeout(r, wait));
             linkedinAt = Date.now();
             const r = await d.fetch(linkedinSearch(q, loc, days, page * 10), { credentials: "omit" });
+            if (!r.ok)
+              t.problem(
+                row,
+                r.status === 429
+                  ? `Rate limited by LinkedIn (HTTP 429)${pages(read)}`
+                  : `LinkedIn refused the search (HTTP ${r.status})${pages(read)}`,
+                read ? "warn" : "error",
+              );
             const jobs = r.ok ? parseLinkedIn(await r.text()) : [];
+            if (r.ok && !jobs.length && !page) t.problem(row, "No results for this search", "info");
+            if (r.ok) read++;
             for (const l of jobs) {
               const key = jobKey(l.url);
               if (linkedin.has(key) || !fits(l, key)) continue;
@@ -235,30 +300,54 @@ export async function discover(d: DiscoverDeps): Promise<number> {
           });
           if (!more) break;
         }
-      if (y.boards.includes("glassdoor"))
-        await safely(async () => {
+      }
+      if (y.boards.includes("glassdoor")) {
+        const row = t.row("glassdoor", label);
+        await safely(row, async () => {
           const r = await d.fetch(glassdoorSearch(q, loc, days), { credentials: "omit" });
-          return r.ok ? parseGlassdoor(await r.text(), now) : [];
+          if (!r.ok) t.problem(row, `Glassdoor refused the search (HTTP ${r.status})`, "error");
+          const list = r.ok ? parseGlassdoor(await r.text(), now) : [];
+          if (r.ok && !list.length) t.problem(row, "No results read from the page (none, or a bot check)", "warn");
+          return list;
         });
-      if (indeed)
-        await safely(async () => {
+      }
+      if (indeed) {
+        const row = t.row("indeed", label);
+        await safely(row, async () => {
           // Cloudflare guards Indeed's search; YOLO never solves a bot check, it tells the user instead.
           const list = await readIndeed(d, q, loc, days);
           await d.indeedBlocked?.(!list);
           // Blocked both ways: the searches after it would be too, each one a tab.
-          if (!list) indeed = false;
+          if (!list) {
+            indeed = false;
+            indeedWall = true;
+            t.problem(
+              row,
+              "A bot check (Cloudflare) stood in for the search. YOLO doesn't solve these; using indeed.com yourself in this browser may clear it",
+              "error",
+            );
+          } else if (!list.length) t.problem(row, "No results read from the search", "info");
           return list ?? [];
         });
+      } else if (indeedWall) t.problem(t.row("indeed", label), "Skipped after the bot check", "info");
     }
+  for (const g of ["linkedin", "glassdoor", "indeed"] as const) await t.done(g);
 
   for (const url of y.careerSites) {
+    const row = t.row("careers", labelOf(url, sitePath));
     // Workday and SmartRecruiters search server-side; the other boards' APIs list every posting at once.
     const ats = boardOf(url)?.ats;
     const perQuery = /\{q\}/.test(url) || ats === "workday" || ats === "smartrecruiters";
-    if (!ats && !d.scrape) continue;
+    if (!ats && !d.scrape) {
+      t.problem(row, "Skipped: an application was using the hidden page; it's read next batch", "info");
+      continue;
+    }
     for (const q of perQuery ? y.queries : [""])
-      await safely(() => careerSite(d.fetch, d.scrape ?? (async () => []), url, q));
+      await safely(row, () =>
+        careerSite(d.fetch, d.scrape ?? (async () => []), url, q, (p) => t.problem(row, p, "error")),
+      );
   }
+  await t.done("careers");
 
   // Merge provenance only: the representative listing, filtering and order stay unchanged.
   const origins = new Map<string, Set<SourceGroup>>();
@@ -280,20 +369,41 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     const key = jobKey(l.url);
     const alt = altKey(l.company, l.title);
     // Also once per cycle: the same job from two sources, or a requisition's copies, are one application.
-    if (seen[key] || seen[alt] || keys.has(key) || keys.has(alt) || queued.has(key)) continue;
+    const old =
+      keys.has(key) || keys.has(alt)
+        ? "Found twice (on another source, or a copy)"
+        : seen[key] || seen[alt]
+          ? "Already looked at (in the last 90 days)"
+          : queued.has(key)
+            ? "Already queued"
+            : "";
+    if (old) {
+      t.drop(l, old);
+      continue;
+    }
     keys.add(key);
     keys.add(alt);
+    t.count(l, "fresh");
     // Not marked seen: a posting the filters reject now may fit after the user changes them.
-    if (rejectReason(l, y, now) || applied(s.applications, key, alt, y.reapplyManual)) continue;
+    const why =
+      rejectReason(l, y, now) ?? (applied(s.applications, key, alt, y.reapplyManual) ? "Already applied" : "");
+    if (why) {
+      t.drop(l, why);
+      continue;
+    }
+    t.count(l, "matched");
     // Looked up while paging and not on the employer's board: done with, without taking a place in the AI's batch.
     if (l.source === "linkedin" && !linkedin.get(key)) {
       seen[key] = seen[alt] = now;
+      t.drop(l, NO_OWN);
       continue;
     }
     fresh.push(l);
   }
   // In queue order, so the jobs the user ranks first aren't the ones left for the next cycle.
-  const batch = inQueueOrder(fresh, y, now).slice(0, BATCH);
+  const ordered = inQueueOrder(fresh, y, now);
+  const batch = ordered.slice(0, BATCH);
+  for (const l of ordered.slice(BATCH)) t.drop(l, `Waits for the next check (${BATCH} per check)`);
   const keep = d.relevance && batch.length ? await d.relevance(batch) : null;
 
   const items: QueueItem[] = [];
@@ -301,7 +411,10 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     const key = jobKey(l.url);
     const alt = altKey(l.company, l.title);
     seen[key] = seen[alt] = now;
-    if (keep && !keep.has(i)) continue;
+    if (keep && !keep.has(i)) {
+      t.drop(l, "AI judged it not a fit");
+      continue;
+    }
     let url = l.url;
     // Boards: apply on the employer's own posting. LinkedIn shows logged-out visitors no way there; Glassdoor and
     // Indeed pages have an "Apply on company site" button the run can click instead.
@@ -311,11 +424,18 @@ export async function discover(d: DiscoverDeps): Promise<number> {
           ? linkedin.get(key)
           : await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
       if (own) url = own;
-      else if (l.source === "linkedin") continue;
+      else if (l.source === "linkedin") {
+        t.drop(l, NO_OWN);
+        continue;
+      }
     }
     const k = jobKey(url);
-    if (k !== key && (seen[k] || applied(s.applications, k, alt, y.reapplyManual))) continue;
+    if (k !== key && (seen[k] || applied(s.applications, k, alt, y.reapplyManual))) {
+      t.drop(l, "Employer's posting already looked at or applied to");
+      continue;
+    }
     seen[k] = now;
+    t.count(l, "queued");
     items.push({
       key: k,
       alt,
@@ -338,5 +458,6 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     feedCache: s.feedCache,
     employerBoards: s.employerBoards,
   });
+  await t.finish();
   return items.length;
 }
