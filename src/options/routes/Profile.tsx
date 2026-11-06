@@ -1,6 +1,18 @@
-import { Cards, Field, Meter, SelectInput, TagInput, TextInput, Toggle, TriState } from "../components/controls";
+import { ONE_PAGE_WORDS } from "../../shared/constants";
+import type { Settings } from "../../shared/types";
+import {
+  Cards,
+  Field,
+  Meter,
+  NumberInput,
+  SelectInput,
+  TagInput,
+  TextInput,
+  Toggle,
+  TriState,
+} from "../components/controls";
 import { PROFILE_GROUPS, type CardSpec, type FieldSpec } from "../profileFields";
-import { completeness, getPath, setPath, useProfile } from "../store";
+import { completeness, getPath, save, setPath, useProfile, useStored } from "../store";
 
 /** Renders one field spec against `obj`; `change` receives the dotted path and the new value. */
 function renderField(f: FieldSpec, obj: object, change: (path: string, v: unknown) => void) {
@@ -104,8 +116,41 @@ export function Profile({ group }: { group: string }) {
             renderField(item, profile, change)
           ),
         )}
+        {spec.id === "essayGuidance" && <EssaySettings />}
       </div>
     </section>
+  );
+}
+
+function EssaySettings() {
+  const s = useStored("settings");
+  if (!s) return <p>Loading…</p>;
+  const set = (patch: Partial<Settings>) => void save({ settings: { ...s, ...patch } });
+  return (
+    <>
+      <NumberInput
+        label="Essay length (words)"
+        help="Target length when a question gives no limit."
+        value={s.essayDefaultWords}
+        min={10}
+        max={2000}
+        onChange={(essayDefaultWords) => set({ essayDefaultWords })}
+      />
+      <NumberInput
+        label="Cover letter length (words)"
+        help="Target length for cover-letter text boxes."
+        value={s.coverLetterDefaultWords}
+        min={10}
+        max={2000}
+        onChange={(coverLetterDefaultWords) => set({ coverLetterDefaultWords })}
+      />
+      <Toggle
+        label="Keep generated cover letters to one page"
+        help={`Cover letter PDFs written for autofill and YOLO. Their length target is at most ${ONE_PAGE_WORDS} words, and a letter that still runs past one page is written again shorter, once; if it still doesn't fit, the upload is left for you. Off: any length.`}
+        checked={s.coverLetterOnePage}
+        onChange={(coverLetterOnePage) => set({ coverLetterOnePage })}
+      />
+    </>
   );
 }
 
