@@ -433,6 +433,12 @@ export function Yolo() {
           ]}
           onChange={(v) => set({ resumeUpload: v as YoloConfig["resumeUpload"] })}
         />
+        <Toggle
+          label="Review YOLO fills with AI"
+          help="Checks each filled page and corrects mistakes before continuing. Also uses AI to find the next step on unfamiliar pages. Adds time and AI usage; choose the review model under AI. Off: uses standard autofill and navigation."
+          checked={y.reviewFills}
+          onChange={(reviewFills) => set({ reviewFills })}
+        />
       </div>
       <h2>Already applied</h2>
       <div class="form">

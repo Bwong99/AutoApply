@@ -3,6 +3,7 @@
 import { test as base, chromium, expect, type BrowserContext, type Page, type Worker } from "@playwright/test";
 import path from "node:path";
 import { MockGemini } from "../mockGemini";
+import { SCHEMA_VERSION } from "../../src/shared/storage";
 
 export const BASE = "http://localhost:5501/jobs/";
 const EXT = path.resolve("dist");
@@ -62,9 +63,9 @@ export interface SeedOptions {
 
 export async function seed(sw: Worker, o: SeedOptions = {}) {
   await sw.evaluate(
-    async ({ o, profile, pdf }) => {
+    async ({ o, profile, pdf, schemaVersion }) => {
       // Wait for the worker's startup migration so it cannot overwrite the seed.
-      while ((await chrome.storage.local.get("schemaVersion")).schemaVersion !== 1)
+      while ((await chrome.storage.local.get("schemaVersion")).schemaVersion !== schemaVersion)
         await new Promise((r) => setTimeout(r, 20));
       const keys = o.apiKey
         ? [{ id: "live", label: "Live", key: o.apiKey, addedAt: 0 }]
@@ -108,7 +109,7 @@ export async function seed(sw: Worker, o: SeedOptions = {}) {
         });
       }
     },
-    { o, profile: PROFILE, pdf: PDF },
+    { o, profile: PROFILE, pdf: PDF, schemaVersion: SCHEMA_VERSION },
   );
 }
 

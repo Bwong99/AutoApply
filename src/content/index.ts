@@ -1403,6 +1403,7 @@ async function startYolo() {
     fill: yoloFill,
     refill,
     navigate: async (why, facts) => {
+      if (!config.settings.reviewFills) return null;
       const { snap } = pageSnapshot();
       const r = await send({ type: "NAVIGATE", page: snap.text, facts, url: location.href, why }).catch(() => null);
       if (!r || isErr(r)) return null;

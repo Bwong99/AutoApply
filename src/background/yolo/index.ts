@@ -444,7 +444,7 @@ async function watchdog(due: number) {
     credit(run, due, now);
     await saveRun(run);
   }
-  const late = overdue(run, now, (await store.get("settings")).reviewFills ? REVIEW_RUN_MS : undefined);
+  const late = overdue(run, now, yolo.reviewFills ? REVIEW_RUN_MS : undefined);
   if (late) await finish(run, late);
   // After a worker restart the tab listener is gone: listen again.
   else if (run.host !== "frame") watchTab(run);
@@ -501,6 +501,7 @@ export async function yoloOverrides(sender: chrome.runtime.MessageSender): Promi
       autoAcceptAcknowledgements: true,
       coverLetterPdfs: yolo.optionalCoverLetters,
       resumeUpload: yolo.resumeUpload,
+      reviewFills: yolo.reviewFills,
       ...(run.host === "visible" ? {} : { showBadges: false }),
     },
     email: await accountEmail(),

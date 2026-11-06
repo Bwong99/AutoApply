@@ -70,10 +70,16 @@ const base = z.object({
   optionalCoverLetters: b(false),
   /** Résumé upload fields: the best-fitting résumé variant, or the LaTeX résumé tailored by the AI. Never left blank. */
   resumeUpload: z.enum(["variants", "tailor"]).catch("variants"),
+  /** Review filled pages and use AI navigation when the usual navigation cannot find a way forward. */
+  reviewFills: b(true),
 });
 export const YoloSchema = base.catch(() => base.parse({}));
 export type Yolo = z.infer<typeof YoloSchema>;
 export const defaultYolo = (): Yolo => YoloSchema.parse({});
+
+/** Older settings and exports used one review toggle for both modes. Keep it unless YOLO has its own. */
+export const migrateYoloReview = (value: unknown, reviewFills: boolean): Yolo =>
+  YoloSchema.parse({ reviewFills, ...(value && typeof value === "object" ? value : {}) });
 
 /** A posting found by a source. */
 export interface Listing {

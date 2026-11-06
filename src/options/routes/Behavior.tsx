@@ -25,8 +25,8 @@ const TOGGLES: [Bool, string, string][] = [
   ],
   [
     "reviewFills",
-    "Review every fill with AI",
-    "After each fill, a stronger AI model reads the page as shown and checks every answer against your profile: it corrects wrong values, fills fields the fill missed, and tells you what's left. Slower and uses more AI, for the most accurate applications. Pick its model under AI. YOLO reviews too while this is on.",
+    "Review manual fills with AI",
+    "After a manual fill, AI checks answers against your profile, corrects mistakes and fills missed fields. Adds time and AI usage; choose the review model under AI. Off: the usual autofill without a second review.",
   ],
   ["showBadges", "Show field badges", "Colored outlines and tags on each field. The overlay list works either way."],
   [

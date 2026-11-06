@@ -97,7 +97,7 @@ const base = z.object({
   debugLogging: b(false),
   /**
    * After each fill, an AI reads the page as shown and checks every answer against the profile: it corrects wrong
-   * ones, fills what the scan missed, and flags the rest (content/review). YOLO always reviews while this is on.
+   * ones, fills what the scan missed, and flags the rest (content/review). Manual fills only; YOLO sets its own.
    */
   reviewFills: b(true),
   /** How long one review (or YOLO navigator) call may take: these think longer than a fill's calls. */

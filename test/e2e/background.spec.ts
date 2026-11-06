@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { MockGemini } from "../mockGemini";
 import { BASE, expect, fillPage, seed } from "./extension";
+import { SCHEMA_VERSION } from "../../src/shared/storage";
 
 type Target = { type: string; url: string; webSocketDebuggerUrl: string };
 type Msg = { id?: number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: unknown };
@@ -70,7 +71,7 @@ const test = base.extend<{ sw: Worker }>({
             }),
             new Promise<null>((r) => setTimeout(() => r(null), 2000)),
           ]);
-          return r?.result.value === 1;
+          return r?.result.value === SCHEMA_VERSION;
         },
         { timeout: 30_000 },
       )

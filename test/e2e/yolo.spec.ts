@@ -41,27 +41,37 @@ const outcome = (sw: Worker) =>
     intervals: [500],
   });
 
-test("applies to a queued job end to end without opening anything on screen", async ({ context, sw, page, mock }) => {
-  test.setTimeout(120_000);
-  await seed(sw, { caps: true });
-  const pages = context.pages().length;
-  await queue(sw, `${BASE}yolo-job.html`);
-  await outcome(sw).toBe("submitted");
-  const [a] = await storage<Application[]>(sw, "applications");
-  expect(a).toMatchObject({ mode: "yolo", company: "Acme", reason: "" });
-  expect(a.doneUrl).toContain("yolo-thanks.html");
-  // Made-up answers are logged for review; profile answers are not.
-  expect(a.guesses).toEqual([{ q: "Do you have any offer deadlines?", a: "No" }]);
-  expect(mock.calls_("guess")).toHaveLength(1);
-  // An account was made for the site, its password kept encrypted.
-  const vault = await storage<Record<string, { email: string; ct: string }>>(sw, "vault");
-  expect(Object.keys(vault)).toEqual(["localhost"]);
-  expect(vault.localhost.email).toBe("ada@example.com");
-  expect(context.pages().length).toBe(pages);
-  void page;
-  // Done: the hidden page's renderer is let go.
-  await expect.poll(() => sw.evaluate(() => chrome.offscreen.hasDocument())).toBe(false);
-});
+for (const reviewFills of [false, true]) {
+  test(`applies to a queued job with YOLO review ${reviewFills ? "on" : "off"} and manual review ${reviewFills ? "off" : "on"}`, async ({
+    context,
+    sw,
+    page,
+    mock,
+  }) => {
+    test.setTimeout(120_000);
+    await seed(sw, { caps: true, settings: { reviewFills: !reviewFills } });
+    const pages = context.pages().length;
+    await queue(sw, `${BASE}yolo-job.html`, { reviewFills });
+    await outcome(sw).toBe("submitted");
+    const [a] = await storage<Application[]>(sw, "applications");
+    expect(a).toMatchObject({ mode: "yolo", company: "Acme", reason: "" });
+    expect(a.doneUrl).toContain("yolo-thanks.html");
+    // Made-up answers are logged for review; profile answers are not.
+    expect(a.guesses).toEqual([{ q: "Do you have any offer deadlines?", a: "No" }]);
+    expect(mock.calls_("guess")).toHaveLength(1);
+    expect(mock.calls_("essay").length).toBeGreaterThan(0);
+    expect(mock.calls_("review").length > 0).toBe(reviewFills);
+    expect(mock.calls_("navigate")).toHaveLength(0);
+    // An account was made for the site, its password kept encrypted.
+    const vault = await storage<Record<string, { email: string; ct: string }>>(sw, "vault");
+    expect(Object.keys(vault)).toEqual(["localhost"]);
+    expect(vault.localhost.email).toBe("ada@example.com");
+    expect(context.pages().length).toBe(pages);
+    void page;
+    // Done: the hidden page's renderer is let go.
+    await expect.poll(() => sw.evaluate(() => chrome.offscreen.hasDocument())).toBe(false);
+  });
+}
 
 test("opens a job-detail Apply CTA even when page chrome has several fields", async ({ sw, page }) => {
   test.setTimeout(120_000);
@@ -581,10 +591,24 @@ test("warns under a source's toggle in settings as soon as it's turned on, YOLO 
 
 test("the navigator finds an Apply no wording rule reads, and the run goes on to submit", async ({ sw, mock }) => {
   test.setTimeout(120_000);
-  await seed(sw, { caps: true });
-  await queue(sw, `${BASE}yolo-job-odd-apply.html`);
+  await seed(sw, { caps: true, settings: { reviewFills: false } });
+  await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills: true });
   await outcome(sw).toBe("submitted");
   const [a] = await storage<Application[]>(sw, "applications");
   expect(a.doneUrl).toContain("yolo-thanks.html");
   expect(mock.calls_("navigate").length).toBeGreaterThanOrEqual(1);
+});
+
+test("YOLO review off leaves an unfamiliar page to standard navigation, even with manual review on", async ({
+  sw,
+  mock,
+}) => {
+  test.setTimeout(120_000);
+  await seed(sw, { caps: true, settings: { reviewFills: true } });
+  await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills: false, tabFallback: false });
+  await outcome(sw).toBe("failed");
+  const [a] = await storage<Application[]>(sw, "applications");
+  expect(a.reason).toBe("Unrecognized page");
+  expect(mock.calls_("navigate")).toHaveLength(0);
+  expect(mock.calls_("review")).toHaveLength(0);
 });

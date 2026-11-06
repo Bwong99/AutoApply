@@ -191,7 +191,7 @@ const TASKS: [AiTask, string, string][] = [
   [
     "review",
     "Answer review & YOLO navigation",
-    "The AI review of each filled page (Behavior → Review every fill with AI), and YOLO's next step on pages it can't read. Accuracy matters most here: the strongest model and effort you have.",
+    "Page reviews enabled separately in Behavior and YOLO Mode, and YOLO's next step on unfamiliar pages when its review is on. Accuracy matters most here: the strongest model and effort you have.",
   ],
 ];
 

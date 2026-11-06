@@ -4,6 +4,7 @@ import { BASE, badge, expect, fillPage, seed, test, waitDone } from "./extension
 
 test("review corrects a wrong value and answers a question the scan missed", async ({ page, sw, mock }) => {
   await seed(sw, { caps: true });
+  await sw.evaluate(() => chrome.storage.local.set({ yolo: { reviewFills: false } }));
   await page.goto(BASE + "review.html");
   await fillPage(page, sw);
   await waitDone(page);
@@ -46,6 +47,7 @@ test("review recovers an omitted verdict and retries incomplete recovery", async
 
 test("review off: the fill is as before, with no review call", async ({ page, sw, mock }) => {
   await seed(sw, { caps: true, settings: { reviewFills: false } });
+  await sw.evaluate(() => chrome.storage.local.set({ yolo: { reviewFills: true } }));
   await page.goto(BASE + "review.html");
   await fillPage(page, sw);
   await waitDone(page);

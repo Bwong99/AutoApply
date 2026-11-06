@@ -3,7 +3,7 @@ import { z } from "zod";
 import { ProfileSchema } from "../../shared/profileSchema";
 import { SettingsSchema } from "../../shared/settings";
 import { ApiKeyEntrySchema, DocumentMetaSchema, LOCAL_SCHEMAS } from "../../shared/storage";
-import { YoloSchema } from "../../shared/yolo";
+import { migrateYoloReview } from "../../shared/yolo";
 import { markSaved, save, store } from "../store";
 
 const ExportSchema = z.object({
@@ -120,6 +120,7 @@ export function Data() {
   const applyImport = async () => {
     if (!pending) return;
     const { data } = pending;
+    const settings = SettingsSchema.parse(data.settings);
     if (data.documents) {
       const old = await store.get("documentsIndex");
       for (const d of old) await store.removeDoc(d.id);
@@ -141,13 +142,13 @@ export function Data() {
     }
     await store.set({ profile: ProfileSchema.parse(data.profile) });
     await save({
-      settings: SettingsSchema.parse(data.settings),
+      settings,
       ...(data.documents ? { documentsIndex: data.documents.map((d) => d.meta) } : {}),
       ...(data.apiKeys ? { apiKeys: data.apiKeys } : {}),
       selectedModel: data.selectedModel,
       fallbackModel: data.fallbackModel,
       ...(data.reviewModel !== undefined ? { reviewModel: data.reviewModel } : {}),
-      ...(data.yolo ? { yolo: { ...YoloSchema.parse(data.yolo), enabled: false } } : {}),
+      ...(data.yolo ? { yolo: { ...migrateYoloReview(data.yolo, settings.reviewFills), enabled: false } } : {}),
       ...(data.applications ? { applications: LOCAL_SCHEMAS.applications.parse(data.applications) } : {}),
     });
     setPending(null);

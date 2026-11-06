@@ -2,9 +2,16 @@ import { z } from "zod";
 import { ProfileSchema } from "./profileSchema";
 import { SettingsSchema } from "./settings";
 import type { ClaudeModel, DocumentMeta, JobContext, Pay, TabStatus } from "./types";
-import { ApplicationSchema, QueueItemSchema, VaultEntrySchema, YoloSchema, YoloStateSchema } from "./yolo";
+import {
+  ApplicationSchema,
+  migrateYoloReview,
+  QueueItemSchema,
+  VaultEntrySchema,
+  YoloSchema,
+  YoloStateSchema,
+} from "./yolo";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const ThinkingSchema = z.union([
   z.object({ kind: z.literal("level"), value: z.enum(["minimal", "low", "high"]) }),
@@ -247,12 +254,14 @@ export function createStorage(ctx: StorageContext) {
 
 /** Runs once at service-worker start: stamps schemaVersion and rewrites values into validated shape. */
 export async function migrate(): Promise<void> {
-  const raw = await chrome.storage.local.get(["schemaVersion", "settings", "profile"]);
+  const raw = await chrome.storage.local.get(["schemaVersion", "settings", "profile", "yolo"]);
   if (raw.schemaVersion === SCHEMA_VERSION) return;
+  const settings = LOCAL_SCHEMAS.settings.parse(raw.settings);
   await chrome.storage.local.set({
     schemaVersion: SCHEMA_VERSION,
-    settings: LOCAL_SCHEMAS.settings.parse(raw.settings),
+    settings,
     profile: LOCAL_SCHEMAS.profile.parse(raw.profile),
+    yolo: migrateYoloReview(raw.yolo, settings.reviewFills),
   });
 }
 

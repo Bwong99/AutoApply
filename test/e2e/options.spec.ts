@@ -3,9 +3,30 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MockGemini } from "../mockGemini";
-import { expect, test } from "./extension";
+import { expect, seed, test } from "./extension";
 
 const EXT = path.resolve("dist");
+
+test("manual and YOLO review controls save independently in their respective settings", async ({ sw, page }) => {
+  await seed(sw);
+  const options = `chrome-extension://${new URL(sw.url()).host}/src/options/index.html`;
+  await page.goto(`${options}#/behavior`);
+  const manual = page.getByRole("checkbox", { name: "Review manual fills with AI", exact: true });
+  await expect(manual).toBeChecked();
+  await manual.click();
+  await expect(manual).not.toBeChecked();
+  await page.goto(`${options}#/yolo`);
+  const yolo = page.getByRole("checkbox", { name: "Review YOLO fills with AI", exact: true });
+  await expect(yolo).toBeChecked();
+  await yolo.click();
+  await expect(yolo).not.toBeChecked();
+  await page.goto(`${options}#/behavior`);
+  await expect(manual).not.toBeChecked();
+  await manual.click();
+  await expect(manual).toBeChecked();
+  await page.goto(`${options}#/yolo`);
+  await expect(yolo).not.toBeChecked();
+});
 
 async function launch(dir: string) {
   const mock = new MockGemini();
