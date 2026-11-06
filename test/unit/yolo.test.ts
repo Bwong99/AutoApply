@@ -768,13 +768,13 @@ describe("discovery", () => {
     expect(await run(1)).toEqual([[0], 1]);
     expect(await run(1, Infinity, false)).toEqual([[0, 10], 1]);
     expect(await run(1, Infinity, false)).toEqual([[0, 10, 20, 30], 1]);
-    const { yoloQueue, yoloSeen } = (await chrome.storage.local.get(["yoloQueue", "yoloSeen"])) as {
+    const { yoloQueue, employerBoards } = (await chrome.storage.local.get(["yoloQueue", "employerBoards"])) as {
       yoloQueue: { url: string }[];
-      yoloSeen: Record<string, number>;
+      employerBoards: Record<string, string>;
     };
     expect(yoloQueue.map((i) => i.url)).toEqual([1, 2, 3].map((n) => `https://jobs.lever.co/acme/${n}`));
-    // Nobody's posting (twice on LinkedIn) was looked up once and isn't again.
-    expect(yoloSeen["linkedin:7"] && yoloSeen["nobody|software engineer intern"]).toBeTruthy();
+    // Nobody has no board on record, so its postings are dropped again without asking any board.
+    expect(employerBoards.nobody).toBe("");
   });
 
   it("leaves LinkedIn postings without an employer posting out of the AI's batch", async () => {
@@ -856,6 +856,120 @@ describe("discovery", () => {
     });
     expect(asked).toEqual([["Software Engineer Intern", "Software Engineer Intern (PhD)"]]);
     expect(n).toBe(1);
+  });
+
+  it("queues any job not in Applications, the queue or the running application, and remembers only AI rejects", async () => {
+    const rows = ["a", "b", "c", "d"].map((id) => ({
+      company_name: `Co ${id}`,
+      title: "Software Engineer Intern",
+      url: `https://jobs.lever.co/co/${id}`,
+      locations: ["Remote"],
+      active: true,
+    }));
+    const f = async () => new Response(JSON.stringify(rows));
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      feeds: ["https://x/feed.json"],
+      boards: [],
+    };
+    const asked: string[][] = [];
+    // The AI rejects d.
+    const relevance = async (items: Listing[]) => (
+      asked.push(items.map((i) => i.url.slice(-1))),
+      new Set([...items.keys()].filter((i) => !items[i].url.endsWith("d")))
+    );
+    const queue = async () =>
+      ((await chrome.storage.local.get("yoloQueue")).yoloQueue as { key: string }[]).map((i) => i.key).sort();
+    expect(await discover({ yolo: y, fetch: f, relevance })).toBe(3);
+    expect(await queue()).toEqual(["lever:a", "lever:b", "lever:c"]);
+
+    // a was applied to, b is running (out of the queue, not yet recorded), c was dropped (turned off, removed).
+    const [a, b] = ["a", "b"].map((id) => ({
+      key: `lever:${id}`,
+      alt: altKey(`Co ${id}`, "Software Engineer Intern"),
+    }));
+    await chrome.storage.local.set({
+      yoloQueue: [],
+      applications: [{ ...a, url: "", mode: "yolo", status: "failed", at: 1 }],
+    });
+    await chrome.storage.session.set({ yoloRun: { mode: "apply", item: { ...b, listing: b.key } } });
+    asked.length = 0;
+    expect(await discover({ yolo: y, fetch: f, relevance })).toBe(1);
+    expect(await queue()).toEqual(["lever:c"]);
+    // d, rejected by the AI, isn't asked about again.
+    expect(asked).toEqual([["c"]]);
+  });
+
+  it("asks the AI again about a job it rejected once aiRejectDays have passed", async () => {
+    const rows = [
+      {
+        company_name: "Co d",
+        title: "Software Engineer Intern",
+        url: "https://jobs.lever.co/co/d",
+        locations: ["Remote"],
+        active: true,
+      },
+    ];
+    const f = async () => new Response(JSON.stringify(rows));
+    const y = { ...defaultYolo(), queries: ["Software Engineer Intern"], feeds: ["https://x/feed.json"], boards: [] };
+    let asked = 0;
+    const relevance = async () => (asked++, new Set<number>());
+    await chrome.storage.local.set({ yoloRejected: { "lever:d": Date.now() - 10 * 86400e3 } });
+    await discover({ yolo: { ...y, aiRejectDays: 30 }, fetch: f, relevance });
+    expect(asked).toBe(0);
+    await discover({ yolo: { ...y, aiRejectDays: 7 }, fetch: f, relevance });
+    expect(asked).toBe(1);
+  });
+
+  it("adds to the queue as it is when discovery ends, and leaves the hidden page to a running application", async () => {
+    const job = (id: string) => ({
+      key: `lever:${id}`,
+      alt: altKey(`Co ${id}`, "Software Engineer Intern"),
+      listing: `lever:${id}`,
+      url: `https://jobs.lever.co/co/${id}`,
+      company: `Co ${id}`,
+      title: "Software Engineer Intern",
+      location: "Remote",
+      source: "x/feed",
+      postedAt: 1,
+      addedAt: 1,
+    });
+    const rows = ["n", "r"].map((id) => ({
+      company_name: `Co ${id}`,
+      title: "Software Engineer Intern",
+      url: `https://jobs.lever.co/co/${id}`,
+      locations: ["Remote"],
+      active: true,
+    }));
+    await chrome.storage.local.set({ yoloQueue: [job("x")] });
+    const scraped: string[] = [];
+    const f = async (url: string) => {
+      if (url === "https://x/feed.json") {
+        // Meanwhile the pump starts x, and r is put back from an application stopped mid-way.
+        await chrome.storage.local.set({ yoloQueue: [{ ...job("r"), postedAt: RETRY }] });
+        await chrome.storage.session.set({ yoloRun: { mode: "apply", item: job("x") } });
+        return new Response(JSON.stringify(rows));
+      }
+      return new Response("", { status: 404 });
+    };
+    const y = {
+      ...defaultYolo(),
+      queries: ["Software Engineer Intern"],
+      feeds: ["https://x/feed.json"],
+      boards: [],
+      careerSites: ["https://careers.example.com/jobs"],
+    };
+    const n = await discover({ yolo: y, fetch: f, scrape: async (u) => (scraped.push(u), []) });
+    const q = (await chrome.storage.local.get("yoloQueue")).yoloQueue as { key: string; postedAt: number }[];
+    // x isn't put back (it would be applied to twice), r isn't lost or doubled, n is added.
+    expect(q.map((i) => [i.key, i.postedAt === RETRY])).toEqual([
+      ["lever:r", true],
+      ["lever:n", false],
+    ]);
+    expect(n).toBe(1);
+    // The career site waits: scraping it would take the hidden page from x's application.
+    expect(scraped).toEqual([]);
   });
 
   it("reads the signed-in Jobright feed until it runs out, trusting its roles over the queries", async () => {

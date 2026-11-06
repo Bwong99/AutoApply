@@ -24,7 +24,7 @@ import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext } from "../jobContext";
 import { realInput, realInputReady, releaseRealInput } from "./realInput";
-import { recordApplication, updateApplications } from "./applicationStore";
+import { recordApplication, updateApplications, updateQueue } from "./applicationStore";
 import { completedSince, needsReviewTab, pendingReview, reviewReasons } from "./submissionReview";
 import {
   dismissReview,
@@ -128,7 +128,14 @@ async function schedule() {
   if (!on) {
     if (a) await chrome.alarms.clearAll();
     const run = await getRun();
-    if (run && !run.reviewKey) await end(run.id);
+    if (run && !run.reviewKey && (await end(run.id)) && run.mode === "apply" && run.host !== "visible") {
+      // Past Submit it may have gone through: left for the user to check rather than applied to twice.
+      if (run.confirming)
+        await record(
+          await outcome(run, { status: "needs", reason: "YOLO was turned off before the emailed confirmation" }),
+        );
+      else await requeue(run.item);
+    }
     await closeFrame().catch(() => undefined);
     return;
   }
@@ -327,8 +334,17 @@ async function pump() {
     if ("error" in ctx) return void (await setState({ pauseReason: ctx.error.message }));
     const blocked = await resumeBlocker();
     if (blocked) return void (await setState({ pauseReason: blocked }));
-    const [item, ...rest] = inQueueOrder(queue, yolo);
-    await store.set({ yoloQueue: rest });
+    let item: QueueItem | undefined;
+    // Taken from the queue as it is now (discovery or a requeue may have changed it since), dropping jobs already in
+    // Applications: discovery can queue one in the moment between its run ending and its result being recorded.
+    // Requeued jobs were put back on purpose.
+    await updateQueue((q) => {
+      const ok = (i: QueueItem) => i.postedAt === RETRY || !applied(apps, i.key, i.alt, yolo.reapplyManual);
+      const [first, ...rest] = inQueueOrder(q.filter(ok), yolo);
+      item = first;
+      return rest;
+    });
+    if (!item) return;
     await setState({ pauseReason: "" });
     const tab = yolo.tabFallback && (await store.get("yoloTabHosts")).includes(hostOf(applyUrl(item.url)));
     const reviewTab = needsReviewTab(policy, item);
@@ -354,7 +370,7 @@ async function requeue(item: QueueItem) {
     await queueReviewRefill(held.key);
     return;
   }
-  await store.set({ yoloQueue: [{ ...item, postedAt: RETRY }, ...(await store.get("yoloQueue"))] });
+  await updateQueue((q) => [{ ...item, postedAt: RETRY }, ...q]);
 }
 
 /**
@@ -400,7 +416,23 @@ async function recoverLost() {
     )
   )
     return;
-  if ((item.retries ?? 0) >= 2) return;
+  // Recorded, so the next check doesn't queue it again: past Submit it may have gone through, and a page that keeps
+  // crashing the browser would loop.
+  const { submitted, ...job } = item;
+  if (submitted || (item.retries ?? 0) >= 2)
+    return record({
+      ...job,
+      url: applyUrl(item.url),
+      doneUrl: "",
+      mode: "yolo",
+      status: submitted ? "needs" : "failed",
+      reason: submitted
+        ? "The browser restarted before the emailed confirmation"
+        : "The browser restarted during this application twice",
+      guesses: [],
+      notes: [],
+      at: Date.now(),
+    });
   await requeue({ ...item, retries: (item.retries ?? 0) + 1 });
   if (yolo.enabled) await whenOnline("pump");
 }
@@ -445,9 +477,18 @@ async function finish(run: Run, r: YoloResult) {
     await pause(r.retryAt, "AI usage limit reached");
     return;
   }
+  const a = await outcome(run, r);
+  await record(a);
+  if (a.status === "needs" && run.host !== "visible")
+    notify(`yolo:${a.key}`, "AutoApply needs you", `${a.company} – ${a.title}: ${a.reason}`);
+  void pump();
+}
+
+/** The Applications entry a run's result makes. */
+async function outcome(run: Run, r: YoloResult): Promise<Application> {
   const { item } = run;
   const previous = run.reviewKey ? (await store.get("applications")).find((a) => a.key === run.reviewKey) : undefined;
-  const a: Application = {
+  return {
     key: previous?.key ?? (run.atsUrl ? jobKey(run.atsUrl) : item.key),
     alt: item.alt,
     url: run.atsUrl ?? applyUrl(item.url),
@@ -466,10 +507,6 @@ async function finish(run: Run, r: YoloResult) {
     notes: [...new Set([...(previous?.notes ?? []), ...(run.notes ?? [])])],
     at: Date.now(),
   };
-  await record(a);
-  if (a.status === "needs" && run.host !== "visible")
-    notify(`yolo:${a.key}`, "AutoApply needs you", `${a.company} – ${a.title}: ${a.reason}`);
-  void pump();
 }
 
 /** Save first, then stop driving, retaining the actual document and its uploads. */
@@ -791,11 +828,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   },
 
   async YOLO_FORGET({ key }) {
-    const seen = await store.get("yoloSeen");
-    delete seen[key];
     await releaseReview(key);
     await updateApplications((apps) => apps.filter((a) => a.key !== key));
-    await store.set({ yoloSeen: seen });
     void pump();
     return { ok: true };
   },
@@ -881,7 +915,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       else kind = "success";
     }
     // Submitted: never applied to again after a browser restart.
-    if (run.confirming && !held) await store.set({ yoloInFlight: null });
+    if (run.confirming && !held && run.host !== "visible")
+      await store.set({ yoloInFlight: { ...run.item, submitted: true } });
     const sig = signature(kind, facts);
     run.guesses = mergeGuesses(run.guesses, guesses);
     // The page reloads to retry a submission flagged as spam: its steps repeat from the start, only the flags count.

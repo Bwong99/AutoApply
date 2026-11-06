@@ -88,7 +88,7 @@ await seed(
       },
     ],
     applications: [],
-    yoloSeen: {},
+    yoloRejected: {},
     yoloState: {},
     yoloInFlight: null,
     yoloTabHosts: meta.tab ? [meta.tab] : [],

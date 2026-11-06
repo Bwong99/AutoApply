@@ -12,7 +12,7 @@ import {
   YoloStateSchema,
 } from "./yolo";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const ThinkingSchema = z.union([
   z.object({ kind: z.literal("level"), value: z.enum(["minimal", "low", "high"]) }),
@@ -141,8 +141,8 @@ export const LOCAL_SCHEMAS = {
   ),
   /** The latest discovery's per-source report (yolo/sourceCheck.ts), shown whatever Debug logging is set to. */
   yoloSourceCheck: SourceCheckSchema.nullable().catch(null),
-  /** Job keys already looked at → when first seen. */
-  yoloSeen: rec(z.number()),
+  /** Job keys the AI fit check judged not a fit → when (yolo/discover.ts). */
+  yoloRejected: rec(z.number()),
   /** Hosts whose bot checks stopped YOLO's hidden frame, latest last: their jobs start in a background tab. */
   yoloTabHosts: list(z.string()),
   /** Company → its ATS board ("greenhouse:lyft"), "" when none was found (yolo/careers.ts). */
@@ -266,6 +266,8 @@ export async function migrate(): Promise<void> {
     profile: LOCAL_SCHEMAS.profile.parse(raw.profile),
     yolo: migrateYoloReview(raw.yolo, settings.reviewFills),
   });
+  // v4: every job not in Applications can be queued; the old every-job-looked-at memory would still block them.
+  await chrome.storage.local.remove("yoloSeen");
 }
 
 // ---------- chrome.storage.session (background only) ----------

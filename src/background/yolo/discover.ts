@@ -15,6 +15,8 @@ import { boardOf, careerSite, findOnEmployerBoard, type Fetcher } from "./career
 import { rejectReason } from "./filter";
 import { altKey, jobKey } from "./jobKey";
 import { loadPlaces } from "./places";
+import { updateQueue } from "./applicationStore";
+import { getRun } from "./runner";
 import { plainError, startSourceCheck } from "./sourceCheck";
 import {
   glassdoorSearch,
@@ -33,7 +35,6 @@ import {
 } from "./sources";
 
 const store = createStorage("background");
-const SEEN_DAYS = 90;
 /** Postings checked by the AI per cycle; the rest wait for the next one. */
 const BATCH = 60;
 /** LinkedIn search pages read per search when `want` asks for more: ~20 fast pages draw a 429, 40 a second apart don't (live, 2026-11-03). */
@@ -162,7 +163,10 @@ const pages = (n: number) => (n ? ` after ${n} page${n === 1 ? "" : "s"}` : "");
 export async function discover(d: DiscoverDeps): Promise<number> {
   const { yolo: y } = d;
   const now = d.now ?? Date.now();
-  const s = await store.getMany(["yoloSeen", "applications", "yoloQueue", "feedCache", "employerBoards"]);
+  const [s, running] = await Promise.all([
+    store.getMany(["yoloRejected", "applications", "yoloQueue", "feedCache", "employerBoards"]),
+    getRun(),
+  ]);
   const found: Listing[] = [];
   const t = await startSourceCheck(y, !!d.topUp, now);
   const safely = async (row: SourceRow, fn: () => Promise<Listing[]>) => {
@@ -228,13 +232,21 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   }
 
   await loadPlaces();
-  const seen = s.yoloSeen;
-  const queued = new Set(s.yoloQueue.map((i) => i.key));
+  const rejected = s.yoloRejected;
+  // Expired before use, so a shortened `aiRejectDays` applies this check.
+  for (const [k, at] of Object.entries(rejected)) if (now - at > y.aiRejectDays * 86400e3) delete rejected[k];
+  // Every job not yet in Applications can be queued, once: the queue's, and the one being applied to right now.
+  const queued = new Set(
+    [...s.yoloQueue, ...(running?.mode === "apply" ? [running.item] : [])]
+      .flatMap((i) => [i.key, i.alt, i.listing])
+      .filter(Boolean),
+  );
+  const taken = (key: string, alt: string) => queued.has(key) || queued.has(alt);
   // What the pass below keeps before the AI and employer lookups, so LinkedIn stops paging once there's enough.
   const fits = (l: Listing, key = jobKey(l.url), alt = altKey(l.company, l.title)) =>
-    !seen[key] &&
-    !seen[alt] &&
-    !queued.has(key) &&
+    !rejected[key] &&
+    !rejected[alt] &&
+    !taken(key, alt) &&
     !rejectReason(l, y, now) &&
     !applied(s.applications, key, alt, y.reapplyManual);
   const boards = new Map<string, Listing[] | null>();
@@ -291,7 +303,8 @@ export async function discover(d: DiscoverDeps): Promise<number> {
               if (linkedin.has(key) || !fits(l, key)) continue;
               const own = await findOnEmployerBoard(d.fetch, l, s.employerBoards, boards).catch(() => null);
               linkedin.set(key, own);
-              if (own && !seen[jobKey(own)]) linkedinOwn.add(jobKey(own));
+              const k = own && jobKey(own);
+              if (k && !queued.has(k) && !applied(s.applications, k, "", y.reapplyManual)) linkedinOwn.add(k);
             }
             // An empty page is the end of the results; a failed one (429) means stop asking. Pages already seen add
             // nothing, so a later search for the same batch reads on past them.
@@ -338,14 +351,17 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     // Workday and SmartRecruiters search server-side; the other boards' APIs list every posting at once.
     const ats = boardOf(url)?.ats;
     const perQuery = /\{q\}/.test(url) || ats === "workday" || ats === "smartrecruiters";
-    if (!ats && !d.scrape) {
-      t.problem(row, "Skipped: an application was using the hidden page; it's read next batch", "info");
-      continue;
-    }
-    for (const q of perQuery ? y.queries : [""])
+    for (const q of perQuery ? y.queries : [""]) {
+      // Before each page: an application started since the check began holds the hidden page, and a scrape would
+      // take it over.
+      if (!ats && (!d.scrape || (await getRun()))) {
+        t.problem(row, "Skipped: an application was using the hidden page; it's read next batch", "info");
+        break;
+      }
       await safely(row, () =>
         careerSite(d.fetch, d.scrape ?? (async () => []), url, q, (p) => t.problem(row, p, "error")),
       );
+    }
   }
   await t.done("careers");
 
@@ -362,7 +378,7 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   const groupsFor = (l: Listing) => [
     ...new Set([...(origins.get(jobKey(l.url)) ?? []), ...(origins.get(altKey(l.company, l.title)) ?? [])]),
   ];
-  // New postings that fit, each looked at once.
+  // New postings that fit.
   const fresh: Listing[] = [];
   const keys = new Set<string>();
   for (const l of found) {
@@ -372,10 +388,10 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     const old =
       keys.has(key) || keys.has(alt)
         ? "Found twice (on another source, or a copy)"
-        : seen[key] || seen[alt]
-          ? "Already looked at (in the last 90 days)"
-          : queued.has(key)
-            ? "Already queued"
+        : taken(key, alt)
+          ? "Already queued"
+          : rejected[key] || rejected[alt]
+            ? `AI judged it not a fit (in the last ${y.aiRejectDays} days)`
             : "";
     if (old) {
       t.drop(l, old);
@@ -384,7 +400,6 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     keys.add(key);
     keys.add(alt);
     t.count(l, "fresh");
-    // Not marked seen: a posting the filters reject now may fit after the user changes them.
     const why =
       rejectReason(l, y, now) ?? (applied(s.applications, key, alt, y.reapplyManual) ? "Already applied" : "");
     if (why) {
@@ -394,7 +409,6 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     t.count(l, "matched");
     // Looked up while paging and not on the employer's board: done with, without taking a place in the AI's batch.
     if (l.source === "linkedin" && !linkedin.get(key)) {
-      seen[key] = seen[alt] = now;
       t.drop(l, NO_OWN);
       continue;
     }
@@ -410,8 +424,9 @@ export async function discover(d: DiscoverDeps): Promise<number> {
   for (const [i, l] of batch.entries()) {
     const key = jobKey(l.url);
     const alt = altKey(l.company, l.title);
-    seen[key] = seen[alt] = now;
     if (keep && !keep.has(i)) {
+      rejected[key] = now;
+      if (alt) rejected[alt] = now;
       t.drop(l, "AI judged it not a fit");
       continue;
     }
@@ -430,11 +445,11 @@ export async function discover(d: DiscoverDeps): Promise<number> {
       }
     }
     const k = jobKey(url);
-    if (k !== key && (seen[k] || applied(s.applications, k, alt, y.reapplyManual))) {
-      t.drop(l, "Employer's posting already looked at or applied to");
+    if (k !== key && (queued.has(k) || applied(s.applications, k, alt, y.reapplyManual))) {
+      t.drop(l, "Employer's posting already queued or applied to");
       continue;
     }
-    seen[k] = now;
+    queued.add(k);
     t.count(l, "queued");
     items.push({
       key: k,
@@ -451,13 +466,19 @@ export async function discover(d: DiscoverDeps): Promise<number> {
     });
   }
 
-  for (const [k, at] of Object.entries(seen)) if (now - at > SEEN_DAYS * 86400e3) delete seen[k];
-  await store.set({
-    yoloSeen: seen,
-    yoloQueue: [...s.yoloQueue.map((l) => ({ ...l, sourceGroups: groupsFor(l) })), ...items],
-    feedCache: s.feedCache,
-    employerBoards: s.employerBoards,
+  await store.set({ yoloRejected: rejected, feedCache: s.feedCache, employerBoards: s.employerBoards });
+  // Into the queue as it is now, not as read above: the pump may have started jobs from it meanwhile (written back,
+  // they'd be applied to twice), and jobs may have been requeued or removed.
+  let added = 0;
+  await updateQueue((q) => {
+    const have = new Set(q.flatMap((i) => [i.key, i.alt, i.listing]).filter(Boolean));
+    const adding = items.filter((i) => ![i.key, i.alt, i.listing].some((k) => k && have.has(k)));
+    added = adding.length;
+    return [
+      ...q.map((l) => ({ ...l, sourceGroups: [...new Set([...groupsFor(l), ...(l.sourceGroups ?? [])])] })),
+      ...adding,
+    ];
   });
   await t.finish();
-  return items.length;
+  return added;
 }

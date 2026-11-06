@@ -67,6 +67,8 @@ const base = z.object({
   excludeTitleWords: strs(["senior", "sr", "staff", "principal", "lead", "manager", "director", "ii", "iii", "phd"]),
   skipCompanies: strs(),
   aiRelevanceCheck: b(true),
+  /** Days a job the AI judged not a fit is skipped without asking again (yolo/discover.ts). */
+  aiRejectDays: n(90, 1, 365),
   boards: z.array(z.enum(BOARDS)).catch(["linkedin", "indeed", "glassdoor"]),
   feeds: strs([SIMPLIFY_FEED]),
   /** Non-empty = read the signed-in user's Jobright recommendations. Its values are unused (once Jobright's GitHub lists). */
@@ -145,6 +147,8 @@ export const QueueItemSchema = z.object({
   addedAt: z.number().catch(0),
   /** Times the job was restarted after the computer slept or the browser restarted mid-application. */
   retries: z.number().optional().catch(undefined),
+  /** In-flight only: past Submit, so a browser restart records it rather than applying again. */
+  submitted: z.boolean().optional().catch(undefined),
 });
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 
@@ -153,6 +157,7 @@ export const ApplicationSchema = QueueItemSchema.omit({
   postedAt: true,
   addedAt: true,
   retries: true,
+  submitted: true,
 }).extend({
   /** The confirmation page a submission ended on. */
   doneUrl: z.string().catch(""),
@@ -195,7 +200,7 @@ const SourceGroupCheckSchema = z.object({
   found: z.number().catch(0),
   /** Passed the user's filters. */
   matched: z.number().catch(0),
-  /** Of those, not looked at, queued or applied to before. */
+  /** Of those, not already queued or judged not a fit by the AI. */
   fresh: z.number().catch(0),
   queued: z.number().catch(0),
   /** Why found postings weren't queued → how many. */

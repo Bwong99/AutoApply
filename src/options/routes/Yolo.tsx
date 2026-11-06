@@ -330,9 +330,17 @@ export function Yolo() {
         <TagInput label="Skip companies" value={y.skipCompanies} onChange={(skipCompanies) => set({ skipCompanies })} />
         <Toggle
           label="Check matches with AI"
-          help="One AI call per check drops jobs whose level or requirements rule you out (PhD-only, citizens only)."
+          help="After the filters above, one AI call per check (up to 60 jobs) screens each job's title, company and location against your queries, education, work authorization, country and relocation preference. It drops a job at a different level than your queries (e.g. a full-time role on an intern search), or one that rules you out: a degree you aren't pursuing (PhD- or MBA-only), a class year or graduation window you don't fit, or a citizenship or clearance requirement you don't meet. It doesn't read job descriptions, so it only catches what those fields show. When unsure, or if the AI call fails, it keeps the job. A dropped job is skipped without asking the AI again for the days set below. Turning this off stops new checks, but jobs already dropped stay skipped until those days pass."
           checked={y.aiRelevanceCheck}
           onChange={(aiRelevanceCheck) => set({ aiRelevanceCheck })}
+        />
+        <NumberInput
+          label="Remember AI rejections (days)"
+          help="How long a job the AI dropped is skipped before the AI is asked about it again (if it's still posted). Fewer days give a dropped job another chance sooner, at the cost of more AI usage. Changes apply from the next check, to jobs already dropped too."
+          value={y.aiRejectDays}
+          min={1}
+          max={365}
+          onChange={(aiRejectDays) => set({ aiRejectDays })}
         />
       </div>
       <h2>Sources</h2>
