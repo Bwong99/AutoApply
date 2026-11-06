@@ -70,16 +70,20 @@ const base = z.object({
   optionalCoverLetters: b(false),
   /** Résumé upload fields: the best-fitting résumé variant, or the LaTeX résumé tailored by the AI. Never left blank. */
   resumeUpload: z.enum(["variants", "tailor"]).catch("variants"),
-  /** Review filled pages and use AI navigation when the usual navigation cannot find a way forward. */
+  /** Check filled pages against the profile and correct missed or wrong answers. */
   reviewFills: b(true),
+  /** Use AI to find the next step when the usual navigation gets stuck. */
+  aiNavigation: b(true),
 });
 export const YoloSchema = base.catch(() => base.parse({}));
 export type Yolo = z.infer<typeof YoloSchema>;
 export const defaultYolo = (): Yolo => YoloSchema.parse({});
 
-/** Older settings and exports used one review toggle for both modes. Keep it unless YOLO has its own. */
-export const migrateYoloReview = (value: unknown, reviewFills: boolean): Yolo =>
-  YoloSchema.parse({ reviewFills, ...(value && typeof value === "object" ? value : {}) });
+/** Split legacy review preferences without changing which AI features are enabled. */
+export const migrateYoloReview = (value: unknown, reviewFills: boolean): Yolo => {
+  const previous = { reviewFills, ...(value && typeof value === "object" ? value : {}) };
+  return YoloSchema.parse({ aiNavigation: previous.reviewFills, ...previous });
+};
 
 /** A posting found by a source. */
 export interface Listing {

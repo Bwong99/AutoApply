@@ -534,6 +534,10 @@ label.inline {
 .yolo .form {
   align-items: start;
 }
+.yolo .ai-controls {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
 .yolo .field .row {
   margin: 8px 0 0;
 }

@@ -11,7 +11,7 @@ import {
   YoloStateSchema,
 } from "./yolo";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const ThinkingSchema = z.union([
   z.object({ kind: z.literal("level"), value: z.enum(["minimal", "low", "high"]) }),

@@ -150,7 +150,7 @@ export async function drive(deps: DriverDeps) {
     facts: PageFacts,
     before: string,
   ): Promise<"moved" | "fill" | "end" | null> => {
-    if (navCalls >= MAX_NAV) return null;
+    if (!hello.aiNavigation || navCalls >= MAX_NAV) return null;
     navCalls++;
     const nav = await deps.navigate(why, facts).catch(() => null);
     if (!nav) return null;

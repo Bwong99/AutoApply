@@ -7,8 +7,9 @@ import { expect, seed, test } from "./extension";
 
 const EXT = path.resolve("dist");
 
-test("manual and YOLO review controls save independently in their respective settings", async ({ sw, page }) => {
+test("manual review, YOLO review and YOLO navigation controls save independently", async ({ sw, page }) => {
   await seed(sw);
+  await page.setViewportSize({ width: 1280, height: 900 });
   const options = `chrome-extension://${new URL(sw.url()).host}/src/options/index.html`;
   await page.goto(`${options}#/behavior`);
   const manual = page.getByRole("checkbox", { name: "Review manual fills with AI", exact: true });
@@ -17,15 +18,31 @@ test("manual and YOLO review controls save independently in their respective set
   await expect(manual).not.toBeChecked();
   await page.goto(`${options}#/yolo`);
   const yolo = page.getByRole("checkbox", { name: "Review YOLO fills with AI", exact: true });
+  const navigation = page.getByRole("checkbox", { name: "Use AI navigation when stuck", exact: true });
   await expect(yolo).toBeChecked();
+  await expect(navigation).toBeChecked();
+  const reviewBox = (await yolo.boundingBox())!;
+  const navigationBox = (await navigation.boundingBox())!;
+  expect(navigationBox.x).toBeGreaterThan(reviewBox.x);
+  expect(navigationBox.y).toBeCloseTo(reviewBox.y, 0);
   await yolo.click();
   await expect(yolo).not.toBeChecked();
+  await expect(navigation).toBeChecked();
+  await navigation.click();
+  await expect(navigation).not.toBeChecked();
+  await expect(yolo).not.toBeChecked();
+  await yolo.click();
+  await expect(yolo).toBeChecked();
+  await expect(navigation).not.toBeChecked();
   await page.goto(`${options}#/behavior`);
   await expect(manual).not.toBeChecked();
   await manual.click();
   await expect(manual).toBeChecked();
   await page.goto(`${options}#/yolo`);
-  await expect(yolo).not.toBeChecked();
+  await expect(yolo).toBeChecked();
+  await expect(navigation).not.toBeChecked();
+  await page.setViewportSize({ width: 800, height: 900 });
+  expect((await navigation.boundingBox())!.y).toBeGreaterThan((await yolo.boundingBox())!.y);
 });
 
 async function launch(dir: string) {

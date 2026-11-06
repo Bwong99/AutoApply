@@ -214,6 +214,8 @@ export interface Responses {
     company: string;
     title: string;
     visible: boolean;
+    /** Use AI navigation when the usual navigation gets stuck, independently of page review. */
+    aiNavigation: boolean;
     /** Real input for pages a bot check grades: "off" in the hidden frame, or without chrome.debugger. */
     realInput: (typeof REAL_INPUT)[number];
     /** The posting the run went past straight to its form (Lever's /apply): read for its description and pay. */

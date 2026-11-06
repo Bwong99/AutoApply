@@ -51,7 +51,7 @@ for (const reviewFills of [false, true]) {
     test.setTimeout(120_000);
     await seed(sw, { caps: true, settings: { reviewFills: !reviewFills } });
     const pages = context.pages().length;
-    await queue(sw, `${BASE}yolo-job.html`, { reviewFills });
+    await queue(sw, `${BASE}yolo-job.html`, { reviewFills, aiNavigation: !reviewFills });
     await outcome(sw).toBe("submitted");
     const [a] = await storage<Application[]>(sw, "applications");
     expect(a).toMatchObject({ mode: "yolo", company: "Acme", reason: "" });
@@ -589,26 +589,32 @@ test("warns under a source's toggle in settings as soon as it's turned on, YOLO 
   expect((await storage<{ enabled?: boolean }>(sw, "yolo")).enabled).toBeFalsy();
 });
 
-test("the navigator finds an Apply no wording rule reads, and the run goes on to submit", async ({ sw, mock }) => {
-  test.setTimeout(120_000);
-  await seed(sw, { caps: true, settings: { reviewFills: false } });
-  await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills: true });
-  await outcome(sw).toBe("submitted");
-  const [a] = await storage<Application[]>(sw, "applications");
-  expect(a.doneUrl).toContain("yolo-thanks.html");
-  expect(mock.calls_("navigate").length).toBeGreaterThanOrEqual(1);
-});
+for (const reviewFills of [false, true]) {
+  test(`AI navigation on finds an unfamiliar Apply and submits with YOLO review ${reviewFills ? "on" : "off"}`, async ({
+    sw,
+    mock,
+  }) => {
+    test.setTimeout(120_000);
+    await seed(sw, { caps: true, settings: { reviewFills: false } });
+    await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills, aiNavigation: true });
+    await outcome(sw).toBe("submitted");
+    const [a] = await storage<Application[]>(sw, "applications");
+    expect(a.doneUrl).toContain("yolo-thanks.html");
+    expect(mock.calls_("navigate").length).toBeGreaterThanOrEqual(1);
+    expect(mock.calls_("review").length > 0).toBe(reviewFills);
+  });
 
-test("YOLO review off leaves an unfamiliar page to standard navigation, even with manual review on", async ({
-  sw,
-  mock,
-}) => {
-  test.setTimeout(120_000);
-  await seed(sw, { caps: true, settings: { reviewFills: true } });
-  await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills: false, tabFallback: false });
-  await outcome(sw).toBe("failed");
-  const [a] = await storage<Application[]>(sw, "applications");
-  expect(a.reason).toBe("Unrecognized page");
-  expect(mock.calls_("navigate")).toHaveLength(0);
-  expect(mock.calls_("review")).toHaveLength(0);
-});
+  test(`AI navigation off leaves an unfamiliar page to standard navigation with YOLO review ${reviewFills ? "on" : "off"}`, async ({
+    sw,
+    mock,
+  }) => {
+    test.setTimeout(120_000);
+    await seed(sw, { caps: true, settings: { reviewFills: true } });
+    await queue(sw, `${BASE}yolo-job-odd-apply.html`, { reviewFills, aiNavigation: false, tabFallback: false });
+    await outcome(sw).toBe("failed");
+    const [a] = await storage<Application[]>(sw, "applications");
+    expect(a.reason).toBe("Unrecognized page");
+    expect(mock.calls_("navigate")).toHaveLength(0);
+    expect(mock.calls_("review")).toHaveLength(0);
+  });
+}

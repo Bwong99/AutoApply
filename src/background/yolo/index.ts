@@ -444,7 +444,7 @@ async function watchdog(due: number) {
     credit(run, due, now);
     await saveRun(run);
   }
-  const late = overdue(run, now, yolo.reviewFills ? REVIEW_RUN_MS : undefined);
+  const late = overdue(run, now, yolo.reviewFills || yolo.aiNavigation ? REVIEW_RUN_MS : undefined);
   if (late) await finish(run, late);
   // After a worker restart the tab listener is gone: listen again.
   else if (run.host !== "frame") watchTab(run);
@@ -682,6 +682,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       company: run.item.company,
       title: run.item.title,
       visible: run.host === "visible",
+      aiNavigation: yolo.aiNavigation,
       realInput: run.host !== "frame" && realInputReady() ? yolo.realInput : "off",
       ...(skipped ? { posting: run.item.url } : {}),
     };

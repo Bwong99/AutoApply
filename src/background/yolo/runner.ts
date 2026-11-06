@@ -46,7 +46,7 @@ export const WATCHDOG = "yolo-watchdog";
 const HELLO_MS = 45_000;
 const STEP_MS = 180_000;
 const RUN_MS = 12 * 60_000;
-/** With the AI review of every page (yolo.reviewFills), an application takes several times as long. */
+/** With AI review or navigation, an application can take several times as long. */
 export const REVIEW_RUN_MS = 45 * 60_000;
 
 export const getRun = () => session.get<Run>(KEY);
