@@ -423,17 +423,17 @@ export function Yolo() {
           checked={y.optionalCoverLetters}
           onChange={(optionalCoverLetters) => set({ optionalCoverLetters })}
         />
-        <SelectInput
-          label="Upload résumés"
-          help="YOLO always uploads a résumé. Variant select: the résumé PDF in Documents that best fits the job (fast, no AI). AI tailor: your LaTeX résumé, tailored to the job by the AI (slower, uses tokens); if tailoring fails, the untailored version is uploaded."
-          value={y.resumeUpload}
-          options={[
-            ["variants", "Variant select"],
-            ["tailor", "AI tailor"],
-          ]}
-          onChange={(v) => set({ resumeUpload: v as YoloConfig["resumeUpload"] })}
-        />
         <div class="form ai-controls">
+          <SelectInput
+            label="Upload résumés"
+            help="YOLO always uploads a résumé. Variant select: the résumé PDF in Documents that best fits the job (fast, no AI). AI tailor: your LaTeX résumé, tailored to the job by the AI (slower, uses tokens); if tailoring fails, the untailored version is uploaded."
+            value={y.resumeUpload}
+            options={[
+              ["variants", "Variant select"],
+              ["tailor", "AI tailor"],
+            ]}
+            onChange={(v) => set({ resumeUpload: v as YoloConfig["resumeUpload"] })}
+          />
           <Toggle
             label="Review YOLO fills with AI"
             help="Checks each filled page and corrects mistakes before continuing. Adds time and AI usage; choose the review model under AI. Off: skips the review after filling."
