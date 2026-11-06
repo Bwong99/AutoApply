@@ -412,7 +412,8 @@ export async function drive(deps: DriverDeps) {
           // Still rendering (Oracle's next section takes several seconds), or a page we don't know: give up only once
           // it stops changing. A second unknown step goes to the navigator even if the page keeps changing (a
           // carousel or clock), before the loop guard ends the run (Microsoft's sign-in choice).
-          if (++unknowns < 2 && (await changed(before, 15_000))) continue;
+          // With AI navigation off, keep main's full wait at every rendering stage.
+          if ((!hello.aiNavigation || ++unknowns < 2) && (await changed(before, 15_000))) continue;
           // Workday's "Something went wrong. Please refresh the page and then try again." (the step loop guard caps it)
           if (/\b(refresh|reload) the page\b/i.test(pageText())) {
             location.reload();

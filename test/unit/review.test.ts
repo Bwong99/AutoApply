@@ -244,6 +244,89 @@ describe("reviewForm", () => {
     expect(calls[0].spec.payload).not.toHaveProperty("fieldIdsToReview");
   });
 
+  it.each([false, true])("preserves profile-constrained screening answers in review (YOLO %s)", async (yolo) => {
+    const question = "How many months are you available for an internship? Internships require at least 3 months.";
+    const fields = [
+      field({ question, kind: "number", required: true, shown: "2", source: "coop.acceptableTermLengths" }),
+    ];
+    const { ctx, calls } = harness({ data: reply([fix({ verdict: "wrong", answer: "4", sources: ["resume"] })]) });
+    const i = input(fields);
+    i.yolo = yolo;
+    i.profile.coop.acceptableTermLengths = ["2 months"];
+    expect((await reviewForm(ctx, i)).fixes).toEqual([]);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(["fill", "relabel"] as const)(
+    "keeps conflicting availability flagged despite a review %s",
+    async (verdict) => {
+      const question = "How many months are you available for an internship? Internships require at least 3 months.";
+      const { ctx } = harness({
+        data: reply([fix({ verdict, question: "Preferred duration", answer: "3", sources: ["screening"] })]),
+      });
+      const i = input([field({ question, kind: "number", required: true })]);
+      i.profile.coop.acceptableTermLengths = ["4 months"];
+      i.profile.preferences.earliestStartDate = "2090-01-01";
+      i.profile.preferences.availableUntil = "2090-03-01";
+      expect((await reviewForm(ctx, i)).fixes).toEqual([
+        expect.objectContaining({ verdict: "needs_user", reason: "Profile availability constraints conflict" }),
+      ]);
+    },
+  );
+
+  it("repairs a screening amount from the posting without trusting a weaker review answer", async () => {
+    const { ctx } = harness({ data: reply([fix({ verdict: "wrong", answer: "2", sources: ["resume"] })]) });
+    const i = input([
+      field({
+        question: "How many years of experience do you have with React?",
+        kind: "number",
+        required: true,
+        shown: "1",
+      }),
+    ]);
+    i.job = {
+      text: "We require at least 3 years of experience with React.",
+      url: "",
+      title: "",
+      company: "Acme",
+      jobTitle: "Intern",
+      capturedAt: 0,
+    };
+    expect((await reviewForm(ctx, i)).fixes).toEqual([
+      expect.objectContaining({ answer: "3", sources: ["screening"] }),
+    ]);
+  });
+
+  it("keeps the posting-based compensation strategy when the review sees a lower profile floor", async () => {
+    const { ctx, calls } = harness({
+      data: reply([fix({ verdict: "wrong", answer: "50000", sources: ["preferences.desiredCompensation"] })]),
+    });
+    const i = input([field({ question: "Desired annual salary", kind: "number", required: true, shown: "90000" })]);
+    i.profile.preferences.desiredCompensation = {
+      ...i.profile.preferences.desiredCompensation,
+      amount: "50000",
+      currency: "CAD",
+      period: "year",
+      strategy: "mid",
+    };
+    i.pays = [{ min: 80000, max: 100000, currency: "CAD", period: "year" }];
+    expect((await reviewForm(ctx, i)).fixes).toEqual([]);
+    expect(calls[0].spec.context).toMatchObject({
+      profile: { preferences: { desiredCompensation: { amount: "90000" } } },
+    });
+  });
+
+  it("allows a custom dropdown's options to change after the first pass", async () => {
+    const { ctx } = harness({
+      data: reply([fix({ answer: "British Columbia", sources: ["personal.address.region"] })]),
+    });
+    const i = input([
+      field({ question: "Province", kind: "dropdown", required: true, options: ["Alabama", "Indiana"] }),
+    ]);
+    i.profile.personal.address.region = "British Columbia";
+    expect((await reviewForm(ctx, i)).fixes).toEqual([expect.objectContaining({ answer: "British Columbia" })]);
+  });
+
   it("recovers only omitted verdicts with the original context and preserves discoveries and checked answers", async () => {
     const discovery = { refs: ["c4"], question: "Pronouns", kind: "text", required: false };
     const { ctx, calls } = harness(

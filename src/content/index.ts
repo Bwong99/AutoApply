@@ -547,7 +547,7 @@ async function doFill(h: FieldHandle, op: FillOp, okStatus: Status, tooltip: str
     tooltip = "Best guess (YOLO)";
     guesses.set(h.id, { q: h.desc.label, a: opText(op) });
   }
-  if (tooltip === SCREENING_SOURCE) {
+  if (tooltip.split(/,\s*/).includes(SCREENING_SOURCE)) {
     screened.add(h.id);
     okStatus = "check";
     tooltip = "Meets the job's screening requirement; review this answer";
@@ -1001,6 +1001,8 @@ function reviewField(h: FieldHandle): ReviewField {
     required: h.desc.required,
     ...(h.desc.section ? { section: h.desc.section } : {}),
     ...(h.desc.hint ? { hint: clip(h.desc.hint, 300) } : {}),
+    ...(h.desc.placeholder ? { placeholder: h.desc.placeholder } : {}),
+    ...(h.desc.maxLength ? { maxLength: h.desc.maxLength } : {}),
     ...(options ? { options: options.slice(0, 80) } : {}),
     ...(h.desc.multiple ? { multiple: true } : {}),
     shown: clip(shown, 600),
@@ -1127,7 +1129,6 @@ async function reviewPage(groupId: string, ctrl: AbortController): Promise<"none
         setStatus(h, "needs", why, suggestion);
         continue;
       }
-      // A YOLO best guess is logged and badged like the mapping's guesses.
       // A YOLO best guess, or an answer the screening policy permits, is logged and badged like the mapping's.
       const tooltip = screening ? SCREENING_SOURCE : yolo && fix.sources.includes("guess") ? "guess" : why;
       // An attempted write still needs checking: even a failed widget can change the page or reveal questions.

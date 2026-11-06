@@ -2178,14 +2178,11 @@ export function mappingPayloadBase(input: Omit<MapInput, "fields">, pay: PayTarg
   };
 }
 
-export async function mapFields(
-  ctx: ServiceCtx,
-  input: MapInput,
-): Promise<{ decisions: Decision[]; usedModel: string }> {
+/** The first pass's local policies, shared with review corrections without making another AI request. */
+export function localDecisions(input: MapInput): Map<string, Decision> {
   const home = input.profile.personal.address.country;
   const job = input.job?.location ? jobCountry(input.job.location) : undefined;
   const pay = payTarget(input.profile.preferences.desiredCompensation, input.pays ?? [], job);
-  const base = mappingPayloadBase(input, pay);
   const countries = new Map(input.fields.map((f) => [f.id, workCountry(f.label, home, job)]));
   const months = experienceMonths(input.profile.experience);
   const jobExperienceMinimum = hasExperienceMinimum(input.job?.text || input.job?.header || "");
@@ -2251,6 +2248,19 @@ export async function mapFields(
       otherStatusDecision(f, input.fields, local, countries, input.profile.workAuthorization.entries);
     if (d) local.set(f.id, d);
   }
+  return local;
+}
+
+export async function mapFields(
+  ctx: ServiceCtx,
+  input: MapInput,
+): Promise<{ decisions: Decision[]; usedModel: string }> {
+  const home = input.profile.personal.address.country;
+  const job = input.job?.location ? jobCountry(input.job.location) : undefined;
+  const pay = payTarget(input.profile.preferences.desiredCompensation, input.pays ?? [], job);
+  const base = mappingPayloadBase(input, pay);
+  const countries = new Map(input.fields.map((f) => [f.id, workCountry(f.label, home, job)]));
+  const local = localDecisions(input);
   // A follow-up to a question answered here: the model can't see that answer (Etched's "If you answered other:" was
   // skipped after work authorization got "Other (please explain below)").
   const answeredBefore = new Map<string, string>();

@@ -14,13 +14,17 @@ import {
   deniesNeededSponsorship,
   GUESS,
   jobCountry,
+  localDecisions,
+  mappingPayloadBase,
+  payTarget,
   type ServiceCtx,
-  withoutEssayStyle,
   workCountry,
   wrongSiteLink,
+  validateDecisions,
 } from "./mapFields";
 import type { ReviewField, ReviewFix, ReviewResult } from "../../shared/review";
 import { todayIso } from "../../shared/time";
+import { isScreeningQuestion } from "../../shared/screening";
 
 export interface ReviewInput {
   page: string;
@@ -57,6 +61,10 @@ const descOf = (f: ReviewField, question = f.question): FieldDescriptor => ({
   optionsKnown: !!f.options,
   ...(f.options ? { options: f.options } : {}),
   ...(f.hint ? { hint: f.hint } : {}),
+  ...(f.section ? { section: f.section } : {}),
+  ...(f.multiple ? { multiple: true } : {}),
+  ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+  ...(f.maxLength ? { maxLength: f.maxLength } : {}),
 });
 
 /**
@@ -74,6 +82,7 @@ export function checkFix(
   if (f.locked || f.status === "you" || f.status === "edited") return null;
   if (RE_SENSITIVE_LABEL.test(f.question) || trapLabel(f.question)) return null;
   const question = fix.verdict === "relabel" && fix.question ? fix.question : f.question;
+  if (RE_SENSITIVE_LABEL.test(question) || trapLabel(question)) return null;
   if (fix.verdict === "needs_user") return { ...fix, reason: fix.reason || "Needs your answer" };
   let answer = fix.answer;
   if (answer === undefined) return fix.verdict === "relabel" ? { ...fix, question } : null;
@@ -92,6 +101,22 @@ export function checkFix(
     // The user answers what the data doesn't (manual mode): the guess is only a suggestion.
     return { ...fix, verdict: "needs_user", answer, reason: fix.reason || "Not in your profile" };
   const d = descOf(f, question);
+  // The same source check as the first pass: a review cannot invent an identity or treat a job as candidate data.
+  const evidence = validateDecisions(
+    [d],
+    [
+      {
+        fieldId: f.id,
+        action: "fill",
+        text: answer,
+        intendedAnswer: answer,
+        confidence: "medium",
+        sources: fix.sources,
+      },
+    ],
+  )[0];
+  if (evidence.action === "flag" && evidence.note === "Not in your profile")
+    return yolo ? null : { ...fix, verdict: "needs_user", answer, reason: evidence.note };
   const home = profile.personal.address.country;
   if (deniesNeededSponsorship(d, answer, workCountry(question, home, job), profile.workAuthorization.entries))
     return { ...fix, verdict: "needs_user", answer, reason: "Sponsorship needed in this country" };
@@ -137,8 +162,20 @@ export function covered<T extends { fields: { fieldId: string }[] }>(r: T, field
 }
 
 export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<ReviewResult> {
-  const { resumeText, learnedAnswers, ...rest } = input.profile;
+  const { resumeText, learnedAnswers } = input.profile;
   const job = input.job?.location ? jobCountry(input.job.location) : undefined;
+  const base = mappingPayloadBase(
+    { ...input, documents: [] },
+    payTarget(input.profile.preferences.desiredCompensation, input.pays ?? [], job),
+  );
+  const descriptors = input.fields.map((f) => descOf(f));
+  const localInput = {
+    ...input,
+    fields: descriptors,
+    documents: [],
+    uploads: descriptors.filter((f) => f.kind === "file").map((f) => f.label),
+  };
+  const original = localDecisions(localInput);
   const policy = {
     mode: input.yolo ? "yolo" : "manual",
     requiredWithoutData: input.yolo
@@ -154,7 +191,7 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
   };
   const spec = {
     system: REVIEW_FORM_PROMPT,
-    context: { profile: compactProfile(withoutEssayStyle(rest)) ?? {}, resume: resumeText.slice(0, 30000) },
+    context: { profile: base.profile, resume: resumeText.slice(0, 30000) },
     payload: {
       learnedAnswers: [...learnedAnswers]
         .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
@@ -215,7 +252,7 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
       v.verdict = "wrong";
       v.answer = "";
     }
-    const fix = checkFix(
+    let fix = checkFix(
       {
         fieldId: f.id,
         verdict: v.verdict,
@@ -229,6 +266,39 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
       input.yolo,
       job,
     );
+    if (fix) {
+      let policy = original.get(f.id);
+      // A corrected label can change which profile rule applies. A flag or screening constraint on the original
+      // question still holds: renaming the question must not evade it.
+      if (fix.verdict === "relabel" && fix.question && policy?.action !== "flag" && !isScreeningQuestion(descOf(f)))
+        policy = localDecisions({
+          ...localInput,
+          fields: descriptors.map((d) => (d.id === f.id ? descOf(f, fix!.question) : d)),
+        }).get(f.id);
+      if (policy?.action === "flag") {
+        fix = {
+          fieldId: f.id,
+          verdict: "needs_user",
+          reason: policy.note ?? "Needs your answer",
+          sources: policy.sources ?? [],
+        };
+      } else if (fix.verdict !== "needs_user" && policy?.action === "fill") {
+        const answer =
+          policy.text ??
+          (policy.optionIndexes && f.options
+            ? policy.optionIndexes.map((i) => f.options![i]).join(" | ")
+            : policy.intendedAnswer) ??
+          (policy.checked !== undefined ? (policy.checked ? "checked" : "unchecked") : undefined);
+        if (answer !== undefined)
+          fix = checkFix(
+            { ...fix, answer, sources: policy.sources ?? [], reason: "Profile and screening policy" },
+            f,
+            input.profile,
+            input.yolo,
+            job,
+          );
+      } else if ((policy?.action === "skip" && fix.answer !== "") || policy?.action === "consent") fix = null;
+    }
     if (fix) fixes.push(fix);
   }
   const missed = r.data.missed

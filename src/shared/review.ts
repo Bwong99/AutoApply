@@ -9,6 +9,8 @@ export interface ReviewField {
   required: boolean;
   section?: string;
   hint?: string;
+  placeholder?: string;
+  maxLength?: number;
   options?: string[];
   multiple?: boolean;
   /** What the page shows now ("" when empty). */

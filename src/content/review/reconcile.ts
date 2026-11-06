@@ -9,6 +9,7 @@ import type { FillOp } from "../fill/engine";
 import { isForbiddenClick } from "../fill/events";
 import { isFreeText } from "../match/deterministic";
 import type { Adopted, FieldHandle } from "../scan/fields";
+import { controlLabel } from "../scan/labels";
 import { HOST_TAG } from "../scan/traverse";
 import { isVisible } from "../scan/visibility";
 import { RE_FOR_BOTS } from "../yolo/nav";
@@ -23,6 +24,8 @@ function adoptable(el: HTMLElement, excluded: (el: Element) => string | undefine
   if (RE_SAFETY_EXCLUSION.test(excluded(el) ?? "")) return false;
   const nameId = `${el.getAttribute("name") ?? ""} ${el.id} ${el.getAttribute("autocomplete") ?? ""}`;
   if (RE_TRAP_NAME.test(nameId) || RE_SKIP_LABEL.test(nameId)) return false;
+  const label = controlLabel(el);
+  if (RE_SKIP_LABEL.test(label) || trapLabel(label)) return false;
   const shownBox =
     el instanceof HTMLInputElement && /^(radio|checkbox)$/.test(el.type)
       ? (el.labels?.[0] ?? el.closest("label") ?? el)
@@ -88,7 +91,7 @@ export function adoption(
     const members = els.length > 1 ? els : [...first.querySelectorAll<HTMLElement>(CHOICES)];
     if (members.length < 2) return els.length === 1 ? [first, { ...base, kind: "checkbox" }] : null;
     // Pills that would submit or navigate are no answers.
-    if (members.some((b) => isForbiddenClick(b) && !(b instanceof HTMLInputElement))) return null;
+    if (members.some((b) => !adoptable(b, excluded) || isForbiddenClick(b))) return null;
     return [members[0], { ...base, kind: m.kind, members }];
   }
   if (m.kind === "checkbox") return [first, { ...base, kind: "checkbox" }];

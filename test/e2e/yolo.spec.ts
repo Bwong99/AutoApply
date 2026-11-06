@@ -41,6 +41,19 @@ const outcome = (sw: Worker) =>
     intervals: [500],
   });
 
+test("with review and navigation off, waits through multiple rendering stages as main does", async ({ sw, mock }) => {
+  test.setTimeout(60_000);
+  await seed(sw, { caps: true, settings: { reviewFills: false } });
+  await queue(sw, `${BASE}yolo-delayed-form.html`, { reviewFills: false, aiNavigation: false, tabFallback: false });
+  await expect
+    .poll(async () => (await storage<Application[] | undefined>(sw, "applications"))?.[0], { timeout: 30_000 })
+    .toBeTruthy();
+  const [application] = await storage<Application[]>(sw, "applications");
+  expect(application, JSON.stringify(application)).toMatchObject({ status: "submitted" });
+  expect(mock.calls_("review")).toHaveLength(0);
+  expect(mock.calls_("navigate")).toHaveLength(0);
+});
+
 for (const reviewFills of [false, true]) {
   test(`applies to a queued job with YOLO review ${reviewFills ? "on" : "off"} and manual review ${reviewFills ? "off" : "on"}`, async ({
     context,
