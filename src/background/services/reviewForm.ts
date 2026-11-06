@@ -128,15 +128,11 @@ export function checkFix(
   return { ...fix, answer, question };
 }
 
-/**
- * A review that skips most fields checked nothing: Gemini Flash-Lite at its highest thinking returned no verdicts at
- * all on long pages. Asked again (the clients retry bad output once, then use the fallback model).
- */
+/** Every requested field needs a verdict; duplicate or unrelated ids cannot cover an omitted field. */
 export function covered<T extends { fields: { fieldId: string }[] }>(r: T, fields: ReviewField[]): T {
   const ids = new Set(r.fields.map((v) => v.fieldId));
   const answered = fields.filter((f) => ids.has(f.id)).length;
-  if (fields.length && answered < Math.ceil(fields.length / 2))
-    throw new BadOutputError(`The review answered ${answered} of ${fields.length} fields`);
+  if (answered < fields.length) throw new BadOutputError(`The review answered ${answered} of ${fields.length} fields`);
   return r;
 }
 
@@ -156,37 +152,56 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
       marketingOptIns: input.profile.background.consentToMarketing || "follow optionalConsents",
     },
   };
-  const r = await ctx.ai.call(
-    {
-      system: REVIEW_FORM_PROMPT,
-      context: { profile: compactProfile(withoutEssayStyle(rest)) ?? {}, resume: resumeText.slice(0, 30000) },
-      payload: {
-        learnedAnswers: [...learnedAnswers]
-          .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
-          .slice(0, 100)
-          .map((l) => ({ q: l.question, a: l.answer })),
-        documents: input.documents,
-        job: compactProfile({
-          company: input.job?.company,
-          title: input.job?.jobTitle,
-          url: input.job?.url,
-          location: input.job?.location,
-          description: input.job?.text.slice(0, 8000) || input.job?.header,
-        }),
-        today: todayIso(),
-        policy,
-        fields: input.fields,
-        page: input.page,
-      },
-      schema: REVIEW_SCHEMA,
-      validate: (d) => covered(ReviewZ.parse(d), input.fields),
-      review: true,
-      timeoutMs: ctx.settings.reviewTimeoutMs,
-      maxOutputTokens: 32768,
-      signal: ctx.signal,
+  const spec = {
+    system: REVIEW_FORM_PROMPT,
+    context: { profile: compactProfile(withoutEssayStyle(rest)) ?? {}, resume: resumeText.slice(0, 30000) },
+    payload: {
+      learnedAnswers: [...learnedAnswers]
+        .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+        .slice(0, 100)
+        .map((l) => ({ q: l.question, a: l.answer })),
+      documents: input.documents,
+      job: compactProfile({
+        company: input.job?.company,
+        title: input.job?.jobTitle,
+        url: input.job?.url,
+        location: input.job?.location,
+        description: input.job?.text.slice(0, 8000) || input.job?.header,
+      }),
+      today: todayIso(),
+      policy,
+      fields: input.fields,
+      page: input.page,
     },
-    { model: ctx.model, fallback: ctx.fallback },
-  );
+    schema: REVIEW_SCHEMA,
+    validate: (d: unknown) => ReviewZ.parse(d),
+    review: true,
+    timeoutMs: ctx.settings.reviewTimeoutMs,
+    maxOutputTokens: 32768,
+    signal: ctx.signal,
+  };
+  const models = { model: ctx.model, fallback: ctx.fallback };
+  const r = await ctx.ai.call(spec, models);
+  const answered = new Set(r.data.fields.map((v) => v.fieldId));
+  const missing = input.fields.filter((f) => !answered.has(f.id));
+  if (missing.length) {
+    ctx.signal?.throwIfAborted();
+    // Keep the page and every field as context for dependent questions, but request only omitted verdicts. The
+    // clients retry incomplete recovery once, then use the configured fallback; never return a partial review.
+    const recovery = await ctx.ai.call(
+      {
+        ...spec,
+        system: `${spec.system}\n\nCOVERAGE RECOVERY: The earlier reply omitted some field verdicts. For this request, step 1 applies only to the ids in "fieldIdsToReview": return exactly one verdict for each of those ids. All original fields and the page are provided for context. Do not repeat other verdicts. Steps 2 and 3 were already requested: return empty "missed" and "reveal" arrays.`,
+        payload: { ...spec.payload, fieldIdsToReview: missing.map((f) => f.id) },
+        validate: (d) => covered(ReviewZ.parse(d), missing),
+      },
+      models,
+    );
+    const missingIds = new Set(missing.map((f) => f.id));
+    r.data.fields.push(...recovery.data.fields.filter((v) => missingIds.has(v.fieldId)));
+    if (recovery.usedModel !== ctx.model) r.usedModel = recovery.usedModel;
+  }
+  covered(r.data, input.fields);
   const byId = new Map(input.fields.map((f) => [f.id, f]));
   const fixes: ReviewFix[] = [];
   const seen = new Set<string>();

@@ -11,6 +11,38 @@ test("review corrects a wrong value and answers a question the scan missed", asy
   expect(mock.calls_("review").length).toBeGreaterThanOrEqual(2);
 });
 
+test("review recovers an omitted verdict and retries incomplete recovery", async ({ page, sw, mock }) => {
+  const review = mock.review.bind(mock);
+  let omitted: string | undefined;
+  let recoveryAttempts = 0;
+  mock.review = (payload) => {
+    const r = review(payload);
+    const verdicts = r.fields as { fieldId: string }[];
+    const requested = payload.fieldIdsToReview as string[] | undefined;
+    if (requested)
+      return {
+        fields: ++recoveryAttempts === 1 ? [] : verdicts.filter((v) => requested.includes(v.fieldId)),
+        missed: [],
+        reveal: [],
+      };
+    if (!omitted) {
+      omitted = (payload.fields as { id: string; question: string }[]).find((f) => /^last name/i.test(f.question))?.id;
+      r.fields = verdicts.filter((v) => v.fieldId !== omitted);
+    }
+    return r;
+  };
+  await seed(sw, { caps: true });
+  await page.goto(BASE + "review.html");
+  await fillPage(page, sw);
+  await waitDone(page);
+  await expect(page.locator("#ln")).toHaveValue("Lovelace");
+  await expect(page.locator("#status")).toHaveText("authorized: Yes");
+  expect(omitted).toBeTruthy();
+  const recoveries = mock.calls_("review").filter((c) => c.payload?.fieldIdsToReview);
+  expect(recoveries).toHaveLength(2);
+  for (const recovery of recoveries) expect(recovery.payload?.fieldIdsToReview).toEqual([omitted]);
+});
+
 test("review off: the fill is as before, with no review call", async ({ page, sw, mock }) => {
   await seed(sw, { caps: true, settings: { reviewFills: false } });
   await page.goto(BASE + "review.html");
