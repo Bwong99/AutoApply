@@ -117,7 +117,8 @@
 
       // Amazon-style guard shared by both widgets: a mouse open within 250 ms of a mouse close
       // (or a close within 250 ms of an open) is ignored. Escape works only with a legacy keyCode.
-      const last = { open: 0, close: 0 };
+      // Nothing has opened or closed at page load: 0 would reject a first open within 250 ms of navigation.
+      const last = { open: -Infinity, close: -Infinity };
       const allow = (kind, e) => {
         last[kind] = e.timeStamp;
         return e.timeStamp - last[kind === "open" ? "close" : "open"] >= 250;
