@@ -11,7 +11,7 @@ import {
   defaultYolo,
   FORGETTABLE,
   hasReviewRules,
-  isPendingApplication,
+  isResumable,
   RESUMABLE,
   type Application,
   type Guess,
@@ -522,7 +522,7 @@ async function pause(until: number, reason: string) {
 
 async function requeue(item: QueueItem, resumeKey?: string) {
   if (resumeKey) {
-    if ((await store.get("applications")).some((a) => a.key === resumeKey && isPendingApplication(a)))
+    if ((await store.get("applications")).some((a) => a.key === resumeKey && isResumable(a)))
       await queuePendingResumes([resumeKey]);
     return;
   }

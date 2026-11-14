@@ -1,5 +1,5 @@
 import { createStorage, session } from "../../shared/storage";
-import { isPendingApplication } from "../../shared/yolo";
+import { isResumable } from "../../shared/yolo";
 
 const store = createStorage("background");
 const KEY = "yoloPendingResumes";
@@ -27,7 +27,7 @@ export const nextPendingResume = () =>
   change(async () => {
     const keys = await pendingResumeKeys();
     if (!keys.length) return null;
-    const apps = new Map((await store.get("applications")).filter(isPendingApplication).map((a) => [a.key, a]));
+    const apps = new Map((await store.get("applications")).filter(isResumable).map((a) => [a.key, a]));
     const pending = keys.filter((key) => apps.has(key));
     await session.set(KEY, pending);
     return apps.get(pending[0]) ?? null;

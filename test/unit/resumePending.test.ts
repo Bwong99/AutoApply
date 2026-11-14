@@ -14,7 +14,7 @@ const application = (key: string, status: Application["status"] = "needs", revie
     status,
     ...(review && { review: { reasons: ["Review requested"], preparedAt: 1 } }),
   });
-const request = (status: "needs" | "review" = "needs") =>
+const request = (status: "needs" | "review" | "failed" = "needs") =>
   coordinator.yoloHandlers.YOLO_RESUME_PENDING!({ type: "YOLO_RESUME_PENDING", status }, {});
 const sender = (run: Run) =>
   ({ tab: { id: run.tabId }, frameId: 0, url: run.item.url }) as chrome.runtime.MessageSender;
@@ -77,6 +77,16 @@ describe("resume all Needs you applications", () => {
     expect(await request("review")).toEqual({ ok: true, queued: 1 });
     const ready = await running("ready");
     expect(ready.reviewKey).toBe("ready");
+    expect(chrome.tabs.create).toHaveBeenCalledTimes(1);
+    expect((await chrome.storage.session.get("yoloPendingResumes")).yoloPendingResumes).toEqual([]);
+  });
+
+  it("resumes only Failed applications when asked", async () => {
+    await chrome.storage.local.set({
+      applications: [application("first"), application("broke", "failed"), application("done", "submitted")],
+    });
+    expect(await request("failed")).toEqual({ ok: true, queued: 1 });
+    await running("broke");
     expect(chrome.tabs.create).toHaveBeenCalledTimes(1);
     expect((await chrome.storage.session.get("yoloPendingResumes")).yoloPendingResumes).toEqual([]);
   });

@@ -190,6 +190,7 @@ test("forget all failed applications is disabled for empty history", async ({ sw
   await expect(forgetAllButton(page, "Skipped")).toBeDisabled();
   await expect(resumeAllButton(page, "Needs you")).toBeDisabled();
   await expect(resumeAllButton(page, "Ready for your review")).toBeDisabled();
+  await expect(resumeAllButton(page, "Failed")).toBeDisabled();
 });
 
 test("bulk resume includes hidden Needs you jobs and leaves Ready for your review untouched", async ({

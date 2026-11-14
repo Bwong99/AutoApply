@@ -203,7 +203,8 @@ export const isPendingApplication = (a: Application) => a.status === "needs" || 
 export const FORGETTABLE = ["failed", "needs", "skipped"] as const satisfies readonly Application["status"][];
 
 /** The outcomes the Applications page can resume all of at once. */
-export const RESUMABLE = ["needs", "review"] as const satisfies readonly Application["status"][];
+export const RESUMABLE = ["needs", "review", "failed"] as const satisfies readonly Application["status"][];
+export const isResumable = (a: Application) => (RESUMABLE as readonly string[]).includes(a.status);
 
 /** How a source fared in a check, worst last. */
 export const SOURCE_LEVELS = ["ok", "info", "warn", "error"] as const;
