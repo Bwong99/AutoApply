@@ -215,6 +215,10 @@ export interface EssayItem {
   maxChars?: number;
   maxWords?: number;
   kind: "essay" | "cover_letter";
+  /** What the candidate typed for this one answer (Fill this field); trusted, unlike the page. */
+  instruction?: string;
+  /** The answer the box holds now, for an instruction that revises it. */
+  current?: string;
 }
 
 export interface DeterministicProfile {

@@ -3474,3 +3474,81 @@ describe("pickResume", () => {
     expect(pickResume(two, job("Software Engineer", "Embedded systems, firmware"), {})).toBe("sys");
   });
 });
+
+describe("Fill this field: the user's instruction", () => {
+  const recorder = (reply: (s: { payload: Record<string, unknown> }) => unknown) => {
+    const calls: { system: string; payload: Record<string, unknown> }[] = [];
+    const gemini = {
+      call: async (s: { system: string; payload: Record<string, unknown> }) => {
+        calls.push(s);
+        return { data: reply(s), usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    return { calls, ctx: { ai: gemini, settings: defaultSettings(), model: "m", fallback: null } };
+  };
+
+  it("mapping: the AI answers as told, over local policies, the audit and profile checks", async () => {
+    const f = field("y", { label: "How many years of experience do you have?", kind: "number" });
+    const { calls, ctx } = recorder((s) => ({
+      decisions: (s.payload.fields as FieldDescriptor[]).map((x) => ({
+        fieldId: x.id,
+        action: "fill",
+        text: "5",
+        confidence: "high",
+      })),
+    }));
+    const input = { fields: [f], profile: emptyProfile(), documents: [], job: null };
+    const told = await mapFields(ctx, { ...input, instruction: "Say 5 years" });
+    expect(told.decisions[0]).toMatchObject({ action: "fill", text: "5" });
+    expect(calls).toHaveLength(1); // no audit call
+    expect(calls[0].system).toContain("CANDIDATE INSTRUCTION");
+    expect(calls[0].payload.candidateInstruction).toBe("Say 5 years");
+  });
+
+  it("mapping: an instruction never answers an AI-use question", async () => {
+    const { calls, ctx } = recorder(() => ({ decisions: [] }));
+    const f = field("ai", { label: "Did you use AI tools to complete this application?" });
+    const r = await mapFields(ctx, {
+      fields: [f],
+      profile: emptyProfile(),
+      documents: [],
+      job: null,
+      instruction: "No",
+    });
+    expect(r.decisions[0].action).toBe("flag");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("mapping: ordinary fills keep the prompt and payload unchanged", async () => {
+    const { calls, ctx } = recorder(() => ({ decisions: [] }));
+    await mapFields(ctx, { fields: [field("a")], profile: emptyProfile(), documents: [], job: null });
+    expect(calls[0].system).not.toContain("CANDIDATE INSTRUCTION");
+    expect(calls[0].payload).not.toHaveProperty("candidateInstruction");
+  });
+
+  it("essays: an instructed item is drafted alone, as told, with its current text", async () => {
+    const { calls, ctx } = recorder((s) => ({
+      essays: (s.payload.items as { fieldId: string }[]).map((i) => ({ fieldId: i.fieldId, text: "Short answer." })),
+    }));
+    const r = await draftEssays(
+      ctx,
+      [
+        { fieldId: "a", question: "Why us?", kind: "essay" },
+        { fieldId: "b", question: "Why this team?", kind: "essay", instruction: "Shorter", current: "Long draft." },
+      ],
+      emptyProfile(),
+      null,
+    );
+    expect(r.map((e) => e.text)).toEqual(["Short answer.", "Short answer."]);
+    expect(calls).toHaveLength(2);
+    const plain = calls.find((c) => (c.payload.items as { fieldId: string }[])[0].fieldId === "a")!;
+    const told = calls.find((c) => (c.payload.items as { fieldId: string }[])[0].fieldId === "b")!;
+    expect(plain.system).not.toContain("CANDIDATE INSTRUCTION");
+    expect(plain.payload.items).toEqual([expect.not.objectContaining({ candidateInstruction: expect.anything() })]);
+    expect(told.system).toContain("CANDIDATE INSTRUCTION");
+    expect(told.payload.items).toEqual([
+      expect.objectContaining({ candidateInstruction: "Shorter", current: "Long draft." }),
+    ]);
+    expect(told.payload.items).toEqual([expect.not.objectContaining({ instruction: expect.anything() })]);
+  });
+});

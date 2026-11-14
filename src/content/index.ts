@@ -56,12 +56,14 @@ import {
   type FieldHandle,
 } from "./scan/fields";
 import { removeBadge, setBadge, setBadgesVisible, type BadgeColor } from "./ui/badges";
+import { showFieldPrompt } from "./ui/fieldPrompt";
 import { showLearnPrompt } from "./ui/learnPrompt";
 import { createOverlay, type Overlay } from "./ui/overlay";
 import { claimFrame, relayClicksToTop } from "./ui/root";
 import { nextMidnightPacific } from "../shared/time";
 import type { Guess } from "../shared/yolo";
 import { composedContains, isVisible } from "./scan/visibility";
+import { HOST_TAG } from "./scan/traverse";
 import { RE_SIGNUP_BOX } from "./yolo/classify";
 import { jobContext, postingContext, shareOnApply, tabJob } from "./posting";
 import { drive, type FillReport } from "./yolo/driver";
@@ -748,6 +750,171 @@ function emptied(h: FieldHandle): boolean {
   );
 }
 
+/** Job context: top frame extracts; child frames share theirs only when they hold a description. */
+async function shareJobContext() {
+  const jc = jobContext();
+  const postingUrl = TOP && !jc.location ? phenomPostingUrl(location) : null;
+  if (postingUrl) {
+    // Once per posting: Phenom's later steps are the same page.
+    if (posting?.url !== postingUrl) posting = { url: postingUrl, ctx: fetchPosting(postingUrl) };
+    const p = await posting.ctx;
+    // The posting's description over the apply page's blurb.
+    if (p?.location) Object.assign(jc, { location: p.location, text: p.text || jc.text });
+  }
+  if (TOP || jc.text) await send({ type: "SET_JOB_CONTEXT", ctx: jc });
+}
+
+/** Variant select: which of several résumés to upload for this job. */
+async function pickResumeVariant() {
+  resumeId =
+    config.settings.resumeUpload === "variants" && config.documentsIndex.filter((d) => d.kind === "resume").length > 1
+      ? (await send({ type: "PICK_RESUME" })).id
+      : null;
+}
+
+interface LocalEnv {
+  det: RuntimeConfig["profileSnapshotForDeterministic"];
+  cityField: boolean;
+  usedLearned: string[];
+  ctrl: AbortController;
+  jobs: Promise<void>[];
+  groupId: string;
+  /** Fill this field: the user asked for this one, so what it holds is filled over. */
+  force?: boolean;
+}
+
+/** PHASE A for one field: deterministic and learned answers, no AI. False: the AI is to map it. */
+function localFill(h: FieldHandle, env: LocalEnv): boolean {
+  const { det, cityField, usedLearned, ctrl, jobs, groupId } = env;
+  // A parsed entry past the profile's that has no Delete (iCIMS's fixed slots).
+  const entry = parsedEntry(h);
+  if (entry && entry.n > config.entryCounts[entry.kind]) {
+    skipOrClear(h, ctrl, jobs);
+    return true;
+  }
+  // Not one the page rejected: what it holds is ours, and wrong (a typed place never picked from its list).
+  if (
+    h.prefilled &&
+    !env.force &&
+    !config.settings.overwritePrefilled &&
+    !defaultCountry(h) &&
+    !shoutedName(h.desc, det.personal) &&
+    !rejected.has(h.id)
+  ) {
+    setStatus(h, "prefilled");
+    return true;
+  }
+  if (h.sensitive && !sinAnswer(h.desc, det.hasSin, det.noCanadianPermitNeeded)) {
+    // Never made up: a required ID or card number ends a YOLO application.
+    if (yolo && h.desc.required) yoloFatal = `Asks for ${h.desc.label}`;
+    setStatus(h, yolo && !h.desc.required ? "skipped" : "needs", "Sensitive – fill manually");
+    return true;
+  }
+  if (profileConsent(h.desc)) {
+    // Harvest unknown choices first; Unset can be flagged immediately without opening the dropdown.
+    if (
+      (h.desc.kind === "dropdown" || h.desc.kind === "typeahead") &&
+      !h.desc.optionsKnown &&
+      profileConsentAnswer(`${h.desc.label} ${h.desc.hint ?? ""}`, det.consents)
+    )
+      return false;
+    handleConsent(h, undefined, ctrl, jobs);
+    return true;
+  }
+  if (h.consent) {
+    handleConsent(h, undefined, ctrl, jobs);
+    return true;
+  }
+  if (isResumeUpload(h) && config.settings.resumeUpload !== "variants") {
+    if (config.settings.resumeUpload === "tailor") jobs.push(tailoredUpload(h, groupId, ctrl));
+    else setStatus(h, "needs", "Upload your résumé (Flag for me)");
+    return true;
+  }
+  if (h.desc.kind === "file") {
+    const doc = primaryDocFor(h);
+    if (doc) {
+      const label = doc === resumeId ? config.documentsIndex.find((d) => d.id === doc)?.label : undefined;
+      jobs.push(doFill(h, { type: "file", documentId: doc }, "filled", label ?? "Primary résumé", ctrl));
+    } else if (
+      doc === null &&
+      RE_COVER_LETTER.test(h.desc.label) &&
+      ((yolo && h.desc.required) || config.settings.coverLetterPdfs)
+    )
+      jobs.push(coverLetter(h, ctrl));
+    else if (doc === null && yolo && RE_COVER_LETTER.test(h.desc.label)) setStatus(h, "skipped");
+    else if (doc === null)
+      setStatus(h, "needs", RE_COVER_LETTER.test(h.desc.label) ? "No cover letter uploaded" : "No résumé uploaded");
+    else return false;
+    return true;
+  }
+  const d = deterministicValue(h.desc, det.personal, cityField);
+  if (d) {
+    const op: FillOp = d.query
+      ? { type: "intended", answer: d.value, query: d.query }
+      : { type: "text", value: d.value };
+    if (d.value) jobs.push(doFill(h, op, "filled", d.path, ctrl));
+    // An optional box the profile leaves empty (Fivetran's "Address Line 2") needs nothing.
+    else if (h.desc.required) setStatus(h, "needs", "Not set in your Profile");
+    else skipOrClear(h, ctrl, jobs);
+    return true;
+  }
+  const l = matchLearned(h.desc, det.learnedAnswers);
+  if (l) {
+    let op: FillOp | null = null;
+    if (isFreeText(h.desc.kind)) op = { type: "text", value: l.answer };
+    else if (h.desc.kind === "checkbox") op = { type: "checked", value: /^(true|yes|checked)$/i.test(l.answer) };
+    else if (h.desc.options) {
+      const idx = localMatchAll(l.answer, h.desc.options);
+      if (idx) op = { type: "options", texts: idx.map((i) => h.desc.options![i]) };
+    } else op = { type: "intended", answer: l.answer };
+    if (op) {
+      usedLearned.push(l.id);
+      jobs.push(doFill(h, op, "filled", "Saved answer", ctrl));
+      return true;
+    }
+  }
+  return false;
+}
+
+/** A mapping decision applied to its field; an essay to draft is added to `essays`. */
+function applyDecision(
+  h: FieldHandle,
+  d: Decision,
+  groupId: string,
+  ctrl: AbortController,
+  jobs: Promise<void>[],
+  essays: EssayItem[],
+  /** Fill this field: the user asked for an answer here, so it is drafted whatever Draft essays says. */
+  asked = false,
+) {
+  const suggestion = d.suggestion ? `Suggested: ${d.suggestion}` : undefined;
+  if (d.action === "fill" && h.desc.kind === "file" && d.documentId === TAILOR_PLACEHOLDER)
+    jobs.push(tailoredUpload(h, groupId, ctrl));
+  else if (d.action === "fill") {
+    const op = opFromDecision(h, d);
+    if (op) jobs.push(doFill(h, op, "ai", (d.sources ?? []).join(", ") || "AI", ctrl));
+    else setStatus(h, "needs", d.note ?? "No usable AI answer", suggestion);
+  } else if (
+    d.action === "essay" ||
+    // "Write optional cover letters" covers a cover-letter box the AI would leave empty.
+    (d.action === "skip" &&
+      config.settings.coverLetterPdfs &&
+      (h.desc.kind === "textarea" || h.desc.kind === "contenteditable") &&
+      RE_COVER_LETTER.test(h.desc.label))
+  ) {
+    if (config.settings.draftEssays || asked) essays.push(essayItem(h));
+    else setStatus(h, "needs", "Write this yourself");
+  } else if (d.action === "consent") handleConsent(h, d, ctrl, jobs);
+  else if (d.action === "skip") skipOrClear(h, ctrl, jobs);
+  else setStatus(h, "needs", d.note ?? "AI could not answer", suggestion);
+}
+
+function essayItem(h: FieldHandle): EssayItem {
+  const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
+  const kind = RE_COVER_LETTER.test(h.desc.label) ? "cover_letter" : "essay";
+  return { fieldId: h.id, question: h.desc.label, hint: h.desc.hint, ...limits, kind };
+}
+
 async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: number } = {}) {
   if (running) {
     queued = { rerun: !!opts.rerun || !!queued?.rerun };
@@ -804,22 +971,9 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: numb
     for (const h of targets) setStatus(h, "pending");
     report();
 
-    // Job context: top frame extracts; child frames share theirs only when they hold a description.
-    const jc = jobContext();
-    const postingUrl = TOP && !jc.location ? phenomPostingUrl(location) : null;
-    if (postingUrl) {
-      // Once per posting: Phenom's later steps are the same page.
-      if (posting?.url !== postingUrl) posting = { url: postingUrl, ctx: fetchPosting(postingUrl) };
-      const p = await posting.ctx;
-      // The posting's description over the apply page's blurb.
-      if (p?.location) Object.assign(jc, { location: p.location, text: p.text || jc.text });
-    }
-    if (TOP || jc.text) await send({ type: "SET_JOB_CONTEXT", ctx: jc });
+    await shareJobContext();
     const mode = config.settings.resumeUpload;
-    resumeId =
-      mode === "variants" && config.documentsIndex.filter((d) => d.kind === "resume").length > 1
-        ? (await send({ type: "PICK_RESUME" })).id
-        : null;
+    await pickResumeVariant();
     // AI tailor starts now, alongside the rest of the fill, and only for a page asking for the résumé (YOLO: any
     // page of the application it committed to), so no tokens go to forms that never upload one.
     tailoring = mode === "tailor" && (yolo || targets.some(isResumeUpload)) ? requestTailoring(groupId) : null;
@@ -830,95 +984,8 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: numb
     const usedLearned: string[] = [];
     const pending: FieldHandle[] = [];
     const cityField = all.some((h) => RE_CITY_FIELD.test(h.desc.label));
-    for (const h of targets) {
-      // A parsed entry past the profile's that has no Delete (iCIMS's fixed slots).
-      const entry = parsedEntry(h);
-      if (entry && entry.n > config.entryCounts[entry.kind]) {
-        skipOrClear(h, ctrl, jobs);
-        continue;
-      }
-      // Not one the page rejected: what it holds is ours, and wrong (a typed place never picked from its list).
-      if (
-        h.prefilled &&
-        !config.settings.overwritePrefilled &&
-        !defaultCountry(h) &&
-        !shoutedName(h.desc, det.personal) &&
-        !rejected.has(h.id)
-      ) {
-        setStatus(h, "prefilled");
-        continue;
-      }
-      if (h.sensitive && !sinAnswer(h.desc, det.hasSin, det.noCanadianPermitNeeded)) {
-        // Never made up: a required ID or card number ends a YOLO application.
-        if (yolo && h.desc.required) yoloFatal = `Asks for ${h.desc.label}`;
-        setStatus(h, yolo && !h.desc.required ? "skipped" : "needs", "Sensitive – fill manually");
-        continue;
-      }
-      if (profileConsent(h.desc)) {
-        // Harvest unknown choices first; Unset can be flagged immediately without opening the dropdown.
-        if (
-          (h.desc.kind === "dropdown" || h.desc.kind === "typeahead") &&
-          !h.desc.optionsKnown &&
-          profileConsentAnswer(`${h.desc.label} ${h.desc.hint ?? ""}`, det.consents)
-        )
-          pending.push(h);
-        else handleConsent(h, undefined, ctrl, jobs);
-        continue;
-      }
-      if (h.consent) {
-        handleConsent(h, undefined, ctrl, jobs);
-        continue;
-      }
-      if (isResumeUpload(h) && mode !== "variants") {
-        if (mode === "tailor") jobs.push(tailoredUpload(h, groupId, ctrl));
-        else setStatus(h, "needs", "Upload your résumé (Flag for me)");
-        continue;
-      }
-      if (h.desc.kind === "file") {
-        const doc = primaryDocFor(h);
-        if (doc) {
-          const label = doc === resumeId ? config.documentsIndex.find((d) => d.id === doc)?.label : undefined;
-          jobs.push(doFill(h, { type: "file", documentId: doc }, "filled", label ?? "Primary résumé", ctrl));
-        } else if (
-          doc === null &&
-          RE_COVER_LETTER.test(h.desc.label) &&
-          ((yolo && h.desc.required) || config.settings.coverLetterPdfs)
-        )
-          jobs.push(coverLetter(h, ctrl));
-        else if (doc === null && yolo && RE_COVER_LETTER.test(h.desc.label)) setStatus(h, "skipped");
-        else if (doc === null)
-          setStatus(h, "needs", RE_COVER_LETTER.test(h.desc.label) ? "No cover letter uploaded" : "No résumé uploaded");
-        else pending.push(h);
-        continue;
-      }
-      const d = deterministicValue(h.desc, det.personal, cityField);
-      if (d) {
-        const op: FillOp = d.query
-          ? { type: "intended", answer: d.value, query: d.query }
-          : { type: "text", value: d.value };
-        if (d.value) jobs.push(doFill(h, op, "filled", d.path, ctrl));
-        // An optional box the profile leaves empty (Fivetran's "Address Line 2") needs nothing.
-        else if (h.desc.required) setStatus(h, "needs", "Not set in your Profile");
-        else skipOrClear(h, ctrl, jobs);
-        continue;
-      }
-      const l = matchLearned(h.desc, det.learnedAnswers);
-      if (l) {
-        let op: FillOp | null = null;
-        if (isFreeText(h.desc.kind)) op = { type: "text", value: l.answer };
-        else if (h.desc.kind === "checkbox") op = { type: "checked", value: /^(true|yes|checked)$/i.test(l.answer) };
-        else if (h.desc.options) {
-          const idx = localMatchAll(l.answer, h.desc.options);
-          if (idx) op = { type: "options", texts: idx.map((i) => h.desc.options![i]) };
-        } else op = { type: "intended", answer: l.answer };
-        if (op) {
-          usedLearned.push(l.id);
-          jobs.push(doFill(h, op, "filled", "Saved answer", ctrl));
-          continue;
-        }
-      }
-      pending.push(h);
-    }
+    const env = { det, cityField, usedLearned, ctrl, jobs, groupId };
+    for (const h of targets) if (!localFill(h, env)) pending.push(h);
     if (usedLearned.length) void send({ type: "LEARNED_USED", ids: usedLearned }).catch(() => undefined);
     mark("phaseA");
 
@@ -985,30 +1052,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: numb
         const essays: EssayItem[] = [];
         for (const d of res.decisions) {
           const h = handles.get(d.fieldId);
-          if (!h || states.get(h.id)?.userOwned) continue;
-          const suggestion = d.suggestion ? `Suggested: ${d.suggestion}` : undefined;
-          if (d.action === "fill" && h.desc.kind === "file" && d.documentId === TAILOR_PLACEHOLDER)
-            jobs.push(tailoredUpload(h, groupId, ctrl));
-          else if (d.action === "fill") {
-            const op = opFromDecision(h, d);
-            if (op) jobs.push(doFill(h, op, "ai", (d.sources ?? []).join(", ") || "AI", ctrl));
-            else setStatus(h, "needs", d.note ?? "No usable AI answer", suggestion);
-          } else if (
-            d.action === "essay" ||
-            // "Write optional cover letters" covers a cover-letter box the AI would leave empty.
-            (d.action === "skip" &&
-              config.settings.coverLetterPdfs &&
-              (h.desc.kind === "textarea" || h.desc.kind === "contenteditable") &&
-              RE_COVER_LETTER.test(h.desc.label))
-          ) {
-            if (config.settings.draftEssays) {
-              const limits = parseEssayLimits(h.desc.label, h.desc.hint, h.desc.maxLength);
-              const kind = RE_COVER_LETTER.test(h.desc.label) ? "cover_letter" : "essay";
-              essays.push({ fieldId: h.id, question: h.desc.label, hint: h.desc.hint, ...limits, kind });
-            } else setStatus(h, "needs", "Write this yourself");
-          } else if (d.action === "consent") handleConsent(h, d, ctrl, jobs);
-          else if (d.action === "skip") skipOrClear(h, ctrl, jobs);
-          else setStatus(h, "needs", d.note ?? "AI could not answer", suggestion);
+          if (h && !states.get(h.id)?.userOwned) applyDecision(h, d, groupId, ctrl, jobs, essays);
         }
         // Drafted now, not after the other mapping calls: an essay needs nothing from them.
         if (essays.length) jobs.push(draftEssays(essays, groupId, ctrl, mark));
@@ -1353,8 +1397,10 @@ async function draftEssays(items: EssayItem[], groupId: string, ctrl: AbortContr
         },
       );
       if (states.get(h.id)?.userOwned) return;
-      if (fr.outcome === "ok") setStatus(h, "draft", "AI draft – review", `${wordCount(e.text)} words`);
-      else if (ctrl.signal.aborted) setStatus(h, "needs", "Stopped");
+      if (fr.outcome === "ok") {
+        essayed.add(h.id);
+        setStatus(h, "draft", "AI draft – review", `${wordCount(e.text)} words`);
+      } else if (ctrl.signal.aborted) setStatus(h, "needs", "Stopped");
       else setStatus(h, fr.outcome === "mismatch" ? "check" : "failed", fr.note);
     }),
   );
@@ -1449,6 +1495,172 @@ function onUserCommit(e: Event) {
     if (s.status === "needs" || s.status === "failed") setStatus(h, "you", "You answered this");
     if (config.settings.learnPrompts && s.learnable && h.desc.kind !== "file") offerLearn(h);
   }, 50);
+}
+
+// ---------- Fill this field (ui/fieldPrompt.ts) ----------
+/** What the user last right-clicked, for the menu's Fill with AutoApply. */
+let contextTarget: Element | null = null;
+/** Fields answered with an essay draft: an instruction for one revises the draft, with no mapping call first. */
+const essayed = new Set<string>();
+
+/** The focused element, through open shadow roots; null when another frame (or our own card) has the focus. */
+function focusedElement(): Element | null {
+  if (!document.hasFocus()) return null;
+  let a = document.activeElement;
+  while (a?.shadowRoot?.activeElement) a = a.shadowRoot.activeElement;
+  if (!a || a === document.body || a instanceof HTMLIFrameElement || a.localName === "frame") return null;
+  return a.localName === HOST_TAG ? null : a;
+}
+
+/** The field at `t`: its control, or a question box holding that field alone (a right-click on the label). */
+function fieldAt(t: Element): FieldHandle | null {
+  const all = [...handles.values()].filter((h) => h.el.isConnected);
+  return (
+    handleFor(t) ??
+    all.find(
+      (h) => composedContains(h.container, t) && !all.some((o) => o !== h && composedContains(h.container, o.el)),
+    ) ??
+    null
+  );
+}
+
+function pickField(via: "menu" | "key") {
+  if (yolo) return;
+  const t = via === "menu" ? contextTarget : focusedElement();
+  if (!t?.isConnected) return; // the shortcut reaches every frame; the focused one answers
+  rescan();
+  const h = fieldAt(t);
+  if (!h) {
+    const why = scanState.excluded.get(t);
+    return showFieldPrompt(
+      t,
+      "",
+      undefined,
+      why ? `AutoApply doesn't fill this field (${why}).` : "No form field AutoApply can fill here.",
+    );
+  }
+  showFieldPrompt(badgeTarget(h), h.desc.label, (instruction) => fillOne(h, instruction));
+}
+
+const OUTCOME: Partial<Record<Status, string>> = {
+  filled: "Filled",
+  ai: "Filled by AI",
+  draft: "AI draft written. Review it before you submit.",
+  check: "Filled. Check this answer.",
+  prefilled: "Left as it was",
+  skipped: "Left blank: it doesn't apply to you",
+  needs: "Needs you",
+  failed: "Couldn't fill this field",
+};
+
+/**
+ * The one field the user picked, filled now. No instruction: as a fill of the page would (profile and saved answers
+ * first, else the AI), over what it holds. An instruction: the AI answers as told, revising the current answer.
+ */
+async function fillOne(h: FieldHandle, instruction: string): Promise<string> {
+  if (running || current) return "AutoApply is busy on this page. Try again when it's done.";
+  haltFill(false);
+  lastError = null as ApiError | null; // read again after the awaits below set it
+  clearTimeout(retryTimer);
+  const me = (current = { groupId: crypto.randomUUID(), ctrl: new AbortController() });
+  const { groupId, ctrl } = me;
+  const jobs: Promise<void>[] = [];
+  try {
+    config = await send({ type: "GET_RUNTIME_CONFIG", yolo });
+    if (!config.excluded && !config.settings.excludedHosts.includes(HOST)) listen();
+    setBadgesVisible(config.settings.showBadges);
+    const det = config.profileSnapshotForDeterministic;
+    const s = states.get(h.id);
+    if (s) s.userOwned = false; // the user handed it back
+    // Never sent to the AI, whatever the instruction: ID and card numbers are the user's to type.
+    if (h.sensitive && (instruction || !sinAnswer(h.desc, det.hasSin, det.noCanadianPermitNeeded))) {
+      setStatus(h, "needs", "Sensitive – fill manually");
+      return "AutoApply never fills ID or card numbers. Fill this one yourself.";
+    }
+    setStatus(h, "working");
+    await shareJobContext();
+    if (h.desc.kind === "file") await pickResumeVariant();
+    const env = {
+      det,
+      cityField: [...handles.values()].some((o) => RE_CITY_FIELD.test(o.desc.label)),
+      usedLearned: [] as string[],
+      ctrl,
+      jobs,
+      groupId,
+      force: true,
+    };
+    if (!instruction && localFill(h, env)) {
+      if (env.usedLearned.length) void send({ type: "LEARNED_USED", ids: env.usedLearned }).catch(() => undefined);
+    } else await aiFillOne(h, instruction, groupId, ctrl, jobs);
+    await Promise.all(jobs);
+  } catch (e) {
+    if (lastError?.kind !== "allKeysExhausted")
+      lastError = { kind: "other", message: (e as Error)?.message ?? String(e) };
+  } finally {
+    if (ctrl.signal.aborted) await Promise.allSettled(jobs);
+    haltFill(false);
+    if (current === me) current = null;
+    report();
+  }
+  if (lastError) return lastError.message;
+  const st = states.get(h.id);
+  if (!st || st.status === "working" || st.status === "pending") return "Stopped";
+  return [OUTCOME[st.status] ?? "Done", st.note].filter(Boolean).join(": ");
+}
+
+async function aiFillOne(
+  h: FieldHandle,
+  instruction: string,
+  groupId: string,
+  ctrl: AbortController,
+  jobs: Promise<void>[],
+) {
+  const now = instruction ? clip(readValue(h), 4000) : "";
+  const essays: EssayItem[] = [];
+  // Revising a draft: straight to the essay writer, with the text as it stands.
+  if (instruction && now && essayed.has(h.id) && isFreeText(h.desc.kind)) essays.push(essayItem(h));
+  else {
+    if (
+      (h.desc.kind === "dropdown" || (h.desc.kind === "typeahead" && !!ui5Host(h))) &&
+      !h.desc.optionsKnown &&
+      !harvested.has(h.id)
+    )
+      await serial(async () => {
+        const opts = await harvestOptions(h, 400);
+        if (opts) harvested.set(h.id, opts);
+      });
+    if (ctrl.signal.aborted) return;
+    const options = harvested.get(h.id);
+    // A fresh answer, not one kept because the box shows it; an instruction revises what it shows.
+    const { currentValue: _shown, ...desc } = h.desc;
+    const field: FieldDescriptor = {
+      ...desc,
+      ...(options && { options, optionsKnown: true }),
+      ...(now && { currentValue: now }),
+    };
+    // A consent the user gave no words for follows their consent settings, as in a fill of the page.
+    if (!instruction && (isConsent(field) || profileConsent(field))) return handleConsent(h, undefined, ctrl, jobs);
+    const uploads = [...handles.values()].flatMap((o) => (o.desc.kind === "file" ? [o.desc.label] : []));
+    const res = await send({
+      type: "MAP_FIELDS",
+      fields: [field],
+      host: HOST,
+      groupId,
+      ...(uploads.length ? { uploads } : {}),
+      ...(instruction && { instruction }),
+    });
+    if (isErr(res)) {
+      if (lastError?.kind !== "allKeysExhausted") lastError = res.error;
+      return setStatus(h, "needs", res.error.message);
+    }
+    if (ctrl.signal.aborted) return;
+    usedModel = res.usedModel;
+    const d = res.decisions.find((x) => x.fieldId === h.id);
+    if (!d) return setStatus(h, "needs", "No AI answer");
+    applyDecision(h, d, groupId, ctrl, jobs, essays, true);
+  }
+  if (instruction) for (const e of essays) Object.assign(e, { instruction, ...(now && { current: now }) });
+  if (essays.length) await draftEssays(essays, groupId, ctrl, () => undefined);
 }
 
 // ---------- YOLO (./yolo/driver.ts) ----------
@@ -1650,6 +1862,9 @@ function onMessage(msg: Message, _sender: unknown, sendResponse: (r: unknown) =>
     case "TOGGLE_OVERLAY":
       overlay?.toggle();
       break;
+    case "PICK_FIELD":
+      pickField(msg.via);
+      break;
     case "YOLO_ATTACH":
       if (window === window.top) void startYolo();
       break;
@@ -1717,6 +1932,11 @@ async function main() {
   });
   // No message to the background until a fill: waking its service worker on every page load costs battery.
   chrome.runtime.onMessage.addListener(onMessage);
+  // Fill with AutoApply (context menu) acts on what was right-clicked, which only the page sees.
+  document.addEventListener("contextmenu", (e) => (contextTarget = e.composedPath()[0] as Element), {
+    capture: true,
+    signal: life.signal,
+  });
   watchPay();
   // A YOLO run shares its posting itself (sharePosting).
   if (TOP && !DRIVER_FRAME)

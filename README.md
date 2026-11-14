@@ -93,6 +93,7 @@ Other Chromium browsers with Manifest V3 support may work; Chrome/Chromium is th
 | **Alt+Shift+A**  | Open the toolbar popup               |
 | **Alt+Shift+F**  | Fill the current page                |
 | **Alt+Shift+W**  | Expand or collapse the in-page panel |
+| **Alt+Shift+G**  | Fill the focused field               |
 
 Change shortcuts at `chrome://extensions/shortcuts` if another app or extension uses them.
 
@@ -226,6 +227,15 @@ The **Cover letter template** is an optional starting point for cover letter tex
 7. Click the site's **Next** yourself. Trigger another fill for the next step or newly revealed fields, then submit when ready.
 
 Manual mode never clicks Next or Submit. It starts only when requested, including a retry of an existing run; it does not continuously scan or watch for form changes between fills. Fields you edit are treated as yours and protected from subsequent autofill/review. Existing values are also left alone by default.
+
+### Fill one field
+
+Right-click any field (or its question) and choose **Fill with AutoApply…**, or focus it and press **Alt+Shift+G**. A card opens by the field:
+
+- Leave the box empty and click **Generate** (or press Enter) to answer it the way a page fill would: profile and saved answers first, then the AI. It replaces what the field holds.
+- Type an instruction ("say TypeScript", "shorter", "mention my internship") to have the AI answer as told. Your instruction overrides your profile and résumé for that answer, and an existing answer is revised rather than rewritten. Page text still can't instruct the AI, AI-use questions are still left to you, and ID or card numbers are never filled.
+
+The card stays open after filling, so you can refine the answer with another instruction. Escape or a click elsewhere closes it.
 
 ### Field badges
 

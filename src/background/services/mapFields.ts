@@ -37,7 +37,7 @@ import { emptyProfile } from "../../shared/profileSchema";
 import { todayIso } from "../../shared/time";
 import type { Gemini } from "../gemini/client";
 import { AllKeysExhaustedError, BadOutputError, BlockedError } from "../gemini/errors";
-import { AUDIT_PROMPT, BEST_GUESS_PROMPT, MAP_FIELDS_PROMPT } from "../gemini/prompts";
+import { AUDIT_PROMPT, BEST_GUESS_PROMPT, INSTRUCTION_RULE, MAP_FIELDS_PROMPT } from "../gemini/prompts";
 import { AUDIT_SCHEMA, AuditZ, MAPPING_SCHEMA, MappingZ, type RawDecision } from "../gemini/schemas";
 
 export interface ServiceCtx {
@@ -2291,8 +2291,11 @@ async function auditFills(
   }
 }
 
-/** Validates AI decisions against what was sent (§10.8.1, §18.3). */
-export function validateDecisions(fields: FieldDescriptor[], raw: RawDecision[]): Decision[] {
+/**
+ * Validates AI decisions against what was sent (§10.8.1, §18.3). `told`: the user's instruction is the answer's
+ * source (Fill this field), so a fill that cites no profile fact, or that the model was unsure of, still stands.
+ */
+export function validateDecisions(fields: FieldDescriptor[], raw: RawDecision[], told = false): Decision[] {
   const byId = new Map(fields.map((f) => [f.id, f]));
   const out = new Map<string, Decision>();
   for (const r of raw) {
@@ -2330,10 +2333,11 @@ export function validateDecisions(fields: FieldDescriptor[], raw: RawDecision[])
     )
       d = { ...d, action: "fill", text: NOT_APPLICABLE };
     else if (d.action === "skip" && f.required) d = flag(f.id, r.note || "Required field", suggestionOf(r, f));
-    if (d.action === "fill" && d.confidence === "low") d = flag(f.id, r.note || "Low confidence", suggestionOf(r, f));
+    if (d.action === "fill" && d.confidence === "low" && !told)
+      d = flag(f.id, r.note || "Low confidence", suggestionOf(r, f));
     if (d.action === "flag" && !d.suggestion && r.action !== "flag") d.suggestion = suggestionOf(r, f);
     // No suggestion either: it would only be the guess.
-    if (guessed(d, f)) d = flag(f.id, NOT_IN_PROFILE);
+    if (!told && guessed(d, f)) d = flag(f.id, NOT_IN_PROFILE);
     out.set(f.id, d);
   }
   return fields.map((f) => out.get(f.id) ?? flag(f.id, "No AI decision"));
@@ -2420,6 +2424,11 @@ export interface MapInput {
   yolo?: boolean;
   /** Labels of the page's upload boxes, so no answer claims a document went in that had nowhere to go. */
   uploads?: string[];
+  /**
+   * What the user typed for the one field they asked to fill (Fill this field). Their words win over their data, so
+   * no local policy (except the AI-use guard), audit or profile check overrides the answer.
+   */
+  instruction?: string;
 }
 
 // The model miscounts positions in long lists (picked "Cape Verde +238", the option after "Canada +1"),
@@ -2560,7 +2569,11 @@ export async function mapFields(
   const pay = payTarget(input.profile.preferences.desiredCompensation, input.pays ?? [], job);
   const base = mappingPayloadBase(input, pay);
   const countries = new Map(input.fields.map((f) => [f.id, workCountry(f.label, home, job, input.job)]));
-  const local = localDecisions(input);
+  const instruction = input.instruction;
+  // An instruction overrides the profile's policies, never the AI-use trap guard.
+  const local = instruction
+    ? new Map(input.fields.flatMap((f) => (aiUseDecision(f) ? [[f.id, aiUseDecision(f)!] as const] : [])))
+    : localDecisions(input);
   // A follow-up to a question answered here: the model can't see that answer (Etched's "If you answered other:" was
   // skipped after work authorization got "Other (please explain below)").
   const answeredBefore = new Map<string, string>();
@@ -2589,9 +2602,9 @@ export async function mapFields(
     try {
       const r = await ctx.ai.call(
         {
-          system: MAP_FIELDS_PROMPT,
+          system: instruction ? MAP_FIELDS_PROMPT + INSTRUCTION_RULE : MAP_FIELDS_PROMPT,
           context: { profile, resume },
-          payload: { ...rest, fields: chunk.map(sent) },
+          payload: { ...rest, ...(instruction && { candidateInstruction: instruction }), fields: chunk.map(sent) },
           schema: MAPPING_SCHEMA,
           validate: (d) => MappingZ.parse(d),
           timeoutMs: ctx.settings.requestTimeoutMs,
@@ -2600,7 +2613,7 @@ export async function mapFields(
         { model: ctx.model, fallback: ctx.fallback },
       );
       if (r.usedModel !== ctx.model) usedModel = r.usedModel;
-      const decisions = validateDecisions(chunk, r.data.decisions);
+      const decisions = validateDecisions(chunk, r.data.decisions, !!instruction);
       // The model sometimes drops fields from long batches; ask once more for just those.
       const answered = new Set(r.data.decisions.map((d) => d.fieldId));
       const missing = chunk.filter((f) => !answered.has(f.id));
@@ -2634,7 +2647,7 @@ export async function mapFields(
   const audited = await Promise.all(
     chunks.map(async (c) => {
       const withCountry = c.map((f) => ({ ...f, workCountry: countries.get(f.id) }));
-      return auditFills(ctx, withCountry, base, await runChunk(c), input.profile);
+      return instruction ? runChunk(c) : auditFills(ctx, withCountry, base, await runChunk(c), input.profile);
     }),
   );
   const answered = new Map(audited.flat().map((d) => [d.fieldId, d]));
@@ -2644,6 +2657,7 @@ export async function mapFields(
   return {
     decisions: input.fields.map((f, i) => {
       const d = all[i];
+      if (instruction) return d;
       const answer = d.action === "fill" ? (suggestionOf(d, f) ?? "") : "";
       if (deniesNeededSponsorship(f, answer, countries.get(f.id), entries))
         return flag(f.id, "Sponsorship needed in this country", answer);

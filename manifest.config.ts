@@ -42,6 +42,8 @@ export default defineManifest({
     "tabGroups",
     "notifications",
     "identity",
+    // Fill with AutoApply on a right-clicked field (content/ui/fieldPrompt.ts). No install warning.
+    "contextMenus",
     // Real clicks and keys for YOLO on bot-checked pages (background/yolo/realInput.ts). Chrome refuses it as optional.
     "debugger",
     // Test-harness builds only (tools/yolo-sweep/build.mjs): a headless browser can't show the permission prompt.
@@ -61,6 +63,10 @@ export default defineManifest({
     "toggle-overlay": {
       suggested_key: { default: "Alt+Shift+W" },
       description: "Expand or collapse the AutoApply panel",
+    },
+    "fill-field": {
+      suggested_key: { default: "Alt+Shift+G" },
+      description: "Fill the focused field, optionally with your instructions",
     },
   },
   icons: { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },

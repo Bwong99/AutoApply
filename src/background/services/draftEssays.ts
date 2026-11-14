@@ -4,7 +4,7 @@ import { plainDashes, RE_AI_TELL } from "../../shared/injection";
 import type { EssayItem, JobContext, Profile } from "../../shared/types";
 import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
-import { ESSAYS_PROMPT } from "../gemini/prompts";
+import { ESSAYS_PROMPT, INSTRUCTION_RULE } from "../gemini/prompts";
 import { ESSAYS_SCHEMA, EssaysZ } from "../gemini/schemas";
 import { jobBrief } from "./jobBrief";
 import { compactProfile, type ServiceCtx } from "./mapFields";
@@ -22,7 +22,8 @@ export async function draftEssays(
   job: JobContext | null,
 ): Promise<EssayResult[]> {
   const local = new Map<string, EssayResult>();
-  for (const i of items) {
+  // An item the user gave their own words for is theirs to answer, not the screening policy's.
+  for (const i of items.filter((i) => !i.instruction)) {
     const d = screeningDecision(
       {
         id: i.fieldId,
@@ -57,9 +58,16 @@ export async function draftEssays(
     try {
       const r = await ctx.ai.call(
         {
-          system: ESSAYS_PROMPT,
+          system: batch.some((i) => i.instruction) ? ESSAYS_PROMPT + INSTRUCTION_RULE : ESSAYS_PROMPT,
           context: batch.some((i) => i.kind === "cover_letter") ? letterContext : essayContext,
-          payload: { ...base, items: batch.map((i) => ({ ...i, targetWords: target(i) })) },
+          payload: {
+            ...base,
+            items: batch.map(({ instruction, ...i }) => ({
+              ...i,
+              ...(instruction && { candidateInstruction: instruction }),
+              targetWords: target(i),
+            })),
+          },
           schema: ESSAYS_SCHEMA,
           validate: (d) => EssaysZ.parse(d),
           essay: true,
@@ -93,9 +101,11 @@ export async function draftEssays(
 
   const batches: EssayItem[][] = [];
   const pending = items.filter((i) => !local.has(i.fieldId));
+  // Instructed items alone: the prompt rule that gives the user's words the last say reaches no other answer.
   for (const group of [
-    pending.filter((i) => i.kind === "cover_letter"),
-    pending.filter((i) => i.kind !== "cover_letter"),
+    pending.filter((i) => i.kind === "cover_letter" && !i.instruction),
+    pending.filter((i) => i.kind !== "cover_letter" && !i.instruction),
+    ...pending.filter((i) => i.instruction).map((i) => [i]),
   ])
     for (let i = 0; i < group.length; i += 4) batches.push(group.slice(i, i + 4));
   const mapped = new Map((await Promise.all(batches.map(run))).flat().map((e) => [e.fieldId, e]));

@@ -96,7 +96,16 @@ export type Message =
   /** `passive`: read on page load, outside a fill. */
   | { type: "SET_JOB_PAY"; pays: Pay[]; passive?: boolean }
   /** `uploads`: labels of the page's upload boxes, for questions about attached documents. */
-  | { type: "MAP_FIELDS"; fields: FieldDescriptor[]; host: string; groupId: string; yolo?: boolean; uploads?: string[] }
+  /** `instruction`: what the user typed for the one field they asked to fill (Fill this field). */
+  | {
+      type: "MAP_FIELDS";
+      fields: FieldDescriptor[];
+      host: string;
+      groupId: string;
+      yolo?: boolean;
+      uploads?: string[];
+      instruction?: string;
+    }
   /** The user submitted a form we filled; `doneUrl` once its confirmation shows. */
   | { type: "APPLY_ATTEMPT"; job: { url: string; company: string; title: string }; doneUrl?: string }
   // YOLO driver C → B
@@ -183,6 +192,8 @@ export type Message =
   /** Regenerate a field's failed tailored résumé or cover letter (overlay, routed to its frame like FOCUS_FIELD). */
   | { type: "REGEN_DOC"; frameId: number; fieldId: string }
   | { type: "TOGGLE_OVERLAY" }
+  /** Fill this field: the right-clicked field (menu, its frame only) or the focused one (key, every frame). */
+  | { type: "PICK_FIELD"; via: "menu" | "key" }
   | { type: "READ_POSTING" }
   | { type: "READ_JOB_TAB" }
   // popup → B
@@ -244,6 +255,7 @@ export interface Responses {
   FOCUS_FIELD: Ok;
   REGEN_DOC: Ok;
   TOGGLE_OVERLAY: Ok;
+  PICK_FIELD: Ok;
   TAB_STATUS: TabStatusResponse;
   ADD_KEY: Ok | Err;
   TEST_KEY: Ok | Err;

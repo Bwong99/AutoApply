@@ -427,7 +427,7 @@ const handlers: Handlers = {
     return { ok: true };
   },
 
-  async MAP_FIELDS({ fields, groupId, yolo, uploads }, sender) {
+  async MAP_FIELDS({ fields, groupId, yolo, uploads, instruction }, sender) {
     const ctx = await serviceCtx(groupSignal(sender, groupId));
     if ("error" in ctx) return ctx;
     const s = await store.getMany(["profile", "documentsIndex"]);
@@ -445,7 +445,7 @@ const handlers: Handlers = {
             ...s.documentsIndex.filter((d) => d.kind !== "resume"),
             ...(mode === "tailor" ? [{ ...TAILORED_PLACEHOLDER_META }] : []),
           ];
-    const r = await mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y, uploads });
+    const r = await mapFields(ctx, { fields, profile, documents, job, pays, yolo: !!y, uploads, instruction });
     return { ...r, usedModel: (await modelName(r.usedModel)) ?? r.usedModel };
   },
 
@@ -766,9 +766,25 @@ chrome.runtime.onMessage.addListener((msg: Message, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   await ready;
   if (reason === "install") void chrome.tabs.create({ url: chrome.runtime.getURL("src/options/index.html#/setup") });
+  // Menus outlive the worker; made again on each install or update.
+  chrome.contextMenus.removeAll(() =>
+    chrome.contextMenus.create({
+      id: FILL_FIELD,
+      title: "Fill with AutoApply…",
+      contexts: ["all"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"],
+    }),
+  );
   for (const tab of await chrome.tabs.query({})) {
     if (tab.id !== undefined && /^https?:/.test(tab.url ?? "")) void ensureContentScript(tab.id);
   }
+});
+
+const FILL_FIELD = "fill-field";
+// Fill this field: the frame that was right-clicked holds the field (content/ui/fieldPrompt.ts).
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId !== FILL_FIELD || tab?.id === undefined) return;
+  await sendToTab(tab.id, { type: "PICK_FIELD", via: "menu" }, info.frameId ?? 0);
 });
 
 chrome.commands.onCommand.addListener(async (command) => {
@@ -777,5 +793,8 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command === "fill-page") {
     await ensureContentScript(tab.id);
     await sendToTab(tab.id, { type: "TRIGGER_FILL", force: true });
+  } else if (command === FILL_FIELD) {
+    await ensureContentScript(tab.id);
+    await sendToTab(tab.id, { type: "PICK_FIELD", via: "key" }); // every frame: the focused one answers
   } else if (command === "toggle-overlay") await sendToTab(tab.id, { type: "TOGGLE_OVERLAY" }, 0); // overlay lives in the top frame
 });

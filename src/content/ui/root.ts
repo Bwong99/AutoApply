@@ -58,11 +58,16 @@ export const relayClicksToTop = (signal: AbortSignal) =>
  * Calls `fn` on a real click outside `inside` (isTrusted skips the fill engine's synthetic events). Window capture
  * runs before any page listener can stop it; clicks inside iframes never reach this window, so child frames relay.
  */
-export function onOutsideClick(inside: Element, fn: () => void, signal?: AbortSignal) {
-  addEventListener("pointerdown", (e) => e.isTrusted && !e.composedPath().includes(inside) && fn(), {
-    capture: true,
-    signal,
-  });
+export function onOutsideClick(inside: Element | Element[], fn: () => void, signal?: AbortSignal) {
+  const within = [inside].flat();
+  addEventListener(
+    "pointerdown",
+    (e) => e.isTrusted && !e.composedPath().some((n) => within.includes(n as Element)) && fn(),
+    {
+      capture: true,
+      signal,
+    },
+  );
   addEventListener("message", (e) => e.data === FRAME_CLICK && fn(), { signal });
 }
 
@@ -98,6 +103,31 @@ export function anchorTo(target: Element, ...els: HTMLElement[]): (() => void) |
     if (rest.length) anchor.style.setProperty("anchor-name", rest.join(", "));
     else anchor.style.removeProperty("anchor-name");
   };
+}
+
+/**
+ * Shows `card` (already in a uiLayer) below `anchor`, clamped to the viewport, keeping that offset as the page
+ * scrolls: in CSS when the anchor can be CSS-anchored (returns the release), else re-applied on scroll until `signal`.
+ */
+export function pinBelow(anchor: Element, card: HTMLElement, signal: AbortSignal, room = 120): (() => void) | null {
+  const r = anchor.getBoundingClientRect();
+  const dx = Math.max(8, Math.min(r.left, innerWidth - 316)) - r.left;
+  const dy = Math.min(r.bottom + 6, innerHeight - room) - r.top;
+  const release = anchorTo(anchor, card);
+  if (release) {
+    card.style.left = `calc(anchor(left) + ${dx}px)`;
+    card.style.top = `calc(anchor(top) + ${dy}px)`;
+    return release;
+  }
+  const follow = () => {
+    const a = anchor.getBoundingClientRect();
+    card.style.left = `${a.left + dx}px`;
+    card.style.top = `${a.top + dy}px`;
+  };
+  follow();
+  addEventListener("scroll", follow, { capture: true, passive: true, signal });
+  addEventListener("resize", follow, { passive: true, signal });
+  return null;
 }
 
 /**

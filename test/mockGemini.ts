@@ -294,7 +294,11 @@ export class MockGemini {
     if (persistent) return send(persistent.status, persistent.body, call);
 
     if (kind === "validate") return send(200, reply({ ok: true }), call);
-    if (kind === "map") return send(200, reply({ decisions: (payload.fields as Field[]).map(decide) }), call);
+    // Fill this field: an instruction's words are the answer.
+    const told = payload.candidateInstruction as string | undefined;
+    const answer = (f: Field) =>
+      told ? { fieldId: f.id, action: "fill", text: told, confidence: "high", sources: ["instruction"] } : decide(f);
+    if (kind === "map") return send(200, reply({ decisions: (payload.fields as Field[]).map(answer) }), call);
     // The decision table above only answers from the profile: every fill it makes is supported.
     if (kind === "audit") {
       const verdicts = (payload.items as { fieldId: string }[]).map((i) => ({ fieldId: i.fieldId, supported: true }));
