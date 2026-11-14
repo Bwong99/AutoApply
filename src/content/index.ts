@@ -10,6 +10,7 @@ import {
   RE_ENTRY_SECTION,
   RE_OPTIONAL_CONSENT,
   RE_RESUME_ONLY,
+  sinAnswer,
 } from "../shared/constants";
 import { aiUseDecision, consentBoxes, matchesProfileConsent, profileConsentDecision } from "../shared/consents";
 import { parseEssayLimits, wordCount } from "../shared/essay";
@@ -847,7 +848,7 @@ async function runPipeline(opts: { rerun?: boolean; depth?: number; round?: numb
         setStatus(h, "prefilled");
         continue;
       }
-      if (h.sensitive) {
+      if (h.sensitive && !sinAnswer(h.desc, det.hasSin, det.noCanadianPermitNeeded)) {
         // Never made up: a required ID or card number ends a YOLO application.
         if (yolo && h.desc.required) yoloFatal = `Asks for ${h.desc.label}`;
         setStatus(h, yolo && !h.desc.required ? "skipped" : "needs", "Sensitive – fill manually");

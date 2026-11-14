@@ -1,5 +1,5 @@
 import { normalize } from "./normalize";
-import type { Profile } from "./types";
+import type { FieldDescriptor, Profile } from "./types";
 
 // ---------- Gemini ----------
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
@@ -119,6 +119,49 @@ export const RE_COOKIE_CONTAINER = /cookie|consent-banner|onetrust|gdpr/i;
 export const RE_NEWSLETTER = /newsletter|subscribe/i;
 export const RE_SENSITIVE_LABEL =
   /card number|\bcvv\b|\bcvc\b|expiry|iban|routing|\bsin\b|social insurance|social security|ssn|passport (number|no)/i;
+const RE_HAS_SIN =
+  /\b(have|has|hold|holds|possess|possession of)\b[^?]*\b(sin|social insurance (number|no\b|#))|^\W*(a )?valid\b[^?]*\b(sin|social insurance (number|no\b|#))/i;
+// Not the one asked: negated, a 9-series (temporary) SIN, or one asking for the number itself.
+const RE_SIN_OTHER = /\bnot\b|n['’]t\b|\b9\b|\bnine\b|temporar|\bstart|\bbegin|expir|\b(enter|provide|list|what)\b/i;
+// The whole of a need joined to the SIN ("… and a work permit?"), in Canada only: never "… and US work authorization?".
+const RE_CA_WORK_RIGHT =
+  /^(?:(?:do you (?:also )?(?:have|hold)|are you|you are|i am|am|have|hold|possess)\s+)?(?:an?\s+)?(?:valid\s+|current\s+)?(?:canadian\s+)?(?:work (?:permit|visa|authori[sz]ation)(?:\s*\/\s*(?:work\s+)?(?:permit|visa|authori[sz]ation))?|permit to work|(?:legally\s+)?(?:authori[sz]ed|eligible|entitled|permitted|able) to work)(?:\s+in canada)?$/i;
+/** A Canadian citizen or permanent resident, authorized there: works in Canada with no permit to hold. */
+export const needsNoCanadianPermit = (entries: Profile["workAuthorization"]["entries"]): boolean =>
+  entries.some(
+    (e) =>
+      canonicalCountry(e.country) === "canada" &&
+      e.authorized === "yes" &&
+      /\b(citizen|permanent resident)/i.test(e.status) &&
+      !/\bnot\b|n['’]t\b/i.test(e.status),
+  );
+/**
+ * "Do you have a valid SIN?" (Social Insurance Number): the Profile's yes/no, else null and the field stays sensitive.
+ * Only a choice, never a box for the number. A second need ("… and a work permit?") can't take Yes alone, unless it is
+ * a Canadian work permit and `noPermitNeeded` (a citizen holds none, but may work: "No" reads as "can't work here"). A
+ * choice ("SIN or SSN?") or a follow-on ("If not, can you get one?") can't take No alone.
+ */
+export function sinAnswer(
+  f: Pick<FieldDescriptor, "label" | "kind" | "multiple">,
+  hasSin: string,
+  noPermitNeeded = false,
+): "yes" | "no" | null {
+  if (hasSin !== "yes" && hasSin !== "no") return null;
+  if (!["checkbox", "radio_group", "select", "dropdown"].includes(f.kind) || f.multiple) return null;
+  const [q, ...rest] = f.label.split("?");
+  if (!RE_HAS_SIN.test(q) || RE_SIN_OTHER.test(q)) return null;
+  if (hasSin === "yes") {
+    if (!/\band\b|&/i.test(q)) return "yes";
+    const parts = q
+      .split(/,|\band\b|&/i)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    const met = (p: string) => /\b(sin|social insurance)\b/i.test(p) || RE_CA_WORK_RIGHT.test(p);
+    return noPermitNeeded && parts.every(met) ? "yes" : null;
+  }
+  // An unchecked "I have a valid SIN" box says nothing.
+  return f.kind === "checkbox" || /\bor\b|\//i.test(q) || /\w/.test(rest.join("?")) ? null : "no";
+}
 export const RE_CONSENT =
   /i (agree|acknowledge|certify|confirm|understand|accept|have read)|i['’]ve read|\b(agreement|understanding)\b|consent|terms|privacy (policy|notice)|attest|\b(true|accurate|correct),? and (complete|correct|accurate|your own)\b/i;
 /** Consent that is not needed to apply: future/other roles, talent pools, marketing. */

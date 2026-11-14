@@ -138,6 +138,12 @@ export const PROFILE_GROUPS: GroupSpec[] = [
       ),
       t("workAuthorization.over18", "18 or older", "Answers “Are you at least 18 years old?”.", "yn"),
       t(
+        "workAuthorization.hasSin",
+        "Valid Canadian SIN",
+        "Answers “Do you have a valid Social Insurance Number (SIN)?”. The number itself is never filled.",
+        "yn",
+      ),
+      t(
         "workAuthorization.noOtherCitizenship",
         "I do not have citizenship in other countries",
         "Only the countries above with status Citizen. Answers “Are you a citizen of Cuba, Iran, …?”.",

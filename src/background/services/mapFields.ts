@@ -19,7 +19,9 @@ import {
   RE_OPTIONAL_CONSENT,
   commonHeardIndex,
   regionCode,
+  needsNoCanadianPermit,
   regionCountry,
+  sinAnswer,
 } from "../../shared/constants";
 import { aiUseDecision, matchesProfileConsent, profileConsentDecision } from "../../shared/consents";
 import { defang, plainDashes, RE_AI_TELL, trapLabel } from "../../shared/injection";
@@ -809,6 +811,19 @@ function clearanceDecision(f: FieldDescriptor, job: string | undefined, profile:
     confidence: "high",
     sources: ["workAuthorization"],
   };
+}
+
+/** "Do you have a valid SIN?" from the Profile: the content script lets it past the sensitive check only then. */
+function sinDecision(f: FieldDescriptor, wa: Profile["workAuthorization"]): Decision | null {
+  const answer = sinAnswer(f, wa.hasSin, needsNoCanadianPermit(wa.entries));
+  if (!answer) return null;
+  const base = { fieldId: f.id, confidence: "high" as const, sources: ["workAuthorization"] };
+  if (f.kind === "checkbox") return { ...base, action: "fill", checked: true };
+  if (!f.options) return { ...base, action: "fill", intendedAnswer: answer === "yes" ? "Yes" : "No" };
+  const hits = f.options.flatMap((o, i) => (new RegExp(`^${answer}\\b`, "i").test(o.trim()) ? [i] : []));
+  return hits.length === 1
+    ? { ...base, action: "fill", optionIndexes: hits, intendedAnswer: f.options[hits[0]] }
+    : { ...base, action: "flag", note: "No option matches your Profile's SIN answer" };
 }
 
 /**
@@ -2478,6 +2493,7 @@ export function localDecisions(input: MapInput): Map<string, Decision> {
       schoolEmailDecision(f) ??
       exerciseDecision(f) ??
       clearanceDecision(f, job, input.profile) ??
+      sinDecision(f, input.profile.workAuthorization) ??
       // Not the candidate's own country for an unknown job's: the question it follows up may name one.
       currentStatusDecision(f, workCountry(f.label, home, job), input.profile.workAuthorization.entries) ??
       workAuthDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??

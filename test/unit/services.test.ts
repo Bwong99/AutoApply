@@ -10,6 +10,7 @@ import type { DocumentMeta, FieldDescriptor, FieldKind, JobContext } from "../..
 import { defaultSettings } from "../../src/shared/settings";
 import { emptyProfile } from "../../src/shared/profileSchema";
 import { todayIso } from "../../src/shared/time";
+import { sinAnswer } from "../../src/shared/constants";
 
 const field = (id: string, extra: Partial<FieldDescriptor> = {}): FieldDescriptor => ({
   id,
@@ -2849,6 +2850,90 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask("Do you hold Legal Permanent Resident Status in a country outside the US?")).toBe("Yes");
     expect(await ask("Do you hold citizenship in a country other than the US?")).toBe("Yes");
     expect(await ask("Do you hold permanent resident status in a country outside Canada?")).toBe("flag");
+  });
+
+  it("answers 'do you have a valid SIN?' from the profile, never the number or a temporary SIN", async () => {
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const profile = emptyProfile();
+    const ask = async (
+      label: string,
+      kind: FieldKind = "radio_group",
+      options: string[] | undefined = ["Yes", "No"],
+    ) => {
+      const f = field("a", { label, kind, options });
+      const r = await mapFields(
+        { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+        { fields: [f], profile, documents: [], job: null },
+      );
+      const d = r.decisions[0];
+      return d.checked !== undefined ? d.checked : (d.intendedAnswer ?? d.action);
+    };
+    const q = "Do you have a valid SIN?";
+    const sinAnswerFor = (label: string, kind: FieldKind = "radio_group") =>
+      sinAnswer({ label, kind }, profile.workAuthorization.hasSin);
+    expect(await ask(q)).toBe("flag");
+    expect(sinAnswerFor(q)).toBeNull();
+    profile.workAuthorization.hasSin = "yes";
+    expect(await ask(q)).toBe("Yes");
+    expect(await ask("Are you in possession of a valid Social Insurance Number (SIN)?", "dropdown", undefined)).toBe(
+      "Yes",
+    );
+    expect(
+      await ask("Do you currently hold a valid Canadian Social Insurance Number?", "select", ["Select", "Yes", "No"]),
+    ).toBe("Yes");
+    expect(await ask("Valid SIN", "radio_group", ["Yes", "No"])).toBe("Yes");
+    expect(await ask("I confirm that I have a valid SIN", "checkbox", undefined)).toBe(true);
+    expect(await ask("Do you have a valid SIN or SSN?")).toBe("Yes");
+    expect(sinAnswerFor("Do you have a valid SIN and a work permit?")).toBeNull();
+    expect(sinAnswerFor("Social Insurance Number", "text")).toBeNull();
+    expect(sinAnswerFor("Do you have a valid SIN? Please enter it.", "text")).toBeNull();
+    expect(sinAnswerFor("Do you have a SIN that starts with 9?")).toBeNull();
+    expect(sinAnswerFor("Do you have a temporary SIN?")).toBeNull();
+    expect(sinAnswerFor("What is your SIN?")).toBeNull();
+    expect(sinAnswerFor("Do you have a Bachelor's degree?")).toBeNull();
+    // A Canadian citizen or permanent resident holds no work permit, but needs none.
+    const entry = (country: string, status: string, authorized: "yes" | "no" = "yes") => ({
+      country,
+      authorized,
+      status,
+      requiresSponsorshipNow: "no" as const,
+      requiresSponsorshipFuture: "no" as const,
+      notes: "",
+    });
+    const permit = [
+      "Do you have a valid SIN and a work permit?",
+      "Do you have a valid Social Insurance Number and Work Permit/Authorization?",
+      "Do you have a valid SIN, and are you legally entitled to work in Canada?",
+      "I confirm that I have a valid SIN and am eligible to work in Canada",
+    ];
+    for (const status of ["Citizen", "Permanent resident"]) {
+      profile.workAuthorization.entries = [entry("Canada", status)];
+      for (const l of permit.slice(0, 3)) expect(await ask(l)).toBe("Yes");
+      expect(await ask(permit[3], "checkbox", undefined)).toBe(true);
+    }
+    expect(await ask("Do you have a valid SIN and US work authorization?")).toBe("flag");
+    expect(await ask("Do you have a valid SIN, work permit, and driver's licence?")).toBe("flag");
+    for (const e of [
+      entry("Canada", "Work permit"),
+      entry("Canada", "Citizen", "no"),
+      entry("United States", "Citizen"),
+    ]) {
+      profile.workAuthorization.entries = [e];
+      expect(await ask(permit[0])).toBe("flag");
+    }
+    profile.workAuthorization.entries = [entry("Canada", "Citizen")];
+    profile.workAuthorization.hasSin = "no";
+    expect(await ask(permit[0])).toBe("No");
+    expect(await ask(q)).toBe("No");
+    expect(await ask("Do you hold a Social Insurance Number?", "dropdown", ["No", "Yes"])).toBe("No");
+    expect(sinAnswerFor("I have a valid SIN", "checkbox")).toBeNull();
+    expect(sinAnswerFor("Do you have a valid SIN or SSN?")).toBeNull();
+    expect(sinAnswerFor("Do you have a valid SIN? If not, can you obtain one before your start date?")).toBeNull();
   });
 
   it("picks how soon the candidate can start from the earliest start date", async () => {

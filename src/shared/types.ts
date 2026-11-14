@@ -225,6 +225,10 @@ export interface DeterministicProfile {
     "consentToInterviewRecording" | "consentToAiReview" | "consentToJobOpportunities" | "consentToMarketing"
   >;
   learnedAnswers: Pick<LearnedAnswer, "id" | "question" | "normalizedQuestion" | "kind" | "options" | "answer">[];
+  /** Answers "Do you have a valid SIN?", which is otherwise held back as sensitive. */
+  hasSin: Profile["workAuthorization"]["hasSin"];
+  /** A Canadian citizen or permanent resident: "a valid SIN and a work permit?" is Yes with a SIN. */
+  noCanadianPermitNeeded: boolean;
 }
 
 /** Filled profile entries per repeatable form section (sections opened with an "Add" button). */

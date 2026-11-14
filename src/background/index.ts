@@ -2,6 +2,7 @@
 import { ensureContentScript, type Message, type Responses } from "../shared/messages";
 import { createStorage, migrate, session } from "../shared/storage";
 import { normalize } from "../shared/normalize";
+import { needsNoCanadianPermit } from "../shared/constants";
 import { formatTime } from "../shared/time";
 import type { ApiError, EntryCounts, ModelCaps, Profile, Settings, TabStatus } from "../shared/types";
 import { defaultSettings, type AiTask, type ClaudeTask } from "../shared/settings";
@@ -351,6 +352,8 @@ const handlers: Handlers = {
           options,
           answer,
         })),
+        hasSin: s.profile.workAuthorization.hasSin,
+        noCanadianPermitNeeded: needsNoCanadianPermit(s.profile.workAuthorization.entries),
       },
       entryCounts: entryCounts(s.profile),
       documentsIndex: s.documentsIndex,
