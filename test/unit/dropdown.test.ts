@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setBody, stubLayout } from "./dom";
 import { newScanState, scan, type FieldHandle } from "../../src/content/scan/fields";
 import {
@@ -406,6 +406,32 @@ describe("remote dropdowns (Select2 AJAX)", () => {
       "University of Northern British Columbia",
     ]);
     expect(ul.hidden).toBe(true);
+  });
+});
+
+describe("virtualized lists in a visible tab that renders no frames", () => {
+  it("reads the whole list though the browser never fires a scroll event", async () => {
+    // react-window-like: 8 of 40 rows rendered, re-rendered from scroll. happy-dom, like a tab rendering no frames
+    // (CI: a just-opened tab's first 3 s), fires no scroll event when scrollTop changes; no frames come either.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+    const all = Array.from({ length: 40 }, (_, i) => `Country ${i}`);
+    setBody(`<div><label>Country</label>
+      <div id="ctl" role="combobox" aria-expanded="false" aria-controls="menu" tabindex="0"></div></div>
+      <div id="menu" role="listbox" style="overflow-y: auto" hidden></div>`);
+    const menu = document.getElementById("menu")!;
+    Object.defineProperties(menu, { clientHeight: { value: 240 }, scrollHeight: { value: all.length * 30 } });
+    const render = () =>
+      (menu.innerHTML = all
+        .slice(Math.floor(menu.scrollTop / 30), Math.floor(menu.scrollTop / 30) + 8)
+        .map((t) => `<div role="option">${t}</div>`)
+        .join(""));
+    menu.addEventListener("scroll", render);
+    const h = scan(newScanState()).handles[0];
+    h.el.addEventListener("mousedown", () => ((menu.hidden = false), render()));
+    h.el.addEventListener("keydown", (e) => (e as KeyboardEvent).key === "Escape" && (menu.hidden = true));
+    const read = await harvestOptions(h);
+    vi.restoreAllMocks();
+    expect(read).toEqual(all);
   });
 });
 

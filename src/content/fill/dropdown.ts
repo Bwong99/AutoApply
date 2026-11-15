@@ -207,11 +207,19 @@ export async function closeDropdown(h: FieldHandle, c: HTMLElement | null) {
 }
 
 // Virtualized lists re-render from scroll events, which fire on the next rendering frame. Hidden tabs render no
-// frames, so there the event is ours, fired at once, and nothing waits on frames.
+// frames, so there the event is ours, fired at once, and nothing waits on frames. A visible tab can render none for a
+// while too (a just-opened tab on a loaded machine: 3 s): there ours follows if the browser's hasn't come.
 function scrollTo(s: HTMLElement, top: number) {
+  const from = s.scrollTop;
   s.scrollTop = top;
-  if (throttled()) s.dispatchEvent(new Event("scroll"));
+  if (throttled()) return void s.dispatchEvent(new Event("scroll"));
+  if (s.scrollTop === from) return; // nothing moved: no event from the browser either
+  let fired = false;
+  s.addEventListener("scroll", () => (fired = true), { once: true });
+  setTimeout(() => !fired && s.isConnected && s.dispatchEvent(new Event("scroll")), SCROLL_EVENT_MS);
 }
+/** Under settleScroll's 150 ms wait where no frames come; well past a rendering tab's next frame. */
+const SCROLL_EVENT_MS = 100;
 const settleScroll = () =>
   sleep(50).then(() =>
     throttled()
