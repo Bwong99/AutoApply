@@ -48,7 +48,18 @@ import {
   showTab,
   submitReview,
 } from "./reviewTabs";
-import { dropParked, park, parkedKeys, takeParked } from "./parked";
+import {
+  continueParked,
+  dropParked,
+  MAX_PARKED,
+  park,
+  parkedFull,
+  parkedKeys,
+  takeContinued,
+  takeParked,
+  waitingFor,
+  waitingText,
+} from "./parked";
 import { confirmation, confirmFirst, kindOf, refused, signature, verifyFailed } from "./classify";
 import { applied, discover, indeedSignedOutNow, inQueueOrder, readIndeed, RETRY, runnable } from "./discover";
 import {
@@ -401,14 +412,24 @@ async function resumeBlocker(): Promise<string> {
 
 // ---------- queue ----------
 let pumping = false;
+/** A pump asked for during another: run once more after it, or a Continue YOLO pressed meanwhile would wait unseen. */
+let pumpAgain = false;
+/** Resume all held at the parked-tab limit: a tab closing may free a place. */
+const freed = () => {
+  chrome.tabs.onRemoved.removeListener(freed);
+  void pump();
+};
 /** Starts the next queued job when nothing runs, the batch has room, and the AI is usable. */
 async function pump() {
-  if (pumping) return;
+  if (pumping) return void (pumpAgain = true);
   pumping = true;
   try {
     if (await getRun()) return;
     const state = await store.get("yoloState");
     if (state.pausedUntil > Date.now()) return;
+    // The user finished a resumed run's step and pressed Continue YOLO: first, they're waiting on it.
+    const go = await takeContinued();
+    if (go) return void (await adoptRun(go));
     const refill = await nextReviewRefill();
     if (refill) {
       await releaseReview(refill.key, true);
@@ -430,6 +451,14 @@ async function pump() {
         await setState({
           pauseReason: `Review tab limit reached (${yolo.submissionReview.maxPending}). Submit or dismiss a review to continue resuming.`,
         });
+        return;
+      }
+      // Each stuck one keeps its tab for the user (waitForUser): no more than the parked tabs' limit at once.
+      if (await parkedFull()) {
+        await setState({
+          pauseReason: `Waiting on you in ${MAX_PARKED} tabs. Finish or close one to continue resuming.`,
+        });
+        if (!chrome.tabs.onRemoved.hasListener(freed)) chrome.tabs.onRemoved.addListener(freed);
         return;
       }
       if (pending.review) await releaseReview(pending.key, true);
@@ -499,6 +528,10 @@ async function pump() {
     );
   } finally {
     pumping = false;
+    if (pumpAgain) {
+      pumpAgain = false;
+      void pump();
+    }
   }
 }
 
@@ -606,9 +639,10 @@ export async function recoverLost() {
 
 /**
  * A run's outcome: started again when the computer's sleep broke it, retried in a tab when the hidden frame was
- * refused, re-queued on a quota stop, else logged.
+ * refused, re-queued on a quota stop, kept for the user when a resumed run is stuck, else logged. `fromPage`: the
+ * run's page sent it, its driver done (a watchdog's timeout may stop one still going).
  */
-async function finish(run: Run, r: YoloResult) {
+async function finish(run: Run, r: YoloResult, fromPage = false) {
   // The user closed their job tab before it was sent: dropped unrecorded, as before its turn, to apply to again later.
   if (
     run.item.tabId !== undefined &&
@@ -630,6 +664,7 @@ async function finish(run: Run, r: YoloResult) {
     await requeue({ ...run.item, retries: (run.item.retries ?? 0) + 1 }, run.resumeKey);
     return whenOnline("pump");
   }
+  if (fromPage && (await waitForUser(run, r))) return;
   if (!(await end(run.id))) return;
   if (run.mode === "scrape") return resolveScrape(run, r);
   const limit = deps.logLimit();
@@ -665,6 +700,36 @@ async function finish(run: Run, r: YoloResult) {
   if (a.status === "needs" && (run.host !== "visible" || run.adopted))
     notify(`yolo:${a.key}`, "AutoApply needs you", `${a.company} – ${a.title}: ${a.reason}`);
   void pump();
+}
+
+/** A run the user started again (Resume, its notification, Resume all, an opened CAPTCHA tab): they're there to help. */
+const resumed = (run: Run) => run.mode === "apply" && (run.host === "visible" || !!run.resumeKey);
+
+/**
+ * A resumed run stuck where the user can help: its tab stays as it is, they're told again, and the run carries on
+ * from there once they finish the step and press Continue YOLO (pump). False when it can't wait: as before.
+ */
+async function waitForUser(run: Run, r: YoloResult): Promise<boolean> {
+  if (!resumed(run) || run.tabId === undefined || !/^(needs|failed|blocked)$/.test(r.status)) return false;
+  if ("retryAt" in r && r.retryAt) return false;
+  const a: Application = { ...(await outcome(run, r)), status: "needs" };
+  const text = `${a.company} – ${a.title}: ${a.reason}`;
+  if (!(await park(a.key, run, text))) return false;
+  await record(a);
+  if (!(await end(run.id, true))) return true;
+  await releaseRealInput(run.tabId);
+  const limit = deps.logLimit();
+  if (limit) await logRun(run, r, limit);
+  notify(`yolo:${a.key}`, "AutoApply needs you", text);
+  await chrome.tabs
+    .sendMessage(
+      run.tabId,
+      { type: "YOLO_WAITING", text },
+      { frameId: 0, ...(run.documentId ? { documentId: run.documentId } : {}) },
+    )
+    .catch(() => undefined);
+  void pump();
+  return true;
 }
 
 /** The Applications entry a run's result makes. */
@@ -790,6 +855,7 @@ async function watchdog(due: number) {
 async function resume(key: string): Promise<Responses["YOLO_RESUME"]> {
   const a = (await store.get("applications")).find((x) => x.key === key);
   if (!a) return { error: { kind: "other", message: "Unknown application" } };
+  if (await showWaiting(key)) return { ok: true };
   if (await adopt(key)) return { ok: true };
   if (a.review) {
     if (!(await openReview(key))) {
@@ -825,8 +891,15 @@ async function adopt(key: string): Promise<boolean> {
   if (!alive) return false;
   const run = await getRun();
   if (run && (await end(run.id)) && run.mode === "apply") await requeue(run.item, run.resumeKey);
+  await adoptRun(parked);
+  await showTab(parked.tabId);
+  return true;
+}
+
+/** Drives a parked run's tab on from where it stands, as a visible run. */
+function adoptRun(parked: Run) {
   const now = Date.now();
-  await adoptTab({
+  return adoptTab({
     ...parked,
     id: crypto.randomUUID(),
     host: "visible",
@@ -836,7 +909,18 @@ async function adopt(key: string): Promise<boolean> {
     helloAt: 0,
     steps: [],
   });
-  await showTab(parked.tabId);
+}
+
+/**
+ * Brings forward the tab a resumed run left waiting for the user, its Continue YOLO shown again on whatever page it
+ * shows now (the user may have moved it on). False when there's none, or it was closed.
+ */
+async function showWaiting(key: string): Promise<boolean> {
+  const w = await waitingFor(key);
+  if (!w || !(await showTab(w.tabId).catch(() => false))) return false;
+  await chrome.tabs
+    .sendMessage(w.tabId, { type: "YOLO_WAITING", text: w.waiting }, { frameId: 0 })
+    .catch(() => undefined);
   return true;
 }
 
@@ -1588,7 +1672,7 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       (!runId || run.id === runId) &&
       (!run.documentId || run.documentId === sender.documentId)
     )
-      await finish(run, result);
+      await finish(run, result, true);
     return { ok: true };
   },
 
@@ -1657,6 +1741,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     if (!fromRun(run, sender) || run.mode !== "apply" || run.host === "frame" || run.tabId === undefined)
       return { parked: false };
     const reason = "Solve the CAPTCHA in its tab; YOLO finishes the application after";
+    // The user is there to help: the tab waits for their Continue YOLO, as for any other stop.
+    if (resumed(run)) return { parked: await waitForUser(run, { status: "needs", reason, guesses: run.guesses }) };
     const a = await outcome(run, { status: "needs", reason, guesses: run.guesses });
     if (!(await park(a.key, run))) return { parked: false };
     await record(a);
@@ -1667,6 +1753,20 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     notify(`yolo:${a.key}`, "AutoApply needs you", `${a.company} – ${a.title}: solve the CAPTCHA (click to open it)`);
     void pump();
     return { parked: true };
+  },
+
+  async YOLO_WAITING_CHECK(_, sender) {
+    const text = sender.tab?.id === undefined || sender.frameId !== 0 ? undefined : await waitingText(sender.tab.id);
+    return text ? { text } : null;
+  },
+
+  async YOLO_CONTINUE(_, sender) {
+    if (sender.tab?.id === undefined || sender.frameId !== 0 || !(await continueParked(sender.tab.id)))
+      return { ok: false };
+    // Never in place of a run going now: one past its Submit, put back in the queue, could apply twice.
+    const queued = !!(await getRun()) || (await store.get("yoloState")).pausedUntil > Date.now();
+    void pump();
+    return { ok: true, queued };
   },
 
   async YOLO_WAIT_EMAIL({ since, want }, sender) {

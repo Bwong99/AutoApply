@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installChromeMock } from "./chromeMock";
-import { MAX_PARKED, park, parkedKeys, takeParked } from "../../src/background/yolo/parked";
+import {
+  continueParked,
+  MAX_PARKED,
+  park,
+  parkedFull,
+  parkedKeys,
+  takeContinued,
+  takeParked,
+  waitingFor,
+  waitingText,
+} from "../../src/background/yolo/parked";
 import type { Run } from "../../src/background/yolo/runner";
 
 let open: Set<number>;
@@ -32,5 +42,37 @@ describe("parked CAPTCHA tabs", () => {
     expect(await takeParked("job")).toMatchObject({ tabId: 2 });
     expect(await takeParked("job")).toBeNull();
     expect(chrome.tabs.update).toHaveBeenLastCalledWith(2, { autoDiscardable: true });
+  });
+});
+
+describe("resumed runs waiting for Continue YOLO", () => {
+  it("goes on only for a waiting tab the user pressed Continue in, as a plain run", async () => {
+    await park("captcha", run(1));
+    await park("stuck", run(2), "Acme – Intern: No Next or Submit button");
+    expect(await waitingText(2)).toBe("Acme – Intern: No Next or Submit button");
+    expect(await waitingFor("stuck")).toEqual({ tabId: 2, waiting: "Acme – Intern: No Next or Submit button" });
+    expect(await waitingFor("captcha")).toBeNull();
+    expect(await takeContinued()).toBeNull();
+    expect(await continueParked(1)).toBeNull(); // a CAPTCHA park is opened from Applications, not continued
+    expect(await continueParked(2)).toBe("stuck");
+    const go = await takeContinued();
+    expect(go).toEqual({ id: "r2", tabId: 2 });
+    expect(await parkedKeys()).toEqual(["captcha"]);
+  });
+
+  it("forgets a Continue pressed for an earlier wait when the run waits again", async () => {
+    await park("stuck", run(2), "first");
+    await continueParked(2);
+    await park("stuck", run(2), "again");
+    expect(await takeContinued()).toBeNull();
+    expect(await waitingText(2)).toBe("again");
+  });
+
+  it("is full only with that many tabs still open", async () => {
+    for (let i = 1; i <= MAX_PARKED; i++) await park(`job${i}`, run(i), "wait");
+    expect(await parkedFull()).toBe(true);
+    open.delete(2);
+    expect(await parkedFull()).toBe(false);
+    expect(await parkedKeys()).not.toContain("job2");
   });
 });

@@ -163,6 +163,14 @@ const life = new AbortController();
 /** This page belongs to a YOLO run: every field gets an answer, and nothing is left for the user. */
 let yolo = false;
 let reviewContext: { key: string; ready: boolean } | undefined;
+/** Hands the page back from a YOLO run to the user: once, whichever way the run stops. */
+let releaseYolo = () => undefined as void;
+/** A resumed run stuck on this tab waits for the user (background/yolo/parked.ts): the overlay's text for it. */
+let waiting: string | undefined;
+/** The overlay shows Continue YOLO with it. */
+let canContinue = false;
+/** In the tab's sessionStorage: its next page (the site's own Next, pressed by the user) asks whether it still waits. */
+const WAITING_MARK = "autoapply-yolo-waiting";
 let hasGuessedAnswers = false;
 /** Why the run can't go on, from the last fill (a required ID number, no résumé). */
 let yoloFatal: string | undefined;
@@ -242,7 +250,7 @@ function renderOverlay() {
   const childError = [...childFrames.values()].find((f) => f.error)?.error;
   const error =
     lastError ?? (childError ? { kind: "other", message: childError } : !frames.length && noForm ? NO_FORM : null);
-  if (!frames.length && !error && !reviewContext) return;
+  if (!frames.length && !error && !reviewContext && !waiting) return;
   overlay ??= createOverlay({
     onRerun: () => void send({ type: "BROADCAST_FILL", rerun: true }).catch(() => undefined),
     // Every frame of this tab only: a form in an iframe fills in its own frame. Never a YOLO run's page.
@@ -263,6 +271,23 @@ function renderOverlay() {
         : void regenerate(n.fieldId),
     onOpenDoc: (id) => void openDoc(id),
     onJobInfo: (id) => send({ type: "GET_DOC_JOB", id }).catch(() => null),
+    onContinue: () => {
+      canContinue = false;
+      renderOverlay();
+      void send({ type: "YOLO_CONTINUE" })
+        .then((r) => {
+          setWaitingMark(false);
+          waiting = !r.ok
+            ? "This application is no longer waiting on you."
+            : r.queued
+              ? "YOLO continues here as soon as it's free."
+              : "Continuing…";
+        })
+        .catch(() => {
+          waiting = "Couldn't reach AutoApply. Reload the page and use Resume in Applications.";
+        })
+        .finally(renderOverlay);
+    },
   });
   const total: StatusCounts = {
     total: 0,
@@ -282,6 +307,8 @@ function renderOverlay() {
     reviewing: frames.some((f) => f.reviewing),
     uploads: [...new Map(frames.flatMap((f) => f.uploads ?? []).map((d) => [d.id, d])).values()],
     error,
+    waiting,
+    canContinue,
     model: usedModel ?? config?.selectedModel ?? null,
     debug: config?.settings.debugLogging ? timings.map(([k, v]) => `${k.padEnd(10)} ${v} ms`).join("\n") : "",
     notice:
@@ -1752,7 +1779,15 @@ async function sharePosting(doc: Document, loc: Location) {
 async function startYolo() {
   if (yolo || reviewContext) return;
   yolo = true;
+  // Continue YOLO pressed (or the tab adopted): the overlay's waiting note is done with.
+  waiting = undefined;
+  canContinue = false;
   const restoreTransitions = throttled() ? endTransitions() : () => undefined;
+  releaseYolo = () => {
+    releaseYolo = () => undefined;
+    yolo = false;
+    restoreTransitions();
+  };
   config = await send({ type: "GET_RUNTIME_CONFIG", yolo: true });
   listen();
   const parked = await drive({
@@ -1772,10 +1807,7 @@ async function startYolo() {
     },
     guesses: () => [...guesses.values()],
     hasGuessedAnswers: () => hasGuessedAnswers,
-    handoff: () => {
-      yolo = false;
-      restoreTransitions();
-    },
+    handoff: () => releaseYolo(),
     email: () => config.profileSnapshotForDeterministic.personal.email,
     answers,
     debug: config.settings.debugLogging,
@@ -1789,10 +1821,33 @@ async function startYolo() {
         await sharePosting(new DOMParser().parseFromString(html, "text/html"), new URL(url) as unknown as Location);
     },
   });
-  if (reviewContext || parked) {
-    yolo = false;
-    restoreTransitions();
+  if (reviewContext || parked) releaseYolo();
+}
+
+function setWaitingMark(on: boolean) {
+  try {
+    if (on) sessionStorage.setItem(WAITING_MARK, "1");
+    else sessionStorage.removeItem(WAITING_MARK);
+  } catch {
+    // Storage blocked (a sandboxed page): only this page shows its Continue YOLO.
   }
+}
+
+/** The resumed run stuck on this tab: the user finishes the step, then presses Continue YOLO in the overlay. */
+function showWaiting(text: string) {
+  waiting = `YOLO is waiting on you: ${text}. Finish that part here, then press Continue YOLO.`;
+  canContinue = true;
+  setWaitingMark(true);
+  // Their edits stay theirs when the run fills the page again.
+  listen();
+  if (config) renderOverlay();
+  else
+    void send({ type: "GET_RUNTIME_CONFIG" })
+      .then((c) => {
+        config ??= c;
+        renderOverlay();
+      })
+      .catch(() => undefined);
 }
 
 // ---------- the user's own submissions (for "already applied") ----------
@@ -1867,6 +1922,11 @@ function onMessage(msg: Message, _sender: unknown, sendResponse: (r: unknown) =>
       break;
     case "YOLO_ATTACH":
       if (window === window.top) void startYolo();
+      break;
+    case "YOLO_WAITING":
+      if (window !== window.top) break;
+      releaseYolo();
+      showWaiting(msg.text);
       break;
     case "READ_POSTING":
       // No read of a page that isn't about a job: this runs whenever the page opens a new tab.
@@ -1951,6 +2011,21 @@ async function main() {
   // Except a fresh tab, at any address (an employer's form at "forms.acme.com/f/88"): the tab that opened it may show
   // another job by the fill. Only the background knows its opener ("noreferrer" links hide it from the page).
   else if (TOP && history.length === 1) void send({ type: "BORROW_POSTING" }).catch(() => undefined);
+  // The user moved a waiting tab on by themselves: its Continue YOLO shows on this page too. One read on other pages.
+  // shortcut: a page of another origin has no mark, so it shows only after the notification or Resume; mark in the
+  // background (a tabs listener) if users often leave the origin mid-wait.
+  if (TOP && !DRIVER_FRAME && hasWaitingMark())
+    void send({ type: "YOLO_WAITING_CHECK" })
+      .then((r) => (r ? showWaiting(r.text) : setWaitingMark(false)))
+      .catch(() => undefined);
+}
+
+function hasWaitingMark() {
+  try {
+    return !!sessionStorage.getItem(WAITING_MARK);
+  } catch {
+    return false;
+  }
 }
 
 /** Edit tracking and page timers, from the first fill on a site that isn't excluded (they only act on its fields). */

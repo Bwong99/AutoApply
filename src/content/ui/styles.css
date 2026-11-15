@@ -161,7 +161,8 @@
   color: var(--muted);
   font-size: 12px;
 }
-.notice {
+.notice,
+.waiting {
   color: var(--orange);
   font-weight: 600;
 }

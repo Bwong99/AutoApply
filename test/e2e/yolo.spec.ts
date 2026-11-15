@@ -314,6 +314,61 @@ test("parks a background tab at its CAPTCHA, then finishes it in place once the 
   await expect.poll(() => tab.isClosed(), { timeout: 10_000 }).toBe(true);
 });
 
+test("a resumed run stuck on a page waits in its tab, then carries on there once the user presses Continue YOLO", async ({
+  context,
+  sw,
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await seed(sw, { caps: true });
+  const url = `${BASE}yolo-stuck.html`;
+  await sw.evaluate(async (url) => {
+    const { yolo } = await chrome.storage.local.get("yolo");
+    await chrome.storage.local.set({
+      yolo: { ...(yolo as object), aiNavigation: false },
+      applications: [
+        {
+          key: url,
+          alt: "",
+          url,
+          company: "Acme",
+          title: "Data Intern",
+          location: "",
+          source: "test",
+          doneUrl: "",
+          mode: "yolo",
+          status: "failed",
+          reason: "No Next or Submit button",
+          guesses: [],
+          notes: [],
+          at: 1,
+        },
+      ],
+    });
+  }, url);
+  const id = new URL(sw.url()).host;
+  await page.goto(`chrome-extension://${id}/src/popup/index.html`);
+  await page.evaluate((key) => chrome.runtime.sendMessage({ type: "YOLO_RESUME", key }), url);
+  await expect
+    .poll(() => context.pages().find((p) => p.url().includes("yolo-stuck")), { timeout: 30_000 })
+    .toBeTruthy();
+  const tab = context.pages().find((p) => p.url().includes("yolo-stuck"))!;
+  const go = tab.getByRole("button", { name: "Continue YOLO" });
+  await expect(go).toBeVisible({ timeout: 90_000 });
+  // Told again and recorded for them, the run slot free, and the filled page left as it is.
+  await expect
+    .poll(() => sw.evaluate(async () => Object.keys(await chrome.notifications.getAll())))
+    .toContain(`yolo:${url}`);
+  await outcome(sw).toBe("needs");
+  expect(await sw.evaluate(async () => (await chrome.storage.session.get("yoloRun")).yoloRun)).toBeUndefined();
+  await expect(tab.locator("#fn")).not.toHaveValue("");
+  // The user does the part YOLO couldn't, then hands it back: the run goes on from this page, nothing starts over.
+  await tab.evaluate(() => (document.getElementById("go")!.hidden = false));
+  await go.click();
+  await outcome(sw).toBe("submitted");
+  await expect.poll(() => tab.isClosed(), { timeout: 10_000 }).toBe(true);
+});
+
 test("waits out a challenge page in a background tab instead of failing", async ({ sw, page }) => {
   test.setTimeout(120_000);
   await seed(sw, { caps: true });

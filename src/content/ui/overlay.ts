@@ -16,6 +16,10 @@ export interface OverlayView {
   debug: string;
   /** A warning about the page itself ("YOLO already applied here"). */
   notice?: string;
+  /** A resumed YOLO run stuck here waits for the user: what for, or how it goes on. */
+  waiting?: string;
+  /** With `waiting`: its Continue YOLO button. */
+  canContinue?: boolean;
 }
 
 export interface OverlayHandlers {
@@ -29,6 +33,8 @@ export interface OverlayHandlers {
   onOpenDoc(id: string): void;
   /** The job details an AI-made upload was written from; null when no longer kept. */
   onJobInfo(id: string): Promise<JobBrief | null>;
+  /** The user finished the step a waiting YOLO run was stuck on. */
+  onContinue(): void;
 }
 
 const JOB_ROWS: [keyof JobBrief, string][] = [
@@ -71,6 +77,8 @@ export function createOverlay(h: OverlayHandlers) {
   const layer = uiLayer();
   let expanded = false;
   let running = false;
+  /** Showing Continue YOLO. */
+  let asking = false;
   let pinnedUntil = 0;
   let collapseTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -80,6 +88,7 @@ export function createOverlay(h: OverlayHandlers) {
   const status = el("div", { className: "status" });
   const model = el("div", { className: "muted" });
   const notice = el("div", { className: "notice" });
+  const wait = el("div", { className: "waiting" });
   const error = el("div", { className: "error" });
   const needs = el("ul", { className: "needs" });
   const files = el("ul", { className: "files" });
@@ -126,7 +135,7 @@ export function createOverlay(h: OverlayHandlers) {
     "div",
     { className: "panel" },
     head,
-    el("div", { className: "body" }, status, notice, model, error, needs, files, jobInfo, timings),
+    el("div", { className: "body" }, status, wait, notice, model, error, needs, files, jobInfo, timings),
     el("div", { className: "actions" }, btn("Re-run", h.onRerun, "btn primary"), btn("Stop", h.onStop)),
   );
   panel.setAttribute("role", "region");
@@ -150,7 +159,8 @@ export function createOverlay(h: OverlayHandlers) {
   };
   fab.onclick = () => expand(true);
   close.onclick = collapse;
-  onOutsideClick(panel, () => expanded && collapse());
+  // Not while Continue YOLO waits: the user's clicks on the form would hide it.
+  onOutsideClick(panel, () => expanded && !asking && collapse());
   render();
 
   return {
@@ -161,6 +171,17 @@ export function createOverlay(h: OverlayHandlers) {
       model.textContent = v.model ? `Model: ${v.model}` : "";
       notice.textContent = v.notice ?? "";
       notice.style.display = v.notice ? "" : "none";
+      wait.style.display = v.waiting ? "" : "none";
+      const go = el("button", { className: "btn primary", type: "button", textContent: "Continue YOLO" });
+      // The user's press only: the page's own script can reach this button too.
+      go.onclick = (e) => e.isTrusted && h.onContinue();
+      // Opened as it starts waiting; the user may close it meanwhile.
+      if (v.canContinue && !asking) expand(true);
+      asking = !!v.canContinue;
+      wait.replaceChildren(
+        el("div", { textContent: v.waiting ?? "" }),
+        ...(v.waiting && v.canContinue ? [el("div", { className: "actions" }, go)] : []),
+      );
       count.textContent = v.error ? "!" : String(v.needsYou.length || c.filled);
       count.style.background = v.error ? "var(--red)" : v.needsYou.length ? "" : "var(--green)";
       count.style.color = v.error ? "#fff" : "";

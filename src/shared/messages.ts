@@ -130,6 +130,10 @@ export type Message =
   | { type: "YOLO_WAIT_EMAIL"; since: number; want: "link" | "code" }
   /** A tab's run met a CAPTCHA that didn't pass by itself: its tab is parked for the user (parked.ts). */
   | { type: "YOLO_CAPTCHA" }
+  /** A page loaded in a tab a resumed run left waiting for the user (parked.ts): whether it still waits, and for what. */
+  | { type: "YOLO_WAITING_CHECK" }
+  /** The user pressed Continue YOLO in a waiting tab. */
+  | { type: "YOLO_CONTINUE" }
   | { type: "COVER_LETTER_PDF"; question: string }
   /** The résumé to upload for the tab's job in AI tailor mode: tailored, else the untailored fallback. */
   /** fresh: the user asked again, so a failure kept for this job is retried. */
@@ -138,6 +142,8 @@ export type Message =
   | { type: "REAL_INPUT"; op: RealOp }
   // B → C (a YOLO run in a tab), B → offscreen host
   | { type: "YOLO_ATTACH" }
+  /** The resumed run got stuck here: the tab waits for the user to finish the step and press Continue YOLO. */
+  | { type: "YOLO_WAITING"; text: string }
   | { type: "YOLO_HOST_NAVIGATE"; url: string }
   /** YOLO is done with its frame while a compile keeps the document open. */
   | { type: "YOLO_HOST_CLEAR" }
@@ -298,6 +304,10 @@ export interface Responses {
   YOLO_CREDENTIAL: { email: string; password: string; created: boolean } | null;
   YOLO_WAIT_EMAIL: { link?: string; code?: string } | Err;
   YOLO_CAPTCHA: { parked: boolean };
+  YOLO_WAITING_CHECK: { text: string } | null;
+  /** `ok` false: nothing waits in this tab; `queued`: it carries on once YOLO is free. */
+  YOLO_CONTINUE: { ok: boolean; queued?: boolean };
+  YOLO_WAITING: Ok;
   COVER_LETTER_PDF: { meta: DocumentMeta } | Err;
   /** `note`: why the untailored résumé was used (or a short summary of the tailoring). */
   TAILOR_RESUME: { meta: DocumentMeta; tailored: boolean; note: string } | Err;
