@@ -158,6 +158,15 @@ const test = base.extend<{ sw: Worker }>({
           return r.result.value;
         },
       };
+      // As the usual fixture does: the install-time options tab, opened over a test tab, hides it (no rAF there).
+      await sw.evaluate(async () => {
+        const setup = chrome.runtime.getURL("src/options/index.html");
+        for (let i = 0; i < 250; i++) {
+          const tab = (await chrome.tabs.query({})).find((t) => (t.pendingUrl ?? t.url ?? "").startsWith(setup));
+          if (tab?.id !== undefined) return chrome.tabs.remove(tab.id);
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      });
       await use(sw as unknown as Worker);
     } finally {
       c?.close();
