@@ -41,3 +41,6 @@ export const pendingResumeStarted = (key: string) =>
       (await pendingResumeKeys()).filter((k) => k !== key),
     ),
   );
+
+/** Stop resume all: nothing queued starts. */
+export const clearPendingResumes = () => change(() => session.set(KEY, []));

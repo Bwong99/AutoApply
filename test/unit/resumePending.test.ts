@@ -145,6 +145,39 @@ describe("resume all Needs you applications", () => {
     expect(chrome.tabs.create).toHaveBeenCalledTimes(1);
   });
 
+  it("stops after the running application, or right away keeping its outcome", async () => {
+    await chrome.storage.local.set({
+      applications: [application("first"), application("second"), application("third")],
+    });
+    const stop = (now?: boolean) => coordinator.yoloHandlers.YOLO_RESUME_STOP!({ type: "YOLO_RESUME_STOP", now }, {});
+    const list = () => coordinator.yoloHandlers.YOLO_REVIEW_LIST!({ type: "YOLO_REVIEW_LIST" }, {});
+    await request();
+    const first = await running("first");
+    expect(await list()).toMatchObject({ resumeAll: "running" });
+    expect(await stop()).toEqual({ ok: true });
+    expect((await runner.getRun())?.id).toBe(first.id);
+    await submitted(first);
+    await vi.waitFor(async () => expect(await runner.getRun()).toBeNull());
+    expect(chrome.tabs.create).toHaveBeenCalledTimes(1);
+    expect(await list()).toMatchObject({ resumeAll: "" });
+
+    await request();
+    const second = await running("second");
+    expect(await stop(true)).toEqual({ ok: true });
+    expect(await runner.getRun()).toBeNull();
+    expect(chrome.tabs.remove).toHaveBeenCalledWith(second.tabId);
+    expect(chrome.tabs.create).toHaveBeenCalledTimes(2);
+    expect(
+      Object.fromEntries(
+        (await chrome.storage.local.get<{ applications: Application[] }>("applications")).applications.map((a) => [
+          a.key,
+          a.status,
+        ]),
+      ),
+    ).toEqual({ first: "submitted", second: "needs", third: "needs" });
+    expect((await chrome.storage.session.get("yoloPendingResumes")).yoloPendingResumes).toEqual([]);
+  });
+
   it("preserves live review documents and their edits", async () => {
     await chrome.storage.local.set({ applications: [application("ready", "review", true)] });
     await reviews.retainReview("ready", 7);

@@ -294,6 +294,49 @@ test("bulk resume of Ready for your review refills review tabs and preserves fil
   expect(context.pages()).toHaveLength(tabs);
 });
 
+test("resume all can be stopped while an application runs: cancel, then stop now", async ({ sw, page }) => {
+  await applicationsPage(sw, page, 0, 0);
+  // A page no driver runs on: the first resume stays running until it is stopped.
+  const applications = ["first", "second"].map((key) =>
+    ApplicationSchema.parse({ key, url: `${BASE}missing-${key}.html`, company: key, status: "needs" }),
+  );
+  await sw.evaluate((applications) => chrome.storage.local.set({ applications }), applications);
+  await resumeAllButton(page, "Needs you").click();
+  const stop = page.getByRole("group", { name: "Resume all", exact: true }).getByRole("button", { name: "Stop" });
+  const running = () =>
+    sw.evaluate(
+      async () => (await chrome.storage.session.get<{ yoloRun?: { resumeKey?: string } }>("yoloRun")).yoloRun,
+    );
+  await expect.poll(async () => (await running())?.resumeKey).toBe("first");
+  const dialog = page.getByRole("dialog", { name: "Stop resuming all?" });
+  await stop.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  expect((await running())?.resumeKey).toBe("first");
+  await stop.click();
+  await dialog.getByRole("button", { name: "Stop now" }).click();
+  await expect(stop).toBeHidden();
+  expect(await running()).toBeUndefined();
+  expect((await sw.evaluate(() => chrome.storage.session.get("yoloPendingResumes"))).yoloPendingResumes).toEqual([]);
+  expect(await storage(sw, "applications")).toEqual(applications);
+});
+
+test("resume all's Stop hides once its run ends without the history changing", async ({ sw, page }) => {
+  await applicationsPage(sw, page, 0, 0);
+  const applications = [
+    ApplicationSchema.parse({ key: "only", url: `${BASE}missing-only.html`, company: "only", status: "needs" }),
+  ];
+  await sw.evaluate((applications) => chrome.storage.local.set({ applications }), applications);
+  await resumeAllButton(page, "Needs you").click();
+  const stop = page.getByRole("group", { name: "Resume all", exact: true }).getByRole("button", { name: "Stop" });
+  await expect(stop).toBeVisible();
+  await expect.poll(() => sw.evaluate(async () => !!(await chrome.storage.session.get("yoloRun")).yoloRun)).toBe(true);
+  // As a run parked for the user ends: recorded first, then gone, with nothing queued after it.
+  await sw.evaluate(() => chrome.storage.session.remove("yoloRun"));
+  await expect(stop).toBeHidden();
+});
+
 test("a failed bulk resume keeps pending records and allows retrying", async ({ sw, page }) => {
   await applicationsPage(sw, page, 0, 0);
   const applications = [

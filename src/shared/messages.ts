@@ -160,6 +160,8 @@ export type Message =
   | { type: "YOLO_TABS_STOP"; now?: boolean }
   | { type: "YOLO_RESUME"; key: string }
   | { type: "YOLO_RESUME_PENDING"; status: (typeof RESUMABLE)[number] }
+  /** Stops resume all: `now` also ends the application it is running. */
+  | { type: "YOLO_RESUME_STOP"; now?: boolean }
   | { type: "YOLO_MARK_SUBMITTED"; key: string }
   /** A job the user applied to outside AutoApply, entered on the Applications page. */
   | { type: "YOLO_ADD_APPLICATION"; job: { url: string; company: string; title: string } }
@@ -296,7 +298,8 @@ export interface Responses {
   YOLO_BEFORE_SUBMIT: { action: "submit" | "held" | "stop" };
   YOLO_REVIEW_CONTEXT: Ok;
   YOLO_REVIEW_PING: { ready: boolean };
-  YOLO_REVIEW_LIST: { live: string[]; refilling: string[] };
+  /** resumeAll: whether resume all is running an application, has only queued ones left, or is done (""). */
+  YOLO_REVIEW_LIST: { live: string[]; refilling: string[]; resumeAll: "" | "queued" | "running" };
   YOLO_REVIEW_OPEN: Ok | Err;
   YOLO_REVIEW_REFILL: Ok | Err;
   YOLO_REVIEW_DISMISS: Ok | Err;
@@ -325,6 +328,7 @@ export interface Responses {
   YOLO_TABS_STOP: Ok;
   YOLO_RESUME: Ok | Err;
   YOLO_RESUME_PENDING: { ok: true; queued: number } | Err;
+  YOLO_RESUME_STOP: Ok;
   YOLO_MARK_SUBMITTED: Ok | Err;
   YOLO_ADD_APPLICATION: Ok | Err;
   /** `skipped`: the links not queued, each with why. */

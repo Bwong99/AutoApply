@@ -975,6 +975,20 @@ main:has(.applications-table-scroll) {
   color: var(--muted);
   font-size: 0.85em;
 }
+.stop-resuming {
+  width: min(440px, calc(100% - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--fg);
+}
+.stop-resuming::backdrop {
+  background: #0005;
+}
+.stop-resuming h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
 .danger-zone {
   border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
 }

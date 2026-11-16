@@ -31,7 +31,13 @@ import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext, setJobContext } from "../jobContext";
 import { realInput, realInputReady, releaseRealInput } from "./realInput";
 import { markApplicationSubmitted, recordApplication, updateApplications, updateQueue } from "./applicationStore";
-import { nextPendingResume, pendingResumeKeys, pendingResumeStarted, queuePendingResumes } from "./pendingResumes";
+import {
+  clearPendingResumes,
+  nextPendingResume,
+  pendingResumeKeys,
+  pendingResumeStarted,
+  queuePendingResumes,
+} from "./pendingResumes";
 import { forgetTabsRead, readTabs, tabJobs, tabsRead, tabsReading, updateTabJobs } from "./tabJobs";
 import { completedSince, needsReviewTab, pendingReview, reviewReasons } from "./submissionReview";
 import {
@@ -1334,12 +1340,32 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     return { ok: true, queued };
   },
 
+  async YOLO_RESUME_STOP({ now }) {
+    await clearPendingResumes();
+    chrome.tabs.onRemoved.removeListener(freed);
+    const state = await store.get("yoloState");
+    // Resume all's own holds (review tab and parked tab limits) no longer apply.
+    if (state.pauseReason.endsWith("to continue resuming.")) await setState({ pauseReason: "" });
+    const run = now ? await getRun() : null;
+    if (run?.mode === "apply" && run.resumeKey && (await end(run.id))) {
+      if (run.tabId !== undefined) await releaseRealInput(run.tabId);
+      // Past Submit it may have gone through: left for the user to check rather than applied to twice. Otherwise its
+      // application keeps the outcome it had before resuming.
+      if (run.confirming)
+        await record(await outcome(run, { status: "needs", reason: "Stopped before the emailed confirmation" }));
+    }
+    void pump();
+    return { ok: true };
+  },
+
   async YOLO_REVIEW_LIST() {
     const list = await reviewList();
     const run = await getRun();
-    list.refilling.push(...(await pendingResumeKeys()));
+    const pending = await pendingResumeKeys();
+    list.refilling.push(...pending);
     if (run?.mode === "apply") list.refilling.push(run.reviewKey ?? run.resumeKey ?? run.item.key);
-    return list;
+    const resumeAll = run?.mode === "apply" && run.resumeKey ? "running" : pending.length ? "queued" : "";
+    return { ...list, resumeAll };
   },
   async YOLO_REVIEW_OPEN({ key }) {
     return (await openReview(key))

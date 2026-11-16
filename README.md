@@ -398,6 +398,7 @@ Preparing a review consumes one batch slot; submitting it yourself does not cons
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Resume**                                 | Open an unfinished/failed application in a tab and continue                                                                                    |
 | **Resume all**                             | Queue all Needs you or Ready for your review applications of the selected status, including rows hidden by filters; process them one at a time |
+| **Stop** (Resume all)                      | Stop resuming the rest; while one runs, choose to stop after it finishes or stop it now (it keeps its status)                                  |
 | **Review application / Refill for review** | Return to a live held form, or explicitly rebuild it for manual submission                                                                     |
 | **Mark submitted**                         | Record that you already submitted on the job site                                                                                              |
 | **Forget**                                 | Remove a history entry so the job may become eligible again                                                                                    |

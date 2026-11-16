@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { namesPosting } from "../../background/yolo/jobKey";
-import { send } from "../../shared/messages";
+import { send, type Responses } from "../../shared/messages";
 import { normalize } from "../../shared/normalize";
 import { formatDateTime } from "../../shared/time";
-import { FORGETTABLE, isPendingApplication, RESUMABLE, SOURCE_NAMES, type Application } from "../../shared/yolo";
+import { FORGETTABLE, isResumable, RESUMABLE, SOURCE_NAMES, type Application } from "../../shared/yolo";
 import { readPosting } from "../posting";
 import { useStored } from "../store";
 import { QueuedJobs } from "../components/QueuedJobs";
@@ -35,10 +35,15 @@ export function Applications() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [showLogs, setShowLogs] = useState(false);
-  const [reviewTabs, setReviewTabs] = useState<{ live: string[]; refilling: string[] }>({ live: [], refilling: [] });
+  const [reviewTabs, setReviewTabs] = useState<Responses["YOLO_REVIEW_LIST"]>({
+    live: [],
+    refilling: [],
+    resumeAll: "",
+  });
   const [busy, setBusy] = useState("");
   const [forgetting, setForgetting] = useState<"" | (typeof FORGETTABLE)[number]>("");
   const [resuming, setResuming] = useState<"" | (typeof RESUMABLE)[number]>("");
+  const stopDialog = useRef<HTMLDialogElement>(null);
   const blank = { url: "", company: "", title: "" };
   const [addOpen, setAddOpen] = useState(false);
   const [added, setAdded] = useState(blank);
@@ -97,6 +102,16 @@ export function Applications() {
       .catch(() => undefined)
       .finally(() => setResuming(""));
   };
+  const stopResuming = async (now: boolean) => {
+    await send({ type: "YOLO_RESUME_STOP", now }).catch(() => undefined);
+    loadReviews();
+  };
+  // Asked only while an application is being resumed: with none running, stopping can't cut one short.
+  const askStopResuming = async () => {
+    const list = await send({ type: "YOLO_REVIEW_LIST" }).catch(() => null);
+    if (list?.resumeAll === "running") stopDialog.current?.showModal();
+    else await stopResuming(false);
+  };
   const forgetAll = async (status: (typeof FORGETTABLE)[number], count: number) => {
     const marked = `marked "${STATUS[status]}"`;
     if (
@@ -117,11 +132,26 @@ export function Applications() {
       .then(setReviewTabs)
       .catch(() => undefined);
   useEffect(() => {
-    if (!apps?.some((a) => a.review || isPendingApplication(a))) return;
+    if (!apps?.some((a) => a.review || isResumable(a))) return;
     loadReviews();
     window.addEventListener("focus", loadReviews);
     return () => window.removeEventListener("focus", loadReviews);
   }, [apps, yoloState?.reviewUpdatedAt]);
+  // Resume all can move on without the history changing (a run parked for the user is recorded before it ends): Stop
+  // follows its run starting or ending and its queue.
+  const resumingAll = !!reviewTabs.resumeAll;
+  useEffect(() => {
+    if (!resumingAll) return;
+    const changed = (c: Record<string, chrome.storage.StorageChange>, area: string) => {
+      if (
+        area === "session" &&
+        ("yoloPendingResumes" in c || (c.yoloRun && !c.yoloRun.oldValue !== !c.yoloRun.newValue))
+      )
+        loadReviews();
+    };
+    chrome.storage.onChanged.addListener(changed);
+    return () => chrome.storage.onChanged.removeListener(changed);
+  }, [resumingAll]);
   const applicationAction = async (
     type: "YOLO_REVIEW_OPEN" | "YOLO_REVIEW_REFILL" | "YOLO_REVIEW_DISMISS" | "YOLO_MARK_SUBMITTED",
     key: string,
@@ -219,7 +249,48 @@ export function Applications() {
               </button>
             );
           })}
+          {reviewTabs.resumeAll && (
+            <button
+              type="button"
+              class="btn small danger"
+              title="Stop resuming the remaining applications"
+              aria-haspopup="dialog"
+              onClick={() => void askStopResuming()}
+            >
+              Stop
+            </button>
+          )}
         </div>
+        <dialog
+          ref={stopDialog}
+          class="stop-resuming"
+          aria-labelledby="stop-resuming-title"
+          aria-describedby="stop-resuming-description"
+          onClose={(e) => {
+            const choice = e.currentTarget.returnValue;
+            e.currentTarget.returnValue = "";
+            if (choice) void stopResuming(choice === "now");
+          }}
+        >
+          <form method="dialog">
+            <h2 id="stop-resuming-title">Stop resuming all?</h2>
+            <p id="stop-resuming-description" class="help">
+              An application is being resumed now. Stopping now closes its tab before it finishes, and it keeps its
+              current status.
+            </p>
+            <div class="row">
+              <button class="btn small" value="">
+                Cancel
+              </button>
+              <button class="btn small" value="after">
+                Stop after this application
+              </button>
+              <button class="btn small danger" value="now">
+                Stop now
+              </button>
+            </div>
+          </form>
+        </dialog>
         <div class="forget-all" role="group" aria-labelledby="forget-all-label">
           <span id="forget-all-label">Forget all</span>
           {FORGETTABLE.map((status) => {
