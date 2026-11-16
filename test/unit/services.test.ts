@@ -3105,6 +3105,110 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(late[0].optionIndexes).toEqual([1]);
   });
 
+  it("answers the profile's fixed answers in every form a field takes, not only its options", async () => {
+    // The model flags everything: each answer below is a local rule's.
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({ fieldId: f.id, action: "flag", confidence: "low" }));
+        return { data: { decisions, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const profile = emptyProfile();
+    profile.personal.address.country = "Canada";
+    profile.personal.dateOfBirth = "2005-01-15";
+    profile.workAuthorization.entries = [
+      {
+        ...emptyProfile().workAuthorization.entries[0],
+        country: "Canada",
+        authorized: "yes",
+        status: "Citizen",
+        requiresSponsorshipNow: "no",
+        requiresSponsorshipFuture: "no",
+      },
+    ];
+    profile.workAuthorization.noOtherCitizenship = "yes";
+    profile.education = [
+      {
+        ...emptyProfile().education[0],
+        degree: "BSc Computer Science",
+        degreeLevel: "bachelor",
+        startDate: "2024-09",
+        expectedGraduation: "2028-05",
+        currentlyEnrolled: "yes",
+      },
+    ];
+    profile.highSchool.graduationYear = "2024";
+    profile.referral.howDidYouHearDefault = "LinkedIn";
+    profile.preferences.earliestStartDate = "2027-01-01";
+    profile.preferences.desiredCompensation = {
+      amount: "85000",
+      currency: "CAD",
+      period: "year",
+      strategy: "",
+      notes: "",
+    };
+    const ids: string[] = [];
+    const f = (label: string, kind: FieldKind, options?: string[]) => {
+      ids.push(String(ids.length));
+      return field(String(ids.length - 1), { label, kind, options });
+    };
+    const fields = [
+      f("I was referred by a current employee", "checkbox"),
+      f("Were you referred by a current employee?", "text"),
+      f("Did an employee refer you?", "dropdown"),
+      f("Are you a Canadian citizen?", "checkbox"),
+      f("Are you a U.S. citizen?", "dropdown"),
+      f("Are you legally authorized to work in Canada?", "checkbox"),
+      f("Are you currently enrolled as a student?", "text"),
+      f("Do you hold an active U.S. security clearance?", "text"),
+      f("Are you available to start on May 25th, 2026?", "select", ["Yes, I can start then", "No, I cannot"]),
+      f("Are you graduating in the next 12 months?", "text"),
+      f("Are you graduating within the next 24 months?", "checkbox"),
+      f("Are you graduating within 12 months?", "radio_group", ["Yes, I graduate within 12 months", "No, I do not"]),
+      f("How did you hear about this job?", "text"),
+      f("Highest level of education completed", "text"),
+      f("Highest degree completed or in progress", "dropdown"),
+      f("How old are you?", "number"),
+      f("Desired hourly pay", "select", ["$30 - $40/hr", "$40 - $50/hr", "$50+/hr"]),
+      f("Desired salary", "select", ["$60-80K", "$80-100K", "$100K+"]),
+      f("Desired salary", "dropdown"),
+      f("May we contact your current employer?", "text"),
+      // A Yes the box asks more about, and a pay list that isn't an amount: the model's.
+      f("Are you currently enrolled as a student? If so, where?", "text"),
+      f("Pay frequency", "dropdown"),
+    ];
+    const r = await mapFields(
+      { ai: gemini, settings: defaultSettings(), model: "m", fallback: null },
+      { fields, profile, documents: [], job: null },
+    );
+    const got = r.decisions.map((d) => d.checked ?? d.text ?? d.intendedAnswer ?? d.action);
+    expect(got).toEqual([
+      false,
+      "No",
+      "No",
+      true,
+      "No",
+      true,
+      "Yes",
+      "No",
+      "No, I cannot",
+      "No",
+      true,
+      "No, I do not",
+      "LinkedIn",
+      "High School",
+      "Bachelor's Degree",
+      "21",
+      "$40 - $50/hr",
+      "$80-100K",
+      "85000",
+      "N/A",
+      "flag",
+      "flag",
+    ]);
+    expect(r.decisions[14].searchQuery).toBe("Bachelor");
+  });
+
   it("answers start and availability text boxes from the profile's dates", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {
@@ -3202,12 +3306,12 @@ describe("mapFields chunking and splitting (§10.7)", () => {
         pays: [{ min: 90000, max: 110000, period: "year", currency: "CAD" }],
       },
     );
-    expect(r.decisions.map((d) => d.text ?? d.action)).toEqual([
+    expect(r.decisions.map((d) => d.text ?? d.intendedAnswer ?? d.action)).toEqual([
       "$100,000 CAD per year",
       "$48.08 CAD per hour",
       "100000",
       "flag",
-      "flag",
+      "$90k+",
       "100000",
       "100000",
     ]);

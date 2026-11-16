@@ -192,7 +192,15 @@ const heardOther = (f: FieldDescriptor, answer: string) => RE_HEARD.test(f.label
  * the model picked Supabase's "Other online job boards".
  */
 function heardDecision(f: FieldDescriptor, heard: string, company = ""): Decision | null {
-  if (!f.options || !RE_HEARD.test(f.label)) return null;
+  if (!RE_HEARD.test(f.label)) return null;
+  // Typed: the profile's source, not a referrer's name ("If referred, who?").
+  if (!f.options)
+    return heard.trim() &&
+      (f.kind === "text" || f.kind === "textarea") &&
+      !/\b(who|whom|name)\b/i.test(f.label) &&
+      !RE_YES_NO_Q.test(f.label.trim())
+      ? { fieldId: f.id, action: "fill", text: heard.trim(), confidence: "high", sources: ["referral"] }
+      : null;
   const site = /\b(web ?site|careers? (page|site))\b/i.test(heard);
   const siteish = (o: string) => /\b(web ?site|careers? (page|site|portal))\b|\w\.(com|io|ai|co)\b/i.test(o);
   let hits = f.options.flatMap((o, i) =>
@@ -256,18 +264,9 @@ const RE_REFERRED_NOT =
  * application, a claim the candidate can't back.
  */
 function referredDecision(f: FieldDescriptor, referrer: string): Decision | null {
-  if (referrer.trim() || !f.options || !RE_REFERRED_Q.test(f.label) || RE_REFERRED_NOT.test(f.label)) return null;
-  if (RE_OPTIONAL_CONSENT.test(f.label) || !f.options.some((o) => /^yes\b/i.test(o.trim()))) return null;
-  const no = f.options.flatMap((o, i) => (/^no\b/i.test(o.trim()) ? [i] : []));
-  if (no.length !== 1) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: no,
-    intendedAnswer: f.options[no[0]],
-    confidence: "high",
-    sources: ["referral"],
-  };
+  if (referrer.trim() || !RE_REFERRED_Q.test(f.label) || RE_REFERRED_NOT.test(f.label)) return null;
+  if (RE_OPTIONAL_CONSENT.test(f.label) || (f.options && !f.options.some((o) => /^yes\b/i.test(o.trim())))) return null;
+  return yesNoDecision(f, false, ["referral"]);
 }
 
 /** A country the text names. Short codes only as written ("US", "U.S."), never the pronoun "us". */
@@ -546,8 +545,15 @@ function workAuthDecision(
   // Ro asks in a textarea; Gamma adds "If yes, please share more details below".
   const text =
     (f.kind === "text" || f.kind === "textarea") && /^(are|do|does|will|would|have|is|can)\b[^?]*\?/i.test(f.label);
+  // Also a lone box or an unread list (yesNoDecision).
+  const other = !f.options && (f.kind === "checkbox" || f.kind === "dropdown" || f.kind === "typeahead");
   // Lever asks yes/no as a two-box checkbox group (Zoox).
-  if (!country || (!f.options && !text) || (isMulti(f) && f.options?.length !== 2) || /\bnot\b|n['’]t\b/i.test(f.label))
+  if (
+    !country ||
+    (!f.options && !text && !other) ||
+    (isMulti(f) && f.options?.length !== 2) ||
+    /\bnot\b|n['’]t\b/i.test(f.label)
+  )
     return null;
   const sponsor = RE_SPONSOR_Q.test(f.label);
   const authorized = /authori[sz]ed/i.test(f.label) || RE_ELIGIBLE.test(f.label);
@@ -567,7 +573,7 @@ function workAuthDecision(
   const when = only(now ? /^yes\b.*\bnow\b/i : /^yes\b.*\bfuture\b/i);
   const yes = only(/^yes\b/i) >= 0 ? only(/^yes\b/i) : sponsor && when >= 0 ? when : only(/^yes\W*$/i);
   const no = only(/^no\b/i);
-  if (!text && (yes < 0 || no < 0)) return null;
+  if (f.options && (yes < 0 || no < 0)) return null;
   // No entry for the country: not authorized there, so sponsorship needed (and no visa or permit held).
   const says = !e
     ? [sponsor ? "yes" : "no"]
@@ -598,6 +604,7 @@ function workAuthDecision(
   if (answer === null) return null;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["workAuthorization"] };
   if (text) return { ...base, text: answer ? "Yes" : "No" };
+  if (!f.options) return yesNoDecision(f, answer, ["workAuthorization"]);
   const i = answer ? yes : no;
   return { ...base, optionIndexes: [i], intendedAnswer: f.options![i] };
 }
@@ -679,9 +686,10 @@ function citizenDecision(
   wa: Profile["workAuthorization"],
 ): Decision | null {
   const pr = /\bpermanent resident|\bgreen card\b/i.test(f.label);
-  if (!f.options || isMulti(f) || !RE_CITIZEN.test(f.label) || /\bnot\b|n['’]t\b/i.test(f.label)) return null;
-  const yes = f.options.findIndex((o) => /^yes\b/i.test(o));
-  const no = f.options.findIndex((o) => /^no\b/i.test(o));
+  if (isMulti(f) || !RE_CITIZEN.test(f.label) || /\bnot\b|n['’]t\b/i.test(f.label)) return null;
+  // Without options (a lone box, a text box, an unread list): the answer in that form.
+  const yes = f.options ? f.options.findIndex((o) => /^yes\b/i.test(o)) : 1;
+  const no = f.options ? f.options.findIndex((o) => /^no\b/i.test(o)) : 0;
   if (yes < 0 || no < 0) return null;
   const inLabel = countriesIn(f.label);
   // Else the hint's, else the job's ("a citizen or permanent resident of the country where this job is located?").
@@ -711,6 +719,7 @@ function citizenDecision(
   } else if (named.some((c) => holds(entryFor(c, wa.entries)?.status ?? ""))) i = yes;
   else if (named.length && wa.noOtherCitizenship === "yes") i = no;
   else return null;
+  if (!f.options) return yesNoDecision(f, i === yes, ["workAuthorization"]);
   return {
     fieldId: f.id,
     action: "fill",
@@ -753,20 +762,10 @@ function otherSchoolDecision(f: FieldDescriptor, education: Profile["education"]
  * or partner that uses or sells Huntress products?" was left blank.
  */
 function notWorkingDecision(f: FieldDescriptor, experience: Profile["experience"]): Decision | null {
-  if (!f.options || isMulti(f) || !/^(do|are) you currently (work|employed)\w*\b[^?]*\b(at|for|by)\b/i.test(f.label))
-    return null;
+  if (isMulti(f) || !/^(do|are) you currently (work|employed)\w*\b[^?]*\b(at|for|by)\b/i.test(f.label)) return null;
   const today = todayIso().slice(0, 7);
   if (experience.some((e) => e.current || (e.startDate && (!e.endDate || e.endDate >= today)))) return null;
-  const no = f.options.flatMap((o, i) => (/^no\b/i.test(o) ? [i] : []));
-  if (no.length !== 1) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: no,
-    intendedAnswer: f.options[no[0]],
-    confidence: "high",
-    sources: ["experience"],
-  };
+  return yesNoDecision(f, false, ["experience"]);
 }
 
 /**
@@ -774,10 +773,16 @@ function notWorkingDecision(f: FieldDescriptor, experience: Profile["experience"
  * there is no one to contact. Lyft's required one was left blank.
  */
 function contactEmployerDecision(f: FieldDescriptor, experience: Profile["experience"]): Decision | null {
-  if (!f.options || isMulti(f) || !/\b(may|can) we contact your (current|present) employer\b/i.test(f.label))
-    return null;
+  if (isMulti(f) || !/\b(may|can) we contact your (current|present) employer\b/i.test(f.label)) return null;
   const today = todayIso().slice(0, 7);
   if (experience.some((e) => e.current || (e.startDate && (!e.endDate || e.endDate >= today)))) return null;
+  // An unread list may hold "Not applicable", which beats "Yes": its options decide.
+  if (!f.options)
+    return f.kind === "text" || f.kind === "textarea"
+      ? { fieldId: f.id, action: "fill", text: NOT_APPLICABLE, confidence: "high", sources: ["experience"] }
+      : f.kind === "checkbox"
+        ? yesNoDecision(f, true, ["experience"])
+        : null;
   const na = f.options.findIndex((o) => /\bnot (applicable|currently employed)\b|^n\/?a\b/i.test(o));
   const i = na >= 0 ? na : f.options.findIndex((o) => /^yes\W*$/i.test(o.trim()));
   if (i < 0) return null;
@@ -797,20 +802,10 @@ function contactEmployerDecision(f: FieldDescriptor, experience: Profile["experi
  */
 function clearanceDecision(f: FieldDescriptor, job: string | undefined, profile: Profile): Decision | null {
   const l = f.label;
-  if (!f.options || isMulti(f) || !/\bsecurity clearance\b/i.test(l) || /\bnot\b|n['’]t\b|\bunable\b/i.test(l))
-    return null;
+  if (isMulti(f) || !/\bsecurity clearance\b/i.test(l) || /\bnot\b|n['’]t\b|\bunable\b/i.test(l)) return null;
   if (profile.workAuthorization.securityClearance.trim() || (countryIn(l) ?? job) !== US) return null;
   if (/citizen/i.test(entryFor(US, profile.workAuthorization.entries)?.status ?? "")) return null;
-  const no = f.options.flatMap((o, i) => (/^no\b/i.test(o.trim()) ? [i] : []));
-  if (no.length !== 1) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: no,
-    intendedAnswer: f.options[no[0]],
-    confidence: "high",
-    sources: ["workAuthorization"],
-  };
+  return yesNoDecision(f, false, ["workAuthorization"]);
 }
 
 /** "Do you have a valid SIN?" from the Profile: the content script lets it past the sensitive check only then. */
@@ -902,13 +897,14 @@ function experienceDecision(f: FieldDescriptor, months: number, jobMinimum: bool
  */
 function officeDecision(f: FieldDescriptor, prefs: Profile["preferences"]): Decision | null {
   const l = f.label;
-  if (!f.options || isMulti(f) || !/\b(office|on-?site|in[- ]person)\b/i.test(l)) return null;
+  if (isMulti(f) || !/\b(office|on-?site|in[- ]person)\b/i.test(l)) return null;
   if (!/\b(able|willing|can you|comfortable|commit|open|excited)\b/i.test(l)) return null;
   // Where the candidate is, not where the office is ("office (located at 441 9th Avenue)", Peloton).
   const where = /\b(are you|you are|you're|currently) (located|based|living)\b|\b(you|currently) (live|reside)\b/i;
   if (where.test(l) || /\breside\b|\bnot\b|n['’]t\b/i.test(l) || prefs.willingToRelocate !== "yes") return null;
   const daily = /\b(5|five) days\b|\bevery ?day\b|\bfully on-?site\b/i.test(l);
   if (!prefs.workArrangement.some((w) => w === "onsite" || (!daily && w === "hybrid"))) return null;
+  if (!f.options) return yesNoDecision(f, true, ["preferences"]);
   // A lone plain "Yes": not "Yes, I live in Campinas", nor beside "Yes but I would need to relocate" (Zip).
   const yes = f.options.flatMap((o, i) => (/^yes\b/i.test(o) ? [i] : []));
   if (yes.length !== 1 || !/^yes\W*$/i.test(f.options[yes[0]]) || !f.options.some((o) => /^no\b/i.test(o))) return null;
@@ -936,8 +932,7 @@ function relocationDecision(
   const willing = prefs.willingToRelocate;
   // Negation in the question itself, not in a lead-in clause ("if you do not reside …, are you open to relocating?").
   const ask = f.label.replace(/\bif you (do not|don['’]t)\b[^,?]*,/i, "");
-  if (!f.options || isMulti(f) || !/\brelocat/i.test(ask) || /\bnot\b|n['’]t\b/i.test(ask) || /^if\b/i.test(f.label))
-    return null;
+  if (isMulti(f) || !/\brelocat/i.test(ask) || /\bnot\b|n['’]t\b/i.test(ask) || /^if\b/i.test(f.label)) return null;
   if ((willing !== "yes" && willing !== "no") || !/^(any(where)?)?$/i.test(prefs.relocationNotes.trim())) return null;
   const words = ` ${normalize(f.label)} `;
   const hub = Object.keys(HUBS).find((c) => words.includes(` ${c} `));
@@ -946,6 +941,7 @@ function relocationDecision(
   const region = regionCode(address.regionCode || address.region);
   const elsewhere = there !== mine || (hub && HUB_REGIONS[hub] && region && HUB_REGIONS[hub] !== region);
   if (!there || !mine || !elsewhere) return null;
+  if (!f.options) return yesNoDecision(f, willing === "yes", ["preferences.willingToRelocate"]);
   const neg = /\bnot\b|n['’]t\b|\bunwilling\b|\bunable\b/i;
   const only = (ok: (o: string) => boolean) => {
     const hits = f.options!.flatMap((o, i) => (ok(o) ? [i] : []));
@@ -1008,8 +1004,9 @@ function obtainedEducationDecision(f: FieldDescriptor, profile: Profile): Decisi
   const done = /\b(obtained|completed|attained|earned|achieved|received|finished)\b/i;
   // A list not read yet (SuccessFactors' typeahead got "Bachelor's Degree" from the model): its search finds it.
   const unread = !f.options && (f.kind === "typeahead" || f.kind === "dropdown");
+  const typed = !f.options && (f.kind === "text" || f.kind === "textarea");
   if (
-    (!f.options && !unread) ||
+    (!f.options && !unread && !typed) ||
     isMulti(f) ||
     !/\bhighest\b/i.test(f.label) ||
     !/\b(education|degree)\b/i.test(f.label)
@@ -1033,6 +1030,14 @@ function obtainedEducationDecision(f: FieldDescriptor, profile: Profile): Decisi
       (e.endDate || e.expectedGraduation) <= today,
   );
   if (finished || !profile.education.length) return null;
+  if (typed)
+    return {
+      fieldId: f.id,
+      action: "fill",
+      text: "High School",
+      confidence: "high",
+      sources: ["highSchool", "education"],
+    };
   if (!f.options)
     return {
       fieldId: f.id,
@@ -1072,14 +1077,17 @@ const DEGREE_LEVELS: [Profile["education"][number]["degreeLevel"], RegExp][] = [
   ["doctorate", /\bph\.?\s?d\b|\bdoctor/i],
 ];
 const RE_SCHOOL_LEVEL = /\bhigh school\b|\bsecondary\b|\bGED\b/i;
+// DEGREE_LEVELS' names, typed or searched for.
+const DEGREE_NAMES = ["Diploma", "Associate Degree", "Bachelor's Degree", "Master's Degree", "Doctorate"];
 
 /**
  * "Highest Degree (Completed or Not Completed)" (AMD's iCIMS) or "completed or are pursuing": the highest level among
  * the education entries, in progress or not. The model answered AMD's "High School" for a bachelor's student.
  */
 function pursuedEducationDecision(f: FieldDescriptor, profile: Profile): Decision | null {
+  const typed = f.kind === "text" || f.kind === "textarea";
   if (
-    !f.options ||
+    (!f.options && !typed && f.kind !== "dropdown" && f.kind !== "typeahead") ||
     isMulti(f) ||
     !/\bhighest\b/i.test(f.label) ||
     !/\b(education|degree)\b/i.test(f.label) ||
@@ -1093,6 +1101,12 @@ function pursuedEducationDecision(f: FieldDescriptor, profile: Profile): Decisio
     DEGREE_LEVELS.findIndex(([l, re]) => e.degreeLevel === l || (!e.degreeLevel && re.test(e.degree)));
   const top = Math.max(-1, ...profile.education.map(levelOf));
   if (top < 0) return null;
+  if (!f.options) {
+    const name = DEGREE_NAMES[top];
+    const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["education"] };
+    // Searched by its stem: lists word it "Bachelors", "Bachelor's Degree", "Bachelor of Science".
+    return typed ? { ...base, text: name } : { ...base, intendedAnswer: name, searchQuery: name.split(/['’ ]/)[0] };
+  }
   const re = DEGREE_LEVELS[top][1];
   const hits = f.options.flatMap((o, i) => (re.test(o) && !RE_SCHOOL_LEVEL.test(o) ? [i] : []));
   if (hits.length !== 1) return null;
@@ -1111,7 +1125,7 @@ function pursuedEducationDecision(f: FieldDescriptor, profile: Profile): Decisio
  * profile lists English as fluent or better, or its résumé is in English. JumpCloud's were all rejected by the audit.
  */
 function basicsDecision(f: FieldDescriptor, profile: Profile): Decision | null {
-  if (!f.options || isMulti(f) || /\bnot\b|n['’]t\b/i.test(f.label)) return null;
+  if (isMulti(f) || /\bnot\b|n['’]t\b/i.test(f.label)) return null;
   const setup =
     /^(do|will) you have\b[^?]*\b(internet|power|electricity|phone|cellular|remote work environment|workspace)\b/i.test(
       f.label,
@@ -1123,16 +1137,7 @@ function basicsDecision(f: FieldDescriptor, profile: Profile): Decision | null {
     const words = (profile.resumeText.match(/\b(the|and|with|for|of)\b/gi) ?? []).length;
     if (listed ? !/native|fluent|bilingual|professional|advanced/i.test(listed.proficiency) : words < 20) return null;
   }
-  const yes = f.options.flatMap((o, i) => (/^yes\b/i.test(o) ? [i] : []));
-  if (yes.length !== 1) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: yes,
-    intendedAnswer: f.options[yes[0]],
-    confidence: "high",
-    sources: [english ? "skills.languages" : "preferences"],
-  };
+  return yesNoDecision(f, true, [english ? "skills.languages" : "preferences"]);
 }
 
 /**
@@ -1245,8 +1250,7 @@ function attachedDecision(f: FieldDescriptor, uploads: string[] | undefined): De
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["documents"] };
   if (f.kind === "text" || f.kind === "textarea")
     return { ...base, text: `No: this application has no place to upload my ${doc}. I can send it on request.` };
-  const no = f.options?.flatMap((o, i) => (/^no\b/i.test(o.trim()) ? [i] : [])) ?? [];
-  return no.length === 1 && !isMulti(f) ? { ...base, optionIndexes: no, intendedAnswer: f.options![no[0]] } : null;
+  return isMulti(f) ? null : yesNoDecision(f, false, ["documents"]);
 }
 
 /**
@@ -1584,7 +1588,8 @@ function currentStudentDecision(f: FieldDescriptor, education: Profile["educatio
   if (!answer) return null;
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["education"] };
   if (f.kind === "checkbox") return { ...base, checked: answer === "yes" };
-  if (!f.options || isMulti(f)) return null;
+  if (!f.options) return yesNoDecision(f, answer === "yes", ["education"]);
+  if (isMulti(f)) return null;
   const i = f.options.findIndex((o) => new RegExp(`^${answer}\\b`, "i").test(o));
   return i < 0 ? null : { ...base, optionIndexes: [i], intendedAnswer: f.options[i] };
 }
@@ -1766,7 +1771,6 @@ const RE_NEGATED = /\b(not|cannot|unable|never|no longer)\b|n't\b/i;
  * single checkbox, and in a text box.
  */
 export function fullTimeAfterDecision(f: FieldDescriptor, profile: Profile): Decision | null {
-  if (isMulti(f)) return null;
   const today = todayIso().slice(0, 7);
   const grad = profile.education
     .filter((e) => e.currentlyEnrolled !== "no" && (e.expectedGraduation ?? "").slice(0, 7) > today)
@@ -1795,6 +1799,9 @@ export function fullTimeAfterDecision(f: FieldDescriptor, profile: Profile): Dec
     return yes === null ? null : neg !== yes;
   };
   const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["education"] };
+  // A Yes/No pair of boxes, or a list not read yet.
+  if (isMulti(f) || (!f.options && (f.kind === "dropdown" || f.kind === "typeahead")))
+    return yes === null ? null : yesNoDecision(f, yes, ["education"]);
   if (f.kind === "checkbox") {
     const checked = truth(q);
     return checked === null ? null : { ...base, checked };
@@ -1825,7 +1832,7 @@ const RE_FULL_DATE = /\b([a-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})\b/gi
  */
 function startOnDecision(f: FieldDescriptor, prefs: Profile["preferences"]): Decision | null {
   const { earliestStartDate: from, availableUntil: to } = prefs;
-  if (!f.options || isMulti(f) || !from || !/\bavailable to (start|begin)\b/i.test(f.label)) return null;
+  if (isMulti(f) || !from || !/\bavailable to (start|begin)\b/i.test(f.label)) return null;
   const dates = [...f.label.matchAll(RE_FULL_DATE)].map(([, mon, day, year]) => {
     const m = MONTHS.indexOf(mon.slice(0, 3).toLowerCase()) + 1;
     return m ? `${year}-${String(m).padStart(2, "0")}-${day.padStart(2, "0")}` : "";
@@ -1833,16 +1840,7 @@ function startOnDecision(f: FieldDescriptor, prefs: Profile["preferences"]): Dec
   // shortcut: one date or "either … or" only; a "from … to" range stays with the model.
   if (!dates.length || dates.includes("") || (dates.length > 1 && !/\bor\b/i.test(f.label))) return null;
   const ok = dates.some((d) => d >= from && (!to || d <= to));
-  const i = f.options.findIndex((o) => (ok ? /^yes\W*$/i : /^no\W*$/i).test(o.trim()));
-  if (i < 0) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: [i],
-    intendedAnswer: f.options[i],
-    confidence: "high",
-    sources: ["preferences.earliestStartDate", "preferences.availableUntil"],
-  };
+  return yesNoDecision(f, ok, ["preferences.earliestStartDate", "preferences.availableUntil"], true);
 }
 
 /**
@@ -1913,18 +1911,65 @@ export function payTarget(
 }
 
 /**
+ * Desired pay among ranges ("$60,000 - $80,000", "$30-40/hr", "Under $50K", "$100,000+"): the one holding the target,
+ * in the period the option names, else the question's. An unread list gets the amount, which the fill matches to its
+ * range. shortcut: currencies aren't compared, as in payTarget.
+ */
+function payRangeDecision(f: FieldDescriptor, pay: PayTarget, asked: Pay["period"]): Decision | null {
+  const base = {
+    fieldId: f.id,
+    action: "fill" as const,
+    confidence: "high" as const,
+    sources: ["preferences.desiredCompensation"],
+  };
+  if (!f.options) {
+    // An amount, not "Pay frequency" or "Salary type".
+    const amount = /\b(expect\w*|desired|requir\w*|target|range|how much)\b/i.test(f.label);
+    if (!amount || /\b(frequency|type|period|basis|schedule)\b/i.test(f.label)) return null;
+    return { ...base, intendedAnswer: String(rounded(per(pay.amount, pay.period, asked), asked)) };
+  }
+  if (isMulti(f)) return null;
+  const hits = f.options.flatMap((o, i) => {
+    const raw = o.match(/\d[\d,]*(?:\.\d+)?k?/gi) ?? [];
+    const ns = raw.map((x) => parseFloat(x.replace(/,/g, "")) * (/k$/i.test(x) ? 1000 : 1));
+    // "60-80K": the K is both ends'.
+    if (ns.length === 2 && /k$/i.test(raw[1] ?? "") && !/k$/i.test(raw[0] ?? "") && ns[0] < 1000) ns[0] *= 1000;
+    let range: [number, number];
+    if (ns.length === 2) range = [ns[0], ns[1]];
+    else if (ns.length !== 1) return [];
+    else if (/\b(under|less than|below|up to)\b|</i.test(o)) range = [0, ns[0]];
+    else if (/\+|\b(or more|and above|over|above|more than|at least)\b/i.test(o)) range = [ns[0], Infinity];
+    else return [];
+    const period: Pay["period"] = /\bhour(ly)?\b|\/\s?hr\b|\bhr\b/i.test(o)
+      ? "hour"
+      : /\b(annual(ly)?|year(ly)?|yr|annum)\b/i.test(o)
+        ? "year"
+        : // Unworded, by size: "$30 - $40" is hourly, "$60,000 - $80,000" yearly.
+          ns.every((n) => n < 500)
+          ? "hour"
+          : ns.every((n) => n >= 5000)
+            ? "year"
+            : asked;
+    const t = per(pay.amount, pay.period, period);
+    return t >= range[0] && t <= range[1] ? [i] : [];
+  });
+  return hits.length === 1 ? { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] } : null;
+}
+
+/**
  * Desired pay in a text or number box, in the period the question names, else the target's: "$85,000 CAD per year",
  * or digits for a number box or a bare-number example.
  */
 function compensationDecision(f: FieldDescriptor, pay: PayTarget | null): Decision | null {
-  if (!pay || !["text", "textarea", "number"].includes(f.kind)) return null;
-  if (!RE_PAY_Q.test(f.label) || RE_NOT_DESIRED.test(f.label)) return null;
+  if (!pay || !RE_PAY_Q.test(f.label) || RE_NOT_DESIRED.test(f.label)) return null;
   const asked = `${f.label} ${f.hint ?? ""} ${f.placeholder ?? ""}`;
   const period = /\bhour(ly)?\b|\/\s?hr\b/i.test(asked)
     ? "hour"
     : /\b(annual(ly)?|yearly|per year|annum)\b/i.test(asked)
       ? "year"
       : pay.period;
+  if (f.options || f.kind === "dropdown" || f.kind === "typeahead") return payRangeDecision(f, pay, period);
+  if (!["text", "textarea", "number"].includes(f.kind)) return null;
   const amount = rounded(per(pay.amount, pay.period, period), period);
   const shown = amount.toLocaleString("en-US", { minimumFractionDigits: amount % 1 ? 2 : 0 });
   const text = [`${SYMBOLS[pay.currency] ?? ""}${shown}`, pay.currency, `per ${period}`].filter(Boolean).join(" ");
@@ -1950,11 +1995,17 @@ function compensationDecision(f: FieldDescriptor, pay: PayTarget | null): Decisi
  * "21-29" for a 20-year-old on Tala and Paytm.
  */
 function ageDecision(f: FieldDescriptor, dob: string): Decision | null {
-  if (!f.options || isMulti(f) || !dob || !/\bage (range|group|bracket)\b|\bhow old\b/i.test(f.label)) return null;
+  // Typed: "How old are you?", "Age".
+  const typed =
+    !f.options && (f.kind === "text" || f.kind === "number") && /\bhow old\b|^(your )?age\W*$/i.test(f.label.trim());
+  if (!dob || (!typed && (!f.options || isMulti(f) || !/\bage (range|group|bracket)\b|\bhow old\b/i.test(f.label))))
+    return null;
   const [y, m, d] = dob.split("-").map(Number);
   const [ty, tm, td] = todayIso().split("-").map(Number);
   if (!y) return null;
   const age = ty - y - (tm < (m || 1) || (tm === (m || 1) && td < (d || 1)) ? 1 : 0);
+  if (!f.options)
+    return { fieldId: f.id, action: "fill", text: String(age), confidence: "high", sources: ["personal.dateOfBirth"] };
   const hits = f.options.flatMap((o, i) => {
     const n = (o.match(/\d+/g) ?? []).map(Number);
     const [lo, hi] =
@@ -2219,13 +2270,6 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
   if (isMulti(f) || !RE_GRADUATION.test(f.label) || !date) return null;
   if (!school && /\b(master|ph\.?\s?d|doctora|mba)/i.test(f.label)) return null;
   const [year, month] = date.split("-").map(Number);
-  if (!f.options) {
-    const d = school || !month ? null : graduationText(f, year, month);
-    // Asked with the major (John Deere: "please indicate your major AND your anticipated graduation date"), which
-    // was left out ("May 2028").
-    if (d?.text && when?.major && /\bmajor\b|\bfield of study\b/i.test(f.label)) d.text = `${when.major}, ${d.text}`;
-    return d;
-  }
   // "Did You Graduate?" in an education entry (iCIMS), from that entry: flash-lite answered Yes, then No, for a May
   // 2028 graduate.
   const entry = /^education(?: \(?(\d+)\)?)?$/i.exec(f.section ?? "");
@@ -2235,6 +2279,17 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
     const [ty, tm] = todayIso().split("-").map(Number);
     return end[0] ? yesNoAnswer(f, end[0] * 12 + (end[1] || 12) <= ty * 12 + tm) : null;
   }
+  if (!f.options) {
+    // A yes/no question in a box ("Are you graduating in the next 12 months?"), not the date.
+    const soon =
+      !school && (f.kind === "checkbox" || RE_YES_NO_Q.test(f.label)) ? graduatingSoonDecision(f, year, month) : null;
+    if (soon) return soon;
+    const d = school || !month ? null : graduationText(f, year, month);
+    // Asked with the major (John Deere: "please indicate your major AND your anticipated graduation date"), which
+    // was left out ("May 2028").
+    if (d?.text && when?.major && /\bmajor\b|\bfield of study\b/i.test(f.label)) d.text = `${when.major}, ${d.text}`;
+    return d;
+  }
   if (f.options.some((o) => /^yes\W*$/i.test(o.trim()))) return school ? null : graduatingSoonDecision(f, year, month);
   const hits = f.options.flatMap((o, i) => {
     if (!new RegExp(`\\b${year}\\b`).test(o)) return [];
@@ -2243,6 +2298,9 @@ function graduationDecision(f: FieldDescriptor, profile: Profile): Decision | nu
     if (!month || (!names.length && !seasons.length)) return [i];
     return names.includes(MONTHS[month - 1]) || seasons.some(([, ms]) => ms.includes(month)) ? [i] : [];
   });
+  // No dated option: "Yes, I graduate within 12 months" / "No".
+  if (!hits.length && !school && f.options.some((o) => /^yes\b/i.test(o.trim())))
+    return graduatingSoonDecision(f, year, month);
   if (hits.length !== 1) return null;
   const i = hits[0];
   return {
@@ -2277,18 +2335,37 @@ function graduatingSoonDecision(f: FieldDescriptor, year: number, month = 12): D
   return yesNoAnswer(f, yes);
 }
 
-function yesNoAnswer(f: FieldDescriptor, yes: boolean): Decision | null {
-  const i = f.options!.findIndex((o) => (yes ? /^yes\W*$/i : /^no\W*$/i).test(o.trim()));
-  if (i < 0) return null;
-  return {
-    fieldId: f.id,
-    action: "fill",
-    optionIndexes: [i],
-    intendedAnswer: f.options![i],
-    confidence: "high",
-    sources: ["education"],
+// A yes/no question, maybe after a lead-in: "Do you require sponsorship?" (Zoox's text box).
+const RE_YES_NO_Q = /(^|[.!?:]\s+)(are|do|does|did|will|would|have|has|had|is|was|were|can|could)\b/i;
+
+/**
+ * A rule's fixed Yes or No, in whatever form the field asks it: the one option starting so ("No, I was not referred";
+ * with `bare`, a bare "Yes"/"No" first, beside "Yes, but …"), a lone box ticked for Yes, a yes/no question's text box
+ * or unread list. Each rule answered only some of these, and the model the rest: it could pick the other.
+ */
+function yesNoDecision(f: FieldDescriptor, yes: boolean, sources: string[], bare = false): Decision | null {
+  const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources };
+  const word = yes ? "Yes" : "No";
+  // A negated box ("I am not a U.S. citizen") says the opposite of the question the rule answers.
+  if (f.kind === "checkbox") return /\bnot\b|n['’]t\b|\bnever\b/i.test(f.label) ? null : { ...base, checked: yes };
+  if (!f.options) {
+    if (!RE_YES_NO_Q.test(f.label.trim())) return null;
+    if (f.kind === "dropdown" || f.kind === "typeahead") return { ...base, intendedAnswer: word };
+    if (f.kind !== "text" && f.kind !== "textarea") return null;
+    // A Yes the box asks more about ("If so, where?"): the model writes it.
+    const more =
+      /\bif (yes|so)\b|\bplease (explain|describe|specify|list|provide|share|elaborate)\b|\b(which|where|what|who|when|how)\b/i;
+    return yes && more.test(f.label) ? null : { ...base, text: word };
+  }
+  const only = (re: RegExp) => {
+    const hits = f.options!.flatMap((o, i) => (re.test(o.trim()) ? [i] : []));
+    return hits.length === 1 ? hits : null;
   };
+  const hits = (bare ? only(yes ? /^yes\W*$/i : /^no\W*$/i) : null) ?? only(yes ? /^yes\b/i : /^no\b/i);
+  return hits ? { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] } : null;
 }
+
+const yesNoAnswer = (f: FieldDescriptor, yes: boolean) => yesNoDecision(f, yes, ["education"], true);
 
 /**
  * A profile month as text ("May 2028"): asked for a full date, the fill writes it in the input's format on the 1st

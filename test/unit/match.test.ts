@@ -26,6 +26,14 @@ describe("localMatch (§13.3)", () => {
     expect(localMatch("Native", ["Native", "1 year", "3 years"])).toBe(0);
     expect(localMatch("Fluent", ["Yes", "No"])).toBeNull();
   });
+  it("matches a bare Yes or No to the one option starting so, never a country", () => {
+    expect(localMatch("No", ["Yes, I was referred", "No, I applied directly"])).toBe(1);
+    expect(localMatch("Yes", ["Yes, I am authorized", "No"])).toBe(0);
+    expect(localMatch("No", ["Yes", "No", "No, but I know someone here"])).toBe(1);
+    expect(localMatch("No", ["Yes", "No, not yet", "No, never"])).toBeNull();
+    expect(localMatch("No", ["Norway", "Sweden"])).toBeNull();
+    expect(localMatch("No", ["None", "Not sure"])).toBeNull();
+  });
   it("matches an option worded with a leading 'The' (Intel's Workday schools)", () => {
     const schools = ["The University of British Columbia", "University of Northern British Columbia"];
     expect(localMatch("University of British Columbia", schools)).toBe(0);

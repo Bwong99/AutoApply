@@ -72,13 +72,14 @@ export function localMatch(answer: string, options: string[]): number | null {
   if (q !== null) return q;
   const p = proficiencyMatch(answer, options);
   if (p !== null) return p;
-  // "No" must never resolve to Norway (ISO code NO).
-  if (a !== "yes" && a !== "no") {
-    const c = unique(options, canonicalCountry, canonicalCountry(answer));
-    if (c !== null) return c;
-    const r = unique(options, canonicalRegion, canonicalRegion(answer));
-    if (r !== null) return r;
-  }
+  // A Yes or No a list words out ("No, I was not referred"): the one option starting so. Rules answer an unread list
+  // with a bare Yes/No; the AI matching it could pick the other.
+  // Never a country or region: "No" is Norway's ISO code.
+  if (a === "yes" || a === "no") return unique(options, (o) => normalize(o).split(" ")[0], a);
+  const c = unique(options, canonicalCountry, canonicalCountry(answer));
+  if (c !== null) return c;
+  const r = unique(options, canonicalRegion, canonicalRegion(answer));
+  if (r !== null) return r;
   const d = unique(options, dateish, dateish(answer));
   if (d !== null) return d;
   // A number on a list of ranges: 41600 is "$40,001 - $50,000" (Oracle's salary expectations).
