@@ -1,5 +1,5 @@
 import { createStorage } from "../../shared/storage";
-import type { Application, QueueItem } from "../../shared/yolo";
+import { isResumable, type Application, type QueueItem } from "../../shared/yolo";
 const store = createStorage("background");
 
 /** Runs each change after the one before it, so every read-modify-write sees the last one's write. */
@@ -49,4 +49,17 @@ export async function markApplicationSubmitted(
     }),
   );
   return submitted;
+}
+
+/** Record that the user won't submit an unfinished application, keeping its job, answers, and review metadata. */
+export async function markApplicationSkipped(key: string): Promise<Application | null> {
+  let skipped: Application | null = null;
+  await updateApplications((apps) =>
+    apps.map((a) => {
+      if (a.key !== key) return a;
+      skipped = isResumable(a) ? { ...a, status: "skipped", at: Date.now(), reason: "Marked skipped by you" } : a;
+      return skipped;
+    }),
+  );
+  return skipped;
 }

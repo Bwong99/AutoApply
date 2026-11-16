@@ -163,6 +163,7 @@ export type Message =
   /** Stops resume all: `now` also ends the application it is running. */
   | { type: "YOLO_RESUME_STOP"; now?: boolean }
   | { type: "YOLO_MARK_SUBMITTED"; key: string }
+  | { type: "YOLO_MARK_SKIPPED"; key: string }
   /** A job the user applied to outside AutoApply, entered on the Applications page. */
   | { type: "YOLO_ADD_APPLICATION"; job: { url: string; company: string; title: string } }
   /** Jobs the user queues by hand, from Applications > Queued jobs; `postedAt` as the posting's page gives it. */
@@ -330,6 +331,7 @@ export interface Responses {
   YOLO_RESUME_PENDING: { ok: true; queued: number } | Err;
   YOLO_RESUME_STOP: Ok;
   YOLO_MARK_SUBMITTED: Ok | Err;
+  YOLO_MARK_SKIPPED: Ok | Err;
   YOLO_ADD_APPLICATION: Ok | Err;
   /** `skipped`: the links not queued, each with why. */
   YOLO_QUEUE_ADD: { ok: true; added: number; skipped: { url: string; reason: string }[] } | Err;

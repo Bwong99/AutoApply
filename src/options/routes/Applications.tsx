@@ -153,7 +153,8 @@ export function Applications() {
     return () => chrome.storage.onChanged.removeListener(changed);
   }, [resumingAll]);
   const applicationAction = async (
-    type: "YOLO_REVIEW_OPEN" | "YOLO_REVIEW_REFILL" | "YOLO_REVIEW_DISMISS" | "YOLO_MARK_SUBMITTED",
+    type:
+      "YOLO_REVIEW_OPEN" | "YOLO_REVIEW_REFILL" | "YOLO_REVIEW_DISMISS" | "YOLO_MARK_SUBMITTED" | "YOLO_MARK_SKIPPED",
     key: string,
   ) => {
     setBusy(key);
@@ -518,7 +519,7 @@ export function Applications() {
                           </button>
                         )
                       )}
-                      {a.status !== "submitted" && (
+                      {a.status === "skipped" ? (
                         <button
                           type="button"
                           class="btn small"
@@ -528,6 +529,33 @@ export function Applications() {
                         >
                           Mark submitted
                         </button>
+                      ) : (
+                        a.status !== "submitted" && (
+                          // One row for both outcomes keeps the actions at most three buttons tall.
+                          <div class="mark-as">
+                            <span aria-hidden="true">Mark as</span>
+                            <button
+                              type="button"
+                              class="btn small"
+                              aria-label="Mark submitted"
+                              disabled={busy === a.key}
+                              title="Record that you already submitted this application on the job site"
+                              onClick={() => void applicationAction("YOLO_MARK_SUBMITTED", a.key)}
+                            >
+                              Submitted
+                            </button>
+                            <button
+                              type="button"
+                              class="btn small"
+                              aria-label="Mark skipped"
+                              disabled={busy === a.key}
+                              title="Record that you won't submit this application. YOLO won't apply to it again unless you forget it."
+                              onClick={() => void applicationAction("YOLO_MARK_SKIPPED", a.key)}
+                            >
+                              Skipped
+                            </button>
+                          </div>
+                        )
                       )}
                       {!(a.review && ["review", "needs", "failed"].includes(a.status)) && (
                         <button

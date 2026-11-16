@@ -99,6 +99,52 @@ test("each non-submitted row can be marked submitted while preserving its applic
   await expect(page.getByRole("button", { name: "Mark submitted", exact: true })).toHaveCount(0);
 });
 
+test("each unfinished row can be marked skipped in one click while preserving its application details", async ({
+  sw,
+  page,
+}) => {
+  await applicationsPage(sw, page, 0, 0);
+  const applications = (["submitted", "needs", "failed", "skipped", "review"] as const).map((status) =>
+    ApplicationSchema.parse({
+      key: status,
+      status,
+      url: `https://example.com/${status}`,
+      company: `Company ${status}`,
+      title: "Engineer",
+      source: "Lever",
+      guesses: [{ q: "Start date?", a: "May" }],
+      ...(status === "review" && { review: { reasons: ["Review requested"], preparedAt: 1 } }),
+      at: 1,
+    }),
+  );
+  await sw.evaluate((applications) => chrome.storage.local.set({ applications }), applications);
+  const skip = page.getByRole("button", { name: "Mark skipped", exact: true });
+  await expect(skip).toHaveCount(3);
+  const row = (key: string) =>
+    page.getByRole("row").filter({
+      has: page.getByRole("link", { name: `Company ${key} – Engineer`, exact: true }),
+    });
+  for (const original of applications.filter((a) => ["needs", "failed", "review"].includes(a.status))) {
+    await row(original.key).getByRole("button", { name: "Mark skipped", exact: true }).click();
+    await expect(row(original.key)).toContainText("Marked skipped by you");
+    // A skipped row can still be marked submitted, as before.
+    await expect(row(original.key).getByRole("button", { name: "Mark submitted", exact: true })).toHaveCount(1);
+    await expect(row(original.key).getByRole("button", { name: "Mark skipped", exact: true })).toHaveCount(0);
+    expect((await storage<Application[]>(sw, "applications")).find((a) => a.key === original.key)).toEqual({
+      ...original,
+      status: "skipped",
+      reason: "Marked skipped by you",
+      at: expect.any(Number),
+    });
+  }
+  const stored = await storage<Application[]>(sw, "applications");
+  expect(stored.filter((a) => a.status === "submitted" || a.key === "skipped")).toEqual([
+    applications[0],
+    applications[3],
+  ]);
+  await expect(forgetAllButton(page, "Skipped")).toHaveText("Skipped (4)");
+});
+
 test("a failed mark submitted keeps the application status and allows retrying", async ({ sw, page }) => {
   await applicationsPage(sw, page, 2, 0);
   const applications = await storage<Application[]>(sw, "applications");

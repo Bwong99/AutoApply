@@ -30,7 +30,13 @@ import { jobBrief } from "../services/jobBrief";
 import { compactProfile, type ServiceCtx } from "../services/mapFields";
 import { getJobContext, setJobContext } from "../jobContext";
 import { realInput, realInputReady, releaseRealInput } from "./realInput";
-import { markApplicationSubmitted, recordApplication, updateApplications, updateQueue } from "./applicationStore";
+import {
+  markApplicationSkipped,
+  markApplicationSubmitted,
+  recordApplication,
+  updateApplications,
+  updateQueue,
+} from "./applicationStore";
 import {
   clearPendingResumes,
   nextPendingResume,
@@ -1225,6 +1231,20 @@ async function applyJobTabs(windowId: number): Promise<Responses["YOLO_APPLY_TAB
 }
 
 // ---------- messages ----------
+/** The user's own outcome for an application: whatever YOLO was still doing with it stops. */
+async function markByUser(key: string, mark: (key: string) => Promise<Application | null>) {
+  const run = await getRun();
+  if (run?.mode === "apply" && [run.item.key, run.reviewKey, run.resumeKey].includes(key)) await end(run.id, true);
+  const a = await mark(key);
+  if (!a) return { error: { kind: "other" as const, message: "Unknown application" } };
+  await releaseReview(key);
+  await dropParked(key);
+  await pendingResumeStarted(key);
+  await updateQueue((q) => q.filter((i) => i.key !== key && i.listing !== key && (!a.alt || i.alt !== a.alt)));
+  void pump();
+  return { ok: true as const };
+}
+
 export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
   async YOLO_STATUS() {
     const [apps, queue, state, run, alarm, check] = await Promise.all([
@@ -1396,18 +1416,8 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
     return { ok: true };
   },
 
-  async YOLO_MARK_SUBMITTED({ key }) {
-    const run = await getRun();
-    if (run?.mode === "apply" && [run.item.key, run.reviewKey, run.resumeKey].includes(key)) await end(run.id, true);
-    const a = await markApplicationSubmitted(key);
-    if (!a) return { error: { kind: "other", message: "Unknown application" } };
-    await releaseReview(key);
-    await dropParked(key);
-    await pendingResumeStarted(key);
-    await updateQueue((q) => q.filter((i) => i.key !== key && i.listing !== key && (!a.alt || i.alt !== a.alt)));
-    void pump();
-    return { ok: true };
-  },
+  YOLO_MARK_SUBMITTED: ({ key }) => markByUser(key, markApplicationSubmitted),
+  YOLO_MARK_SKIPPED: ({ key }) => markByUser(key, markApplicationSkipped),
 
   async YOLO_ADD_APPLICATION({ job }) {
     const [url, company, title] = [job.url.trim(), job.company.trim(), job.title.trim()];

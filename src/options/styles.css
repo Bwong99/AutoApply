@@ -729,7 +729,16 @@ main:has(.applications-table-scroll) {
   align-items: flex-start;
   gap: 2px;
   width: max-content;
-  max-width: 148px;
+  max-width: 180px;
+}
+.application-actions .mark-as {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.application-actions .mark-as > span {
+  padding: 0 6px;
 }
 .application-actions .btn {
   min-height: 28px;
@@ -740,6 +749,19 @@ main:has(.applications-table-scroll) {
   color: var(--muted);
   white-space: nowrap;
   font-weight: 400;
+}
+/* A segmented pair, so its two buttons read apart from the "Mark as" label. */
+.application-actions .mark-as .btn {
+  min-height: 24px;
+  border-color: var(--line);
+  color: var(--fg);
+}
+.application-actions .mark-as .btn:first-of-type {
+  border-radius: 6px 0 0 6px;
+}
+.application-actions .mark-as .btn:last-of-type {
+  margin-left: -1px;
+  border-radius: 0 6px 6px 0;
 }
 .application-actions .btn.primary {
   color: var(--action-accent);
