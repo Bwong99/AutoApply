@@ -96,7 +96,7 @@ beforeEach(() => {
       clear: vi.fn(async (name: string) => alarms.delete(name)),
       clearAll: vi.fn(async () => (alarms.clear(), true)),
     },
-    notifications: { onClicked: events(), create: vi.fn() },
+    notifications: { onClicked: events(), create: vi.fn(), clear: vi.fn(async () => true) },
     offscreen: {
       hasDocument: vi.fn(async () => false),
       createDocument: vi.fn(async () => undefined),

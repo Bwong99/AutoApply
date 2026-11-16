@@ -98,7 +98,7 @@ beforeEach(async () => {
       create: vi.fn(async () => undefined),
       clear: vi.fn(async () => true),
     },
-    notifications: { onClicked: events(), create: vi.fn() },
+    notifications: { onClicked: events(), create: vi.fn(), clear: vi.fn(async () => true) },
   });
   chrome.runtime.getManifest = () => ({ content_scripts: [{ js: ["content.js"] }] }) as chrome.runtime.Manifest;
   await chrome.storage.local.set({

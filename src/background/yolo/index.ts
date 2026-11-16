@@ -139,13 +139,16 @@ async function setState(patch: Partial<YoloState>) {
 }
 
 function notify(id: string, title: string, message: string) {
-  chrome.notifications.create(id, {
-    type: "basic",
-    iconUrl: chrome.runtime.getURL("icons/128.png"),
-    title,
-    message,
-    priority: 1,
-  });
+  // Cleared first: on Windows, Chromium shows no popup for an id whose earlier toast is still in the notification list.
+  void chrome.notifications.clear(id).finally(() =>
+    chrome.notifications.create(id, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/128.png"),
+      title,
+      message,
+      priority: 1,
+    }),
+  );
 }
 
 /** Later answers to the same question replace earlier ones (a page re-filled after a validation error). */

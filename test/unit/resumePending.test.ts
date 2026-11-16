@@ -56,7 +56,7 @@ beforeEach(async () => {
       create: vi.fn(async () => undefined),
       clear: vi.fn(async () => true),
     },
-    notifications: { onClicked: events(), create: vi.fn() },
+    notifications: { onClicked: events(), create: vi.fn(), clear: vi.fn(async () => true) },
   });
   await chrome.storage.local.set({
     yolo: { ...defaultYolo(), boards: [], feeds: [], submissionReview: { mode: "off", maxPending: 1 } },
