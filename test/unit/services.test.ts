@@ -3005,6 +3005,106 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask(fullTime, "select", months)).toBe("June");
   });
 
+  it("never says a student can start full-time before graduating, as a return to school is expected", async () => {
+    // The model says Yes to everything: each answer below is the local rule's.
+    const gemini = {
+      call: async (s: { payload: { fields?: FieldDescriptor[]; items?: { fieldId: string }[] } }) => {
+        const decisions = (s.payload.fields ?? []).map((f) => ({
+          fieldId: f.id,
+          action: "fill",
+          intendedAnswer: "Yes",
+          optionIndexes: [0],
+          confidence: "high",
+          sources: ["preferences"],
+        }));
+        const choices = (s.payload.items ?? []).map((i) => ({
+          fieldId: i.fieldId,
+          optionIndexes: [0],
+          confidence: "high",
+        }));
+        return { data: { decisions, choices, verdicts: [] }, usedModel: "m", keyLabel: "k" };
+      },
+    } as unknown as Gemini;
+    const ctx = { ai: gemini, settings: defaultSettings(), model: "m", fallback: null };
+    const profile = emptyProfile();
+    profile.education = [{ ...emptyProfile().education[0], expectedGraduation: "2028-05", currentlyEnrolled: "yes" }];
+    const ask = async (label: string, options = ["Yes", "No"], p = profile) => {
+      const r = await mapFields(ctx, {
+        fields: [field("s", { label, kind: "radio_group", options })],
+        profile: p,
+        documents: [],
+        job: null,
+      });
+      return r.decisions[0].intendedAnswer;
+    };
+    const shopify =
+      "Internships at Shopify are a potential pathway to full time, permanent employment. Would you be able to begin " +
+      "working full-time at Shopify immediately following your internship (August 2027) should an offer be available to you?";
+    expect(await ask(shopify)).toBe("No");
+    expect(await ask("Are you able to start full-time immediately after your internship?")).toBe("No");
+    expect(await ask("Would you be available to convert to a full-time role upon completion of your co-op?")).toBe(
+      "No",
+    );
+    expect(await ask("Can you work full-time following the internship?", ["Yes, I can", "No, I'll be in school"])).toBe(
+      "No, I'll be in school",
+    );
+    expect(await ask("Will you be returning to school after your internship?")).toBe("Yes");
+    expect(await ask("Do you plan to go back to university once the internship ends?")).toBe("Yes");
+    expect(await ask("Will you have at least one semester remaining after the internship?")).toBe("Yes");
+    // A named start: from a month before graduating.
+    expect(await ask("Would you be able to start full-time in Summer 2028?")).toBe("Yes");
+    expect(await ask("Are you available to begin full-time employment in April 2028?")).toBe("Yes");
+    expect(await ask("Are you available to begin full-time employment in March 2028?")).toBe("No");
+    expect(await ask("Could you start a full-time position by January 2028?")).toBe("No");
+    expect(await ask("Could you join full-time in 2029?")).toBe("Yes");
+    // Other questions stay with the model.
+    expect(await ask("Are you able to work full-time (40 hours/week) during the internship?")).toBe("Yes");
+    expect(await ask("Are you interested in full-time employment after your internship?")).toBe("Yes");
+    expect(await ask("Would you be able to start full-time after your internship and graduation?")).toBe("Yes");
+    const graduated = emptyProfile();
+    graduated.education = [{ ...emptyProfile().education[0], expectedGraduation: "2025-05", currentlyEnrolled: "no" }];
+    expect(
+      await ask("Are you able to start full-time immediately after your internship?", ["Yes", "No"], graduated),
+    ).toBe("Yes");
+    // Statements instead of Yes/No, each read on its own.
+    const can = "I can start working full-time immediately after the internship";
+    const cannot = "I cannot start working full-time immediately after the internship";
+    expect(await ask("Full-time availability after your internship", [can, cannot])).toBe(cannot);
+    expect(await ask("Please select one regarding full-time employment", [cannot, can])).toBe(cannot);
+    expect(await ask("Can you start full-time right after your co-op?", ["I can", "I can't"])).toBe("I can't");
+    const back = ["I will return to school after the internship", "I will not return to school after the internship"];
+    expect(await ask("What are your plans after the internship?", back)).toBe(back[0]);
+    const summer = ["I can start full-time in Summer 2028", "I can start full-time in January 2028"];
+    expect(await ask("When could you start full-time?", summer)).toBe(summer[0]);
+    // Another question with such a statement among its options stays with the model.
+    const status = ["Graduating in May 2028", "Returning to school in Fall 2027"];
+    expect(await ask("What is your current academic status?", status)).not.toBe(status[1]);
+    const decide = async (label: string, kind: FieldKind) =>
+      (await mapFields(ctx, { fields: [field("s", { label, kind })], profile, documents: [], job: null })).decisions[0];
+    expect((await decide(can, "checkbox")).checked).toBe(false);
+    expect((await decide(cannot, "checkbox")).checked).toBe(true);
+    expect((await decide(shopify, "textarea")).text).toBe("No, I graduate in May 2028 and could start full-time then.");
+    expect((await decide("Will you return to school after your internship?", "text")).text).toBe(
+      "Yes, I'll be returning to school to finish my degree, graduating in May 2028.",
+    );
+    expect((await decide("Can you start full-time in June 2028?", "text")).text).toBe("Yes, I graduate in May 2028.");
+    // Options found late (a dropdown opened after the scan).
+    const late = await chooseOptions(
+      ctx,
+      [
+        {
+          fieldId: "c",
+          question: "Can you begin working full-time right after the internship?",
+          intendedAnswer: "Yes",
+          options: ["Yes", "No"],
+          multiple: false,
+        },
+      ],
+      profile,
+    );
+    expect(late[0].optionIndexes).toEqual([1]);
+  });
+
   it("answers start and availability text boxes from the profile's dates", async () => {
     const gemini = {
       call: async (s: { payload: { fields?: FieldDescriptor[] } }) => {

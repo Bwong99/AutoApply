@@ -1723,6 +1723,100 @@ function returnOfferDecision(f: FieldDescriptor, profile: Profile): Decision | n
   return i < 0 ? null : { ...base, optionIndexes: [i], intendedAnswer: f.options[i] };
 }
 
+const RE_AFTER_INTERNSHIP =
+  /\b(after|following|upon|once|post|at the (end|conclusion|completion) of)\b[^?.]{0,40}\b(internships?|co-?ops?|placements?|work terms?)\b/i;
+const RE_BACK_TO_SCHOOL =
+  /\b(return(ing)?|go(ing)? back|head(ing)? back)\s+to\s+(school|university|college|campus|class(es)?|(your |my )?(studies|degree|program|education))\b|\b(continu|resum)\w*\s+(your |my )?(studies|education|degree|program)\b|\b(one|1|a|another)\s+(more\s+)?(academic\s+)?(term|semester|quarter)\b[^?.]{0,25}\b(remaining|left)\b/i;
+const RE_NAMED_START =
+  /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?(20\d\d)\b|\b(winter|spring|summer|fall|autumn)\s+(?:of\s+)?(20\d\d)\b|\b(20\d\d)\b/gi;
+
+/**
+ * Whether a statement about starting full-time holds for a student graduating in `grad` (negation not read):
+ * "begin working full-time immediately following your internship (August 2027)" is false while the degree runs past
+ * it. Yes says the candidate won't go back to school, and an internship needs a term left, so it rules them out. A
+ * named start ("full-time in Summer 2028") holds from a month before graduating, a start they can negotiate.
+ * "Return to school after your internship" holds. Null when it is another statement.
+ */
+function fullTimeTruth(text: string, grad: string): boolean | null {
+  if (/\bauthori[sz]|\bsponsor|\bvisa\b|\brelocat/i.test(text)) return null;
+  const months = [...text.matchAll(RE_NAMED_START)].map((m) => {
+    if (m[1]) return Number(m[2]) * 12 + MONTHS.indexOf(m[1].toLowerCase()) + 1;
+    if (m[3]) return Number(m[4]) * 12 + TERM_MID.find(([re]) => re.test(m[3]))![1];
+    return Number(m[5]) * 12 + 12;
+  });
+  const [gy, gm] = grad.split("-").map(Number);
+  const at = months.length ? Math.max(...months) : null;
+  if (RE_BACK_TO_SCHOOL.test(text)) return at !== null && at > gy * 12 + gm ? null : true;
+  const verb = /\b(start|begin|commenc|join|availab|able|work|transition|convert|continu)/i;
+  if (!/\bfull[- ]?time\b/i.test(text) || !verb.test(text)) return null;
+  // Interest in a future offer, or full-time hours during the internship, is another question.
+  if (/\binterest|\bconsider|\bopen to\b|\bprefer|\bduring\b|\bhours?\b|\bper week\b|\bweekly\b/i.test(text))
+    return null;
+  if (at !== null) return at >= gy * 12 + gm - 1;
+  // Undated, only right after the internship: "after your internship and graduation" stays with the model.
+  return RE_AFTER_INTERNSHIP.test(text) && !/\b(graduat|degree|studies|school)/i.test(text) ? false : null;
+}
+
+const RE_NEGATED = /\b(not|cannot|unable|never|no longer)\b|n't\b/i;
+
+/**
+ * Shopify's "Would you be able to begin working full-time at Shopify immediately following your internship (August
+ * 2027) should an offer be available to you?" got Yes, which rules out a student (fullTimeTruth). Also among
+ * statements ("I cannot start working full-time immediately after the internship"), each read on its own, as a
+ * single checkbox, and in a text box.
+ */
+export function fullTimeAfterDecision(f: FieldDescriptor, profile: Profile): Decision | null {
+  if (isMulti(f)) return null;
+  const today = todayIso().slice(0, 7);
+  const grad = profile.education
+    .filter((e) => e.currentlyEnrolled !== "no" && (e.expectedGraduation ?? "").slice(0, 7) > today)
+    .map((e) => e.expectedGraduation)
+    .sort()
+    .pop();
+  if (!grad) return null;
+  // The asking sentence: a preamble ("Internships can lead to full-time roles following the internship.") is not it.
+  const q =
+    f.label
+      .split(/(?<=[.?!])\s+/)
+      .filter((s) => s.includes("?"))
+      .pop() ?? f.label;
+  // A "when" or "which" question isn't answered Yes or No (returnOfferDecision has "when could you start?").
+  const yes = RE_NEGATED.test(q) || /\b(when|what|which|how)\b/i.test(q) ? null : fullTimeTruth(q, grad);
+  // A statement's own truth; else, on a question this answers, its polarity ("I can" / "I cannot").
+  const truth = (o: string) => {
+    const t = o.trim();
+    if (/^(yes|no)\b/i.test(t)) return yes === null ? null : /^yes/i.test(t) === yes;
+    if (/\b(prefer not|not sure|unsure|maybe|depends|other|n\/a|decline|don't know)\b/i.test(t)) return null;
+    const neg = RE_NEGATED.test(t);
+    // "I cannot start full-time until I graduate": the negation doesn't flip the statement.
+    if (neg && /\b(until|unless|before|only|except)\b/i.test(t)) return null;
+    const own = fullTimeTruth(t, grad);
+    if (own !== null) return own !== neg;
+    return yes === null ? null : neg !== yes;
+  };
+  const base = { fieldId: f.id, action: "fill" as const, confidence: "high" as const, sources: ["education"] };
+  if (f.kind === "checkbox") {
+    const checked = truth(q);
+    return checked === null ? null : { ...base, checked };
+  }
+  if (!f.options) {
+    if ((f.kind !== "text" && f.kind !== "textarea") || yes === null) return null;
+    const [gy, gm] = grad.split("-").map(Number);
+    const on = monthYear(gy, gm);
+    const text = !yes
+      ? `No, I graduate in ${on} and could start full-time then.`
+      : RE_BACK_TO_SCHOOL.test(q)
+        ? `Yes, I'll be returning to school to finish my degree, graduating in ${on}.`
+        : `Yes, I graduate in ${on}.`;
+    return { ...base, text: f.maxLength && text.length > f.maxLength ? (yes ? "Yes" : "No") : text };
+  }
+  // Statements count under a question on this: an "academic status" list may hold "Returning to school in Fall 2027".
+  if (yes === null && !/\bfull[- ]?time\b|\b(internships?|co-?ops?|placements?|work terms?)\b/i.test(q)) return null;
+  const hits = f.options.flatMap((o, i) => (truth(o) ? [i] : []));
+  if (hits.length !== 1) return null;
+  return { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] };
+}
+
 const RE_FULL_DATE = /\b([a-z]{3,9})\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})\b/gi;
 
 /**
@@ -2503,6 +2597,7 @@ export function localDecisions(input: MapInput): Map<string, Decision> {
       exerciseDecision(f) ??
       clearanceDecision(f, job, input.profile) ??
       sinDecision(f, input.profile.workAuthorization) ??
+      fullTimeAfterDecision(f, input.profile) ??
       // Not the candidate's own country for an unknown job's: the question it follows up may name one.
       currentStatusDecision(f, workCountry(f.label, home, job), input.profile.workAuthorization.entries) ??
       workAuthDecision(f, countries.get(f.id), input.profile.workAuthorization.entries) ??

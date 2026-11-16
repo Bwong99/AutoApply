@@ -4,7 +4,7 @@ import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { CHOOSE_OPTIONS_PROMPT } from "../gemini/prompts";
 import { CHOOSE_SCHEMA, ChooseZ } from "../gemini/schemas";
-import { compactProfile, numbered, withoutEssayStyle, type ServiceCtx } from "./mapFields";
+import { compactProfile, fullTimeAfterDecision, numbered, withoutEssayStyle, type ServiceCtx } from "./mapFields";
 
 export function validateChoices(items: ChooseItem[], raw: Choice[]): Choice[] {
   const byId = new Map(items.map((i) => [i.fieldId, i]));
@@ -29,17 +29,15 @@ export function validateChoices(items: ChooseItem[], raw: Choice[]): Choice[] {
 export async function chooseOptions(ctx: ServiceCtx, items: ChooseItem[], profile: Profile): Promise<Choice[]> {
   const local = new Map<string, Choice>();
   for (const i of items) {
-    const d = screeningDecision(
-      {
-        id: i.fieldId,
-        label: i.question,
-        kind: i.multiple ? "multiselect" : "select",
-        options: i.options,
-        optionsKnown: true,
-        required: true,
-      },
-      profile,
-    );
+    const f = {
+      id: i.fieldId,
+      label: i.question,
+      kind: i.multiple ? ("multiselect" as const) : ("select" as const),
+      options: i.options,
+      optionsKnown: true,
+      required: true,
+    };
+    const d = screeningDecision(f, profile) ?? fullTimeAfterDecision(f, profile);
     if (d)
       local.set(i.fieldId, { fieldId: i.fieldId, optionIndexes: d.optionIndexes ?? null, confidence: d.confidence });
   }
