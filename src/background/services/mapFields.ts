@@ -1734,6 +1734,21 @@ const RE_BACK_TO_SCHOOL =
   /\b(return(ing)?|go(ing)? back|head(ing)? back)\s+to\s+(school|university|college|campus|class(es)?|(your |my )?(studies|degree|program|education))\b|\b(continu|resum)\w*\s+(your |my )?(studies|education|degree|program)\b|\b(one|1|a|another)\s+(more\s+)?(academic\s+)?(term|semester|quarter)\b[^?.]{0,25}\b(remaining|left)\b/i;
 const RE_NAMED_START =
   /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?,?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?(20\d\d)\b|\b(winter|spring|summer|fall|autumn)\s+(?:of\s+)?(20\d\d)\b|\b(20\d\d)\b/gi;
+/** Lasting employment: "full-time", "a permanent role", "regular employment". */
+const RE_LASTING = /\b(full[- ]?time|permanent|regular|long[- ]term)\b/i;
+const STINT = String.raw`(?:internships?|co-?ops?|placements?|work[- ]terms?|terms?|semesters?|students?|stud(?:y|ies|ying)|enrol\w*|programs?|course\w*)`;
+/**
+ * "Full-time" describing the internship or studies, not a job after them: "a full-time, 12-month co-op", "a full-time
+ * software internship", "co-op on a full-time basis", "full-time student". Words between must not start a new phrase
+ * ("full-time after the co-op", "full-time role following your internship").
+ */
+const RE_LASTING_STINT = new RegExp(
+  String.raw`\b(?:full[- ]?time|long[- ]term|regular)(?:[\s,()/]+(?!(?:after|following|upon|once|post|at|of|the|your|my|a|an|in|by|from|on|to|when|before|until|then|immediately|right|directly|role|position|job|employment|offer|opportunit\w*|career|work|hire|start\w*|begin\w*|join\w*)(?=[\s,()/?.]|$))[\w-]+){0,3}?[\s,()/]+${STINT}\b|\b${STINT}(?:[\s,()]+(?:on\s+a|is|be|as|basis))?[\s,()]+full[- ]?time\b(?!\s+(?:role|position|job|employment|work|offer|opportunit\w*|career|hire|conversion))`,
+  "gi",
+);
+/** A stint with an end: "from January to April 2027", "Jan–Apr 2027", "for 12 months", "a 4-month work term". */
+const RE_BOUNDED =
+  /\b(\d+|one|two|three|four|five|six|eight|twelve|sixteen)[- ]?(months?|weeks?)\b|(?<!long[- ])\b(work )?terms?\b|\bsemesters?\b|\b(from|between)\b[^?.]{0,30}\b(to|through|until|till|and)\b|\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*(-|–|—|to|through|until)\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
 
 /**
  * Whether a statement about starting full-time holds for a student graduating in `grad` (negation not read):
@@ -1743,7 +1758,16 @@ const RE_NAMED_START =
  * "Return to school after your internship" holds. Null when it is another statement.
  */
 function fullTimeTruth(text: string, grad: string): boolean | null {
-  if (/\bauthori[sz]|\bsponsor|\bvisa\b|\brelocat/i.test(text)) return null;
+  if (/\bauthori[sz]|\bsponsor|\bvisa\b|\brelocat|\bpermanent residen/i.test(text)) return null;
+  // Convverge's "eligible for a full-time, 12-month co-op beginning January 2027?" got No: it asks about the co-op.
+  text = text.replace(RE_LASTING_STINT, " ");
+  // After the candidate's present internship, the next one may be the job applied for.
+  if (
+    /\b(current|present|existing|ongoing)(ly)?\b[^?.]{0,20}\b(internships?|co-?ops?|placements?|work terms?)\b/i.test(
+      text,
+    )
+  )
+    return null;
   const months = [...text.matchAll(RE_NAMED_START)].map((m) => {
     if (m[1]) return Number(m[2]) * 12 + MONTHS.indexOf(m[1].toLowerCase()) + 1;
     if (m[3]) return Number(m[4]) * 12 + TERM_MID.find(([re]) => re.test(m[3]))![1];
@@ -1752,14 +1776,22 @@ function fullTimeTruth(text: string, grad: string): boolean | null {
   const [gy, gm] = grad.split("-").map(Number);
   const at = months.length ? Math.max(...months) : null;
   if (RE_BACK_TO_SCHOOL.test(text)) return at !== null && at > gy * 12 + gm ? null : true;
-  const verb = /\b(start|begin|commenc|join|availab|able|work|transition|convert|continu)/i;
-  if (!/\bfull[- ]?time\b/i.test(text) || !verb.test(text)) return null;
+  const verb = /\b(start|begin|commenc|join|availab|able|work|transition|convert|continu|stay|remain|hire)/i;
+  const after = RE_AFTER_INTERNSHIP.test(text);
+  // A role right after the internship is a job ("start a role immediately following your co-op"); otherwise only
+  // lasting employment is.
+  const job = RE_LASTING.test(text) || (after && /\b(employ\w*|position|role|job|offer)\b/i.test(text));
+  if (!job || !verb.test(text)) return null;
   // Interest in a future offer, or full-time hours during the internship, is another question.
   if (/\binterest|\bconsider|\bopen to\b|\bprefer|\bduring\b|\bhours?\b|\bper week\b|\bweekly\b/i.test(text))
     return null;
-  if (at !== null) return at >= gy * 12 + gm - 1;
+  if (at !== null) {
+    // "Full-time from January to April 2027" is an internship's term; a job has no end.
+    if (!after && RE_BOUNDED.test(text)) return null;
+    return RE_LASTING.test(text) ? at >= gy * 12 + gm - 1 : null;
+  }
   // Undated, only right after the internship: "after your internship and graduation" stays with the model.
-  return RE_AFTER_INTERNSHIP.test(text) && !/\b(graduat|degree|studies|school)/i.test(text) ? false : null;
+  return after && !/\b(graduat|degree|studies|school)/i.test(text) ? false : null;
 }
 
 const RE_NEGATED = /\b(not|cannot|unable|never|no longer)\b|n't\b/i;
@@ -1818,7 +1850,8 @@ export function fullTimeAfterDecision(f: FieldDescriptor, profile: Profile): Dec
     return { ...base, text: f.maxLength && text.length > f.maxLength ? (yes ? "Yes" : "No") : text };
   }
   // Statements count under a question on this: an "academic status" list may hold "Returning to school in Fall 2027".
-  if (yes === null && !/\bfull[- ]?time\b|\b(internships?|co-?ops?|placements?|work terms?)\b/i.test(q)) return null;
+  if (yes === null && !RE_LASTING.test(q) && !/\b(internships?|co-?ops?|placements?|work terms?)\b/i.test(q))
+    return null;
   const hits = f.options.flatMap((o, i) => (truth(o) ? [i] : []));
   if (hits.length !== 1) return null;
   return { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] };
@@ -2355,7 +2388,11 @@ function yesNoDecision(f: FieldDescriptor, yes: boolean, sources: string[], bare
     // A Yes the box asks more about ("If so, where?"): the model writes it.
     const more =
       /\bif (yes|so)\b|\bplease (explain|describe|specify|list|provide|share|elaborate)\b|\b(which|where|what|who|when|how)\b/i;
-    return yes && more.test(f.label) ? null : { ...base, text: word };
+    if (yes && more.test(f.label)) return null;
+    // Convverge's "Were you referred …? If yes, please provide their name below. Leave blank if not applicable" got "No".
+    if (!yes && /\b(leave|keep) (it |this( field)? )?(blank|empty)\b/i.test(f.label))
+      return { ...base, action: "skip" };
+    return { ...base, text: word };
   }
   const only = (re: RegExp) => {
     const hits = f.options!.flatMap((o, i) => (re.test(o.trim()) ? [i] : []));

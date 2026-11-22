@@ -1599,6 +1599,11 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       ask("j", "Were you referred?", ["Yes", "No", "No, but I know someone here"]),
       ask("k", "Were you referred by a current employee?", ["Employee", "Job board"]),
       ask("l", "If you were referred, did the referrer work with you?"),
+      // A box to leave blank unless referred.
+      field("m", {
+        label:
+          "Were you referred by a Convverge employee? If yes, please provide their name below. Leave blank if not applicable",
+      }),
     ];
     const run = async (referrer: string, yolo = false) => {
       const profile = emptyProfile();
@@ -1610,7 +1615,7 @@ describe("mapFields chunking and splitting (§10.7)", () => {
       );
       return Object.fromEntries(r.decisions.map((d) => [d.fieldId, d.intendedAnswer ?? d.action]));
     };
-    const no = { a: "No", b: "No, I applied directly", c: "No", d: "No", e: "No", f: "No" };
+    const no = { a: "No", b: "No, I applied directly", c: "No", d: "No", e: "No", f: "No", m: "skip" };
     expect(await run("")).toMatchObject(no);
     expect(asked).toEqual(["g", "h", "i", "j", "k", "l"]);
     expect(await run("", true)).toMatchObject(no);
@@ -3057,6 +3062,34 @@ describe("mapFields chunking and splitting (§10.7)", () => {
     expect(await ask("Are you available to begin full-time employment in March 2028?")).toBe("No");
     expect(await ask("Could you start a full-time position by January 2028?")).toBe("No");
     expect(await ask("Could you join full-time in 2029?")).toBe("Yes");
+    // Permanent, regular or long-term work, or a role, right after the internship.
+    expect(await ask("Would you be able to start permanent employment immediately after your internship?")).toBe("No");
+    expect(await ask("Could you begin a regular, permanent role right after your co-op?")).toBe("No");
+    expect(
+      await ask("Are you able to transition into a long-term position immediately following the internship?"),
+    ).toBe("No");
+    expect(await ask("Should an offer be extended, could you start a role immediately following your co-op?")).toBe(
+      "No",
+    );
+    expect(await ask("Can you start full-time right after your 4-month internship?")).toBe("No");
+    expect(await ask("Are you able to stay on full-time after the internship ends?")).toBe("No");
+    // A full-time internship or studies, or a bounded term, is the internship itself (the model's Yes stands).
+    const convverge =
+      "Are you currently enrolled in a post-secondary program and eligible for a full-time, 12-month co-op beginning January 2027? *";
+    expect(await ask(convverge)).toBe("Yes");
+    expect(await ask("Are you eligible for a full-time co-op beginning January 2027?")).toBe("Yes");
+    expect(await ask("Are you available for a 12-month co-op, full-time, starting January 2027?")).toBe("Yes");
+    expect(await ask("Are you a full-time student available for a co-op starting January 2027?")).toBe("Yes");
+    expect(await ask("Are you available for a full-time 8-month software internship starting in May 2027?")).toBe(
+      "Yes",
+    );
+    expect(await ask("Can you commit to a full-time work term from January to April 2027?")).toBe("Yes");
+    expect(await ask("Are you available to work full-time from January to April 2027?")).toBe("Yes");
+    expect(await ask("Are you available for full-time employment Jan-Apr 2027?")).toBe("Yes");
+    expect(await ask("Are you enrolled full-time and able to start a co-op in January 2027?")).toBe("Yes");
+    expect(await ask("Are you a Canadian citizen or permanent resident able to begin in January 2027?")).toBe("Yes");
+    expect(await ask("Can you start this co-op after your current internship ends in December 2026?")).toBe("Yes");
+    expect(await ask("Are you available to start the position in January 2027?")).toBe("Yes");
     // Other questions stay with the model.
     expect(await ask("Are you able to work full-time (40 hours/week) during the internship?")).toBe("Yes");
     expect(await ask("Are you interested in full-time employment after your internship?")).toBe("Yes");
