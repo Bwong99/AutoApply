@@ -41,24 +41,45 @@ export async function loadPlaces(
   cities = list;
 }
 
+/** Short forms job lists write for a city: Simplify's "SF", "South SF". */
+const ALIASES: Record<string, string> = { sf: "san francisco", "south sf": "south san francisco" };
+/** "St Paul" is "Saint Paul" in the city list, "St Louis" is "St Louis": a city is looked up both ways. */
+const ABBREVIATED: Record<string, string> = {
+  st: "saint",
+  saint: "st",
+  ft: "fort",
+  fort: "ft",
+  mt: "mount",
+  mount: "mt",
+};
+
 /** Every place a name may mean, likeliest first: a province or state, a country, another region, a city, a hub. */
 function meanings(part: string): Place[] {
-  const s = normalize(part);
+  const n = normalize(part);
+  const s = ALIASES[n] ?? n;
   if (!s) return [];
   const out: Place[] = [];
   const region = canonicalRegion(s);
   if (region) out.push({ country: regionCountry(s)!, region });
   const country = canonicalCountry(s);
   if (country) out.push({ country });
+  // Job lists write Los Angeles as "LA" too: "Northridge, LA", "Woodland Hills, LA".
+  if (s === "la") out.push({ country: "united states", region: "california" });
   // Canada's and the US's regions came first, by code or name.
   for (const r of regions) if (r.region === s && r.country !== "canada" && r.country !== "united states") out.push(r);
   // Two letters are codes, not towns.
-  if (s.length > 2)
-    for (let k = firstCity(s); k < starts.length && cityName(k) === s; k++) {
-      const at = starts[k] + s.length + 1;
-      const end = cities.indexOf("\n", at);
-      out.push({ ...regions[parseInt(cities.slice(at, end < 0 ? undefined : end), 36)], city: s });
+  if (s.length > 2) {
+    const other = s.replace(/^(\w+) /, (m, w: string) => (ABBREVIATED[w] ? `${ABBREVIATED[w]} ` : m));
+    for (const name of other === s ? [s] : [s, other]) {
+      const before = out.length;
+      for (let k = firstCity(name); k < starts.length && cityName(k) === name; k++) {
+        const at = starts[k] + name.length + 1;
+        const end = cities.indexOf("\n", at);
+        out.push({ ...regions[parseInt(cities.slice(at, end < 0 ? undefined : end), 36)], city: name });
+      }
+      if (out.length > before) break;
     }
+  }
   if (HUBS[s]) out.push({ country: HUBS[s] }); // "Bay Area", "NYC"
   // LinkedIn's "Greater Vancouver Metropolitan Area", "Downtown Toronto".
   const bare = s.replace(/\b(greater|downtown|metro(politan)?|area|region)\b/g, "").trim();
@@ -87,14 +108,17 @@ const merge = (a: Place, b: Place): Place | null =>
 
 /**
  * What one place ("Kelowna, BC", "Toronto, ON, CA", "Hybrid - San Francisco") may mean, likeliest first. Each part
- * narrows the meanings; a part that fits none is ignored ("Hybrid", "HQ").
+ * narrows the meanings; a part that fits none is ignored ("Hybrid", "HQ"). A state or country that fits none of the
+ * city's meanings outranks them: "Malvern, PA" is in Pennsylvania (the list has only Ontario's and Arkansas's Malvern),
+ * "Malta, NY" in New York.
  */
 export function resolvePlace(place: string): Place[] {
   let pick: Place[] = [];
   for (const part of place.split(/[,()/]| - /)) {
     const options = meanings(part);
     const both = pick.flatMap((a) => options.flatMap((b) => merge(a, b) ?? []));
-    pick = pick.length ? (both.length ? both : pick) : options;
+    const wider = options.filter((o) => !o.city);
+    pick = !pick.length ? options : both.length ? both : wider.length ? wider : pick;
   }
   return pick;
 }

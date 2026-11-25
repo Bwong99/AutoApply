@@ -727,6 +727,27 @@ describe("filters", () => {
     expect(locationMatches("Remote - Ontario", ["British Columbia"], true)).toBe(false);
   });
 
+  it("places a city by its state when the city list has it only elsewhere", () => {
+    // Simplify's short forms.
+    expect(locationMatches("SF", ["United States"], false)).toBe(true);
+    expect(locationMatches("South SF", ["California"], false)).toBe(true);
+    expect(locationMatches("Toronto, ON, Canada; SF", ["Bay Area", "NYC", "Seattle"], false)).toBe(true);
+    // Malvern is listed in Ontario and Arkansas only, St Paul (as "St") in Alberta only, Malta as a country.
+    expect(locationMatches("Malvern, PA", ["United States"], false)).toBe(true);
+    expect(locationMatches("Malvern, PA", ["Canada"], false)).toBe(false);
+    expect(locationMatches("St Paul, MN", ["Minnesota"], false)).toBe(true);
+    expect(locationMatches("St Paul, MN", ["Canada"], false)).toBe(false);
+    expect(locationMatches("Malta, NY", ["United States"], false)).toBe(true);
+    expect(locationMatches("Folsom, NJ", ["California"], false)).toBe(false);
+    // "LA" is Los Angeles as well as Louisiana.
+    expect(locationMatches("Woodland Hills, LA", ["California"], false)).toBe(true);
+    expect(locationMatches("Baton Rouge, LA", ["Louisiana"], false)).toBe(true);
+    expect(locationMatches("Baton Rouge, LA", ["California"], false)).toBe(false);
+    // Outside the US stays out.
+    expect(locationMatches("London, UK", ["United States"], true)).toBe(false);
+    expect(locationMatches("Remote in Canada", ["Bay Area", "NYC", "Seattle"], true)).toBe(false);
+  });
+
   it("explains why a posting is skipped", () => {
     const y = { ...defaultYolo(), queries: ["Software Engineer Intern"], locations: ["Canada"] };
     const now = Date.UTC(2026, 9, 26);
