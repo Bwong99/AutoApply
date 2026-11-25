@@ -268,6 +268,25 @@ describe("screening thresholds", () => {
     });
   });
 
+  it("leaves an optional pay question blank when the profile asks, and answers a required one", () => {
+    const p = emptyProfile();
+    p.preferences.desiredCompensation = { ...p.preferences.desiredCompensation, amount: "25", currency: "CAD" };
+    p.preferences.desiredCompensation.period = "hour";
+    const pay = (required: boolean) =>
+      localDecisions({
+        fields: [field("Desired hourly pay", { kind: "text", required })],
+        profile: p,
+        documents: [],
+        job: null,
+      }).get("q");
+    // Unset: every pay question is answered, as before.
+    expect(pay(false)).toMatchObject({ action: "fill" });
+    p.preferences.desiredCompensation.whenOptional = "blank";
+    expect(pay(false)).toMatchObject({ action: "skip" });
+    expect(pay(true)).toMatchObject({ action: "fill" });
+    expect(JSON.stringify(pay(true))).toContain("25");
+  });
+
   it("leaves unconstrained experience questions and narrative essays with the existing mapper", () => {
     expect(screeningDecision(field("How many years of experience do you have with React?"), emptyProfile())).toBeNull();
     expect(

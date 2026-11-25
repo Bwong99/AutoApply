@@ -364,6 +364,16 @@ export const PROFILE_GROUPS: GroupSpec[] = [
           ["max", "Range maximum"],
         ],
       },
+      {
+        k: "select",
+        path: "preferences.desiredCompensation.whenOptional",
+        label: "Optional pay questions",
+        help: "When a form asks your desired pay but doesn't require an answer.",
+        options: [
+          ["", "Answer them"],
+          ["blank", "Leave them blank"],
+        ],
+      },
       t("preferences.desiredCompensation.notes", "Compensation notes", "e.g. Negotiable."),
       t("preferences.willingToTravelPercent", "Willing to travel (%)", "e.g. 25."),
       t("preferences.noticePeriod", "Notice period", "e.g. Immediately, 2 weeks."),

@@ -157,6 +157,8 @@ export const ProfileSchema = o({
       period: z.enum(["hour", "year", ""]).catch(""),
       // Where in a posting's pay range to answer; "" always answers `amount`, which is also the lowest answer.
       strategy: z.enum(["", "min", "q1", "mid", "q3", "max"]).catch(""),
+      // "blank" leaves a pay question the form doesn't require unanswered; "" answers every one.
+      whenOptional: z.enum(["", "blank"]).optional().catch(""),
       notes: s(),
     }),
     willingToTravelPercent: s(),

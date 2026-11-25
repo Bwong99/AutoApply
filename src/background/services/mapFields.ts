@@ -1993,8 +1993,11 @@ function payRangeDecision(f: FieldDescriptor, pay: PayTarget, asked: Pay["period
  * Desired pay in a text or number box, in the period the question names, else the target's: "$85,000 CAD per year",
  * or digits for a number box or a bare-number example.
  */
-function compensationDecision(f: FieldDescriptor, pay: PayTarget | null): Decision | null {
-  if (!pay || !RE_PAY_Q.test(f.label) || RE_NOT_DESIRED.test(f.label)) return null;
+function compensationDecision(f: FieldDescriptor, pay: PayTarget | null, blankOptional = false): Decision | null {
+  if (!RE_PAY_Q.test(f.label) || RE_NOT_DESIRED.test(f.label)) return null;
+  if (blankOptional && !f.required)
+    return { fieldId: f.id, action: "skip", confidence: "high", sources: ["preferences.desiredCompensation"] };
+  if (!pay) return null;
   const asked = `${f.label} ${f.hint ?? ""} ${f.placeholder ?? ""}`;
   const period = /\bhour(ly)?\b|\/\s?hr\b/i.test(asked)
     ? "hour"
@@ -2652,7 +2655,7 @@ export const withoutEssayStyle = <P extends Pick<Profile, "essayGuidance">>(p: P
 export function mappingPayloadBase(input: Omit<MapInput, "fields">, pay: PayTarget | null = null) {
   const { resumeText, learnedAnswers, ...rest } = input.profile;
   // The model gets the pay to answer for this job, not the rule for choosing it.
-  const { strategy: _, ...comp } = rest.preferences.desiredCompensation;
+  const { strategy: _, whenOptional: __, ...comp } = rest.preferences.desiredCompensation;
   const asked = (p: PayTarget) => ({
     ...comp,
     amount: String(rounded(p.amount, p.period)),
@@ -2746,7 +2749,7 @@ export function localDecisions(input: MapInput): Map<string, Decision> {
       startOnDecision(f, input.profile.preferences) ??
       startDecision(f, input.profile.preferences.earliestStartDate) ??
       durationDecision(f, input.profile.preferences) ??
-      compensationDecision(f, pay) ??
+      compensationDecision(f, pay, input.profile.preferences.desiredCompensation.whenOptional === "blank") ??
       ageDecision(f, input.profile.personal.dateOfBirth) ??
       citizenDecision(f, countries.get(f.id), input.profile.workAuthorization) ??
       roleCountryDecision(f, job) ??
