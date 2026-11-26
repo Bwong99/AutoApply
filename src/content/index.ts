@@ -34,7 +34,8 @@ import { localMatchAll } from "./match/localMatch";
 import { harvestOptions, ui5Host } from "./fill/dropdown";
 import { fill, serial, type FillOp } from "./fill/engine";
 import { dispatching, haltFill, isFilling, sleep, waitFor } from "./fill/events";
-import { findDropzones } from "./fill/file";
+import { findDropzones, isPortfolioUpload } from "./fill/file";
+import { portfolioLink } from "../shared/portfolio";
 import {
   addEntries,
   editInvalidEntries,
@@ -871,6 +872,7 @@ function localFill(h: FieldHandle, env: LocalEnv): boolean {
     else if (doc === null && yolo && RE_COVER_LETTER.test(h.desc.label)) setStatus(h, "skipped");
     else if (doc === null)
       setStatus(h, "needs", RE_COVER_LETTER.test(h.desc.label) ? "No cover letter uploaded" : "No résumé uploaded");
+    else if (wantsPortfolioPdf(h)) jobs.push(portfolioUpload(h, ctrl));
     else return false;
     return true;
   }
@@ -1188,6 +1190,7 @@ function reviewUpload(h: FieldHandle, groupId: string, ctrl: AbortController, wh
   if (isResumeUpload(h) && config.settings.resumeUpload === "tailor") return tailoredUpload(h, groupId, ctrl);
   const doc = primaryDocFor(h);
   if (doc) return doFill(h, { type: "file", documentId: doc }, "filled", why, ctrl);
+  if (doc === undefined && wantsPortfolioPdf(h)) return portfolioUpload(h, ctrl);
   setStatus(h, "needs", why);
 }
 
@@ -1377,6 +1380,28 @@ async function coverLetter(h: FieldHandle, ctrl: AbortController) {
   aiDocs.add(r.meta.id);
   guesses.set(h.id, { q: h.desc.label, a: "A cover letter written for this job" });
   await doFill(h, { type: "file", documentId: r.meta.id }, "draft", "Generated cover letter", ctrl);
+}
+
+/**
+ * A required upload for a portfolio or work samples, with nothing in Documents but résumés and cover letters: a PDF of
+ * the Profile's portfolio link goes in. Optional ones, and pages where the user keeps other documents, go on to the AI
+ * as before.
+ */
+const wantsPortfolioPdf = (h: FieldHandle) =>
+  h.desc.required &&
+  isPortfolioUpload(h) &&
+  !!portfolioLink(config.profileSnapshotForDeterministic.personal.links) &&
+  // Its own earlier PDFs (yolo- ids) aren't the user's documents.
+  !config.documentsIndex.some((d) => d.kind === "other" && !d.id.startsWith("yolo-"));
+
+async function portfolioUpload(h: FieldHandle, ctrl: AbortController) {
+  setStatus(h, "working", "Making a PDF of your portfolio link…");
+  const r = await send({ type: "PORTFOLIO_PDF" });
+  if (ctrl.signal.aborted || states.get(h.id)?.userOwned) return;
+  if (isErr(r)) return setStatus(h, "needs", r.error.message);
+  if (!config.documentsIndex.some((d) => d.id === r.meta.id))
+    config.documentsIndex = [...config.documentsIndex, r.meta];
+  await doFill(h, { type: "file", documentId: r.meta.id }, "filled", "Your portfolio link, as a PDF", ctrl);
 }
 
 /** The overlay's Regenerate: the failed résumé tailoring or cover letter tried again, outside a fill so Stop ends it. */

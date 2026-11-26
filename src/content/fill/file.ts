@@ -36,6 +36,24 @@ export function documentFits(h: FieldHandle, kind: DocumentMeta["kind"]): boolea
   if (RE_OTHER_DOC.test(text)) wants.add("other");
   return !wants.size || wants.has(kind);
 }
+/** An upload for work samples: "Please provide work samples (either portfolio site or code repository)". */
+const RE_PORTFOLIO_UPLOAD =
+  /\bportfolios?\b|\b(work|code|design) samples?\b|\bsamples? of (your |my )?(work|code)\b|\bcode repositor(y|ies)\b/i;
+/** Documents a link PDF can't stand in for: an upload also asking for one of these wants that document. */
+const RE_NOT_PORTFOLIO =
+  /r[ée]sum[ée]|\bcv\b|cover letter|\btranscripts?\b|\bgrades?\b|\bwriting samples?\b|\breferences?\b|\brecommendation|\bcertificat|\blicen[cs]e|\bpassport|\bwork permit|\bvisa\b|\bproof of\b/i;
+
+/** Whether this upload asks only for a portfolio or work samples, and takes a PDF: a PDF of the portfolio link answers it. */
+export function isPortfolioUpload(h: FieldHandle): boolean {
+  const text = `${h.desc.label} ${h.desc.hint ?? ""}`;
+  return (
+    h.desc.kind === "file" &&
+    RE_PORTFOLIO_UPLOAD.test(text) &&
+    !RE_NOT_PORTFOLIO.test(text) &&
+    accepts(h.desc.accept, { fileName: "x.pdf", mimeType: "application/pdf" } as DocumentMeta)
+  );
+}
+
 /** "Complement your resume with a cover letter": a cover letter's box naming the résumé it accompanies. */
 // No leading \b: a box's text runs its heading into it ("Cover LetterComplement your resume").
 const RE_COVER_LETTER_MENTION = /(complement|accompany|accompanies|along with|with|to) your r[ée]sum[ée]\b/gi;

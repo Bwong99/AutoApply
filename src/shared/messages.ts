@@ -135,6 +135,8 @@ export type Message =
   /** The user pressed Continue YOLO in a waiting tab. */
   | { type: "YOLO_CONTINUE" }
   | { type: "COVER_LETTER_PDF"; question: string }
+  /** A PDF of the Profile's portfolio link (shared/portfolio.ts), for a required work-samples upload. */
+  | { type: "PORTFOLIO_PDF" }
   /** The résumé to upload for the tab's job in AI tailor mode: tailored, else the untailored fallback. */
   /** fresh: the user asked again, so a failure kept for this job is retried. */
   | { type: "TAILOR_RESUME"; groupId: string; fresh?: boolean }
@@ -313,6 +315,7 @@ export interface Responses {
   YOLO_CONTINUE: { ok: boolean; queued?: boolean };
   YOLO_WAITING: Ok;
   COVER_LETTER_PDF: { meta: DocumentMeta } | Err;
+  PORTFOLIO_PDF: { meta: DocumentMeta } | Err;
   /** `note`: why the untailored résumé was used (or a short summary of the tailoring). */
   TAILOR_RESUME: { meta: DocumentMeta; tailored: boolean; note: string } | Err;
   YOLO_HOST_CLEAR: Ok;

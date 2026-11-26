@@ -12,7 +12,7 @@ import {
 import { abbreviates, fillTypeahead } from "../../src/content/fill/typeahead";
 import { fill } from "../../src/content/fill/engine";
 import { realClick } from "../../src/content/fill/events";
-import { documentFits, fillFile, findDropzones } from "../../src/content/fill/file";
+import { documentFits, fillFile, findDropzones, isPortfolioUpload } from "../../src/content/fill/file";
 import { fillText } from "../../src/content/fill/native";
 import { dropdownText, readValue } from "../../src/content/fill/verify";
 
@@ -1076,6 +1076,34 @@ describe("file uploads", () => {
     // An upload naming no document takes what was chosen for it, as before.
     const any = upload(`<label for="a">Attachments</label><input id="a" type="file">`);
     expect(documentFits(any, "transcript")).toBe(true);
+  });
+
+  it("knows a portfolio or work-samples upload, and not one wanting another document", () => {
+    const one = (html: string) => {
+      setBody(html);
+      return scan(newScanState()).handles[0];
+    };
+    for (const label of [
+      "Please provide work samples (either portfolio site or code repository) Thank you",
+      "Portfolio",
+      "Code samples",
+      "Samples of your work",
+    ])
+      expect(isPortfolioUpload(one(`<label for="f">${label}</label><input id="f" type="file">`)), label).toBe(true);
+    for (const label of [
+      "Resume / Portfolio",
+      "Writing sample",
+      "References",
+      "Transcript",
+      "Attachments",
+      "Cover letter",
+    ])
+      expect(isPortfolioUpload(one(`<label for="f">${label}</label><input id="f" type="file">`)), label).toBe(false);
+    // An upload taking no PDF can't take the link's PDF.
+    expect(isPortfolioUpload(one(`<label for="f">Portfolio</label><input id="f" type="file" accept=".zip">`))).toBe(
+      false,
+    );
+    expect(isPortfolioUpload(one(`<label for="f">Portfolio</label><input id="f" type="text">`))).toBe(false);
   });
 
   it("refuses to upload a document the field doesn't ask for", async () => {

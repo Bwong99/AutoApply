@@ -89,6 +89,7 @@ import { findOnEmployerBoard } from "./careers";
 import { indeedCardsInPage, JOBRIGHT_PING } from "./sources";
 import { failSourceCheck, plainError } from "./sourceCheck";
 import { letterText, textPdf } from "./pdf";
+import { portfolioLink } from "../../shared/portfolio";
 import {
   adoptTab,
   credit,
@@ -837,7 +838,9 @@ async function uploaded(run: Run) {
     if (isTailoredDoc(id) || isYoloDoc(id)) {
       const d = await (isYoloDoc(id) ? yoloDoc(id) : tailoredDoc(store, id));
       if (d) up.files.push({ name: d.meta.fileName, base64: d.base64 });
-      if (isYoloDoc(id)) up.letter.push(`Generated (${d?.meta.fileName ?? "file no longer kept"})`);
+      // A generated portfolio-link PDF is in `files` only: it is no letter.
+      if (isYoloDoc(id) && d?.meta.kind !== "other")
+        up.letter.push(`Generated (${d?.meta.fileName ?? "file no longer kept"})`);
       // The untailored PDF made when the .tex was uploaded, or a tailoring a browser restart lost.
       else up.resume.push(d && id !== FALLBACK ? `Tailored (${d.meta.fileName})` : "Untailored LaTeX résumé");
       continue;
@@ -1884,6 +1887,28 @@ export const yoloHandlers: { [T in Message["type"]]?: Handler<T> } = {
       // For the overlay: the job as draftEssays gave it to the AI.
       session.set(`docjob:${id}`, jobBrief(job) ?? {}),
     ]);
+    return { meta };
+  },
+
+  /** The Profile's portfolio link as a one-page PDF, for an upload asking for work samples. No AI: the link is the user's own. */
+  async PORTFOLIO_PDF() {
+    const { personal } = await store.get("profile");
+    const link = portfolioLink(personal.links);
+    if (!link) return { error: { kind: "other", message: "Add your portfolio URL in Profile" } };
+    const full = `${personal.firstName} ${personal.lastName}`.trim();
+    const id = `yolo-${crypto.randomUUID()}`;
+    const base64 = textPdf(`${full ? `${full}\n` : ""}Work samples\n\n${link.label}:\n${link.url}`, [link.url]);
+    const meta: DocumentMeta = {
+      id,
+      label: "Portfolio link (generated)",
+      kind: "other",
+      fileName: `${full.replace(/\s+/g, "_") || "Work"}_Portfolio.pdf`,
+      mimeType: "application/pdf",
+      size: Math.floor((base64.length * 3) / 4),
+      isPrimaryResume: false,
+      uploadedAt: Date.now(),
+    };
+    await session.set(`yolodoc:${id}`, { meta, base64 });
     return { meta };
   },
 

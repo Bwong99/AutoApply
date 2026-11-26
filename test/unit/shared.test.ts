@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { installChromeMock } from "./chromeMock";
 import { cleanLabel, humanize, normalize } from "../../src/shared/normalize";
+import { portfolioLink } from "../../src/shared/portfolio";
 import {
   canonicalCountry,
   canonicalRegion,
@@ -377,5 +378,35 @@ describe("ensureContentScript", () => {
       files: ["src/content/index.js"],
     });
     vi.unstubAllGlobals();
+  });
+});
+
+describe("portfolioLink", () => {
+  const links = (o: Partial<Record<"portfolio" | "website" | "github", string>>) => ({
+    linkedin: "https://linkedin.com/in/ada",
+    portfolio: "",
+    website: "",
+    github: "",
+    other: [],
+    ...o,
+  });
+  it("takes the portfolio, else the website, else GitHub, as an absolute URL", () => {
+    expect(portfolioLink(links({ portfolio: "ada.dev", website: "https://w.dev", github: "github.com/ada" }))).toEqual({
+      label: "Portfolio",
+      url: "https://ada.dev/",
+    });
+    expect(portfolioLink(links({ website: "http://w.dev/me", github: "github.com/ada" }))).toEqual({
+      label: "Website",
+      url: "http://w.dev/me",
+    });
+    expect(portfolioLink(links({ github: "github.com/ada" }))).toEqual({
+      label: "GitHub",
+      url: "https://github.com/ada",
+    });
+  });
+  it("has none without a link, and never a LinkedIn or non-web one", () => {
+    expect(portfolioLink(links({}))).toBeNull();
+    expect(portfolioLink(links({ portfolio: "my portfolio" }))).toBeNull();
+    expect(portfolioLink(links({ portfolio: "javascript:alert(1)" }))).toBeNull();
   });
 });

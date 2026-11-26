@@ -876,6 +876,19 @@ describe("cover letter PDF", () => {
     expect(/\/Count (\d+)/.exec(pdf)![1]).not.toBe("1"); // long letters span pages
   });
 
+  it("makes a URL alone on its line a clickable link, and leaves PDFs without links as they were", () => {
+    const url = "https://ada.dev/";
+    const pdf = atob(textPdf(`Ada Lovelace\nWork samples\n\nPortfolio:\n${url}`, [url]));
+    const offsets = [...pdf.split("xref\n")[1].matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    offsets.forEach((o, i) => expect(pdf.slice(o).startsWith(`${i + 1} 0 obj<<`)).toBe(true));
+    expect(pdf).toContain("/Annots[6 0 R]");
+    expect(pdf).toContain(
+      `6 0 obj<</Type/Annot/Subtype/Link/Rect[72 657 162 671]/Border[0 0 0]/A<</S/URI/URI(${url})>>>>`,
+    );
+    expect(textPdf("Ada Lovelace", [])).toBe(textPdf("Ada Lovelace"));
+    expect(atob(textPdf("Ada Lovelace"))).not.toContain("/Annots");
+  });
+
   const pages = (text: string) => Number(/\/Count (\d+)/.exec(atob(textPdf(text)))![1]);
   const letter = (lines: number) => Array.from({ length: lines }, (_, i) => `Line ${i}.`).join("\n");
 

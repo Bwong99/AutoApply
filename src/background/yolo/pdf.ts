@@ -38,8 +38,11 @@ export const LINES_PER_PAGE = 44;
 /** How many lines the text takes in textPdf: over LINES_PER_PAGE runs to a second page. */
 export const textLines = (text: string) => wrap(text).length;
 
-/** Base64 of the PDF. */
-export function textPdf(text: string): string {
+/**
+ * Base64 of the PDF. `links`: ASCII URLs made clickable where one stands alone on a line (a reviewer clicks the
+ * portfolio link rather than retyping it).
+ */
+export function textPdf(text: string, links: string[] = []): string {
   const lines = wrap(text);
   const pages: string[][] = [];
   for (let i = 0; i < lines.length; i += LINES_PER_PAGE) pages.push(lines.slice(i, i + LINES_PER_PAGE));
@@ -48,13 +51,25 @@ export function textPdf(text: string): string {
     `<</Type/Pages/Kids[${pages.map((_, i) => `${4 + 2 * i} 0 R`).join(" ")}]/Count ${pages.length}>>`,
     "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>",
   ];
+  // Link annotations follow the pages' objects. Helvetica averages under 0.51 em a URL character: the box spans the URL.
+  const annots: string[] = [];
   pages.forEach((p, i) => {
     const stream = `BT /F1 11 Tf 15 TL 72 720 Td ${p.map((l) => `(${esc(l)}) Tj T*`).join(" ")} ET`;
+    const refs = p.flatMap((l, n) => {
+      if (!links.includes(l)) return [];
+      const y = 720 - 15 * n;
+      annots.push(
+        `<</Type/Annot/Subtype/Link/Rect[72 ${y - 3} ${Math.min(540, 72 + Math.ceil(l.length * 5.6))} ${y + 11}]` +
+          `/Border[0 0 0]/A<</S/URI/URI(${esc(l)})>>>>`,
+      );
+      return [`${3 + 2 * pages.length + annots.length} 0 R`];
+    });
     objs.push(
-      `<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 3 0 R>>>>/Contents ${5 + 2 * i} 0 R>>`,
+      `<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 3 0 R>>>>/Contents ${5 + 2 * i} 0 R${refs.length ? `/Annots[${refs.join(" ")}]` : ""}>>`,
       `<</Length ${stream.length}>>stream\n${stream}\nendstream`,
     );
   });
+  objs.push(...annots);
   let pdf = "%PDF-1.4\n";
   const offsets = objs.map((o, i) => {
     const at = pdf.length;
