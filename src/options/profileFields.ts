@@ -203,8 +203,17 @@ export const PROFILE_GROUPS: GroupSpec[] = [
     items: [
       t("coop.inCoopProgram", "In a co-op program", "Answers “Are you enrolled in a co-op program?”.", "yn"),
       t("coop.programName", "Program name", "e.g. UBC Science Co-op."),
-      t("coop.workTermNumber", "Work term number", "e.g. 2nd work term."),
-      t("coop.availableTerms", "Available terms", "e.g. Jan–Apr 2027. Press Enter after each.", "tags"),
+      t(
+        "coop.workTermNumber",
+        "Work term number",
+        "Your school co-op term this would be, e.g. 1st work term. Used when a form asks about co-op work terms; internships in Experience still count when it asks about internships.",
+      ),
+      t(
+        "coop.availableTerms",
+        "Available terms",
+        "All (or empty) for any term in your available dates; else seasons or months, e.g. Summer, Jan–Apr 2027. Press Enter after each.",
+        "tags",
+      ),
       t("coop.acceptableTermLengths", "Acceptable term lengths", "e.g. 4 months, 8 months.", "tags"),
       t("coop.studentNumber", "Student number", "Filled only where a student number is requested."),
     ],

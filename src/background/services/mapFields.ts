@@ -1234,6 +1234,35 @@ function internshipsDecision(f: FieldDescriptor, experience: Profile["experience
   return hits.length === 1 ? { ...base, optionIndexes: hits, intendedAnswer: f.options[hits[0]] } : null;
 }
 
+const RE_FIRST_TERM =
+  /\b(is|will|would)\s+(this|it)\s+(be\s+)?(your|the candidate'?s)\s+first\b[^?]{0,40}\b(internships?|co-?ops?|work[- ]terms?|placements?)\b/i;
+
+/**
+ * "Is this your first internship?" / "Will this be your first co-op work term?". Asked of co-op or work terms alone,
+ * the school co-op term the profile names (`coop.workTermNumber`: "1st work term" is the first). Asked of internships
+ * (alone or beside co-ops), any earlier internship or co-op role in the experience makes it not the first: a student on
+ * their first school work term who has interned elsewhere has had an internship before.
+ */
+function firstTermDecision(f: FieldDescriptor, profile: Profile): Decision | null {
+  const m = RE_FIRST_TERM.exec(f.label);
+  if (!m || isMulti(f)) return null;
+  const coopOnly = !/\b(internships?|placements?)\b/i.test(f.label.slice(m.index));
+  if (coopOnly) {
+    const t = profile.coop.workTermNumber.trim().toLowerCase();
+    const word = ["first", "second", "third", "fourth", "fifth", "sixth"].findIndex((w) => t.includes(w));
+    const n = t.match(/\d+/) ? Number(t.match(/\d+/)![0]) : word >= 0 ? word + 1 : NaN;
+    if (!(n >= 1)) return null;
+    return yesNoDecision(f, n === 1, ["coop.workTermNumber"]);
+  }
+  const before = profile.experience.some(
+    (e) =>
+      /\b(intern(ship)?|co-?op)\b/i.test(`${e.employmentType} ${e.title}`) &&
+      !!e.startDate &&
+      e.startDate.slice(0, 7) <= todayIso().slice(0, 7),
+  );
+  return yesNoDecision(f, !before, ["experience"]);
+}
+
 const RE_ATTACH_DOC = /\b(transcript|cover letter|portfolio|writing sample)s?\b/i;
 const RE_ANY_DOC_BOX = /\b(additional|other|supporting)\b[^?]*\b(documents?|files?|attachments?)\b|^attachments?$/i;
 
@@ -1306,14 +1335,32 @@ const TERM_MID: [RegExp, number][] = [
   [/\b(fall|autumn)\b/i, 10],
 ];
 
+/**
+ * Whether a profile term written as months ("Jan–Apr 2027", "May - Aug") holds a season's middle month, in `year`
+ * when both name one. The Profile's own example is this form; read only by season word, it matched no season.
+ */
+function monthsHold(term: string, mid: number, year: string | undefined): boolean {
+  const r = /\b([a-z]{3,9})\.?\s*(20\d\d)?\s*(?:[-–—]|\bto\b)\s*([a-z]{3,9})\.?\s*(20\d\d)?\b/i.exec(term);
+  if (!r) return false;
+  const [a, b] = [r[1], r[3]].map((m) => MONTHS.indexOf(m.slice(0, 3).toLowerCase()) + 1);
+  if (!a || !b) return false;
+  const inside = a <= b ? mid >= a && mid <= b : mid >= a || mid <= b;
+  const [y1, y2] = [r[2], r[4]].map((y) => (y ? Number(y) : undefined));
+  // A term across New Year ("Nov 2027 – Feb 2028") holds November in its first year and February in its second.
+  const start = y1 ?? (y2 !== undefined && a > b ? y2 - 1 : y2);
+  const ty = a > b && mid <= b ? (y2 ?? (start !== undefined ? start + 1 : undefined)) : start;
+  return inside && (!year || ty === undefined || String(ty) === year);
+}
+
 /** Whether a term option ("Summer 2027", "Winter (January - May)") suits the profile; null when it names no season. */
 function termFits(o: string, profile: Profile): boolean | null {
   const { earliestStartDate: from, availableUntil: to } = profile.preferences;
   const terms = profile.coop.availableTerms;
-  const any = !terms.length || terms.some((t) => /^all$/i.test(t.trim()));
+  const any = !terms.length || terms.some((t) => /^(all|any)$/i.test(t.trim()));
   const season = TERM_MID.find(([re]) => re.test(o));
-  if (!season || (!any && !terms.some((t) => season[0].test(t)))) return season ? false : null;
   const year = o.match(/\b20\d\d\b/)?.[0];
+  if (!season || (!any && !terms.some((t) => season[0].test(t) || monthsHold(t, season[1], year))))
+    return season ? false : null;
   if (!year) return true;
   const mid = `${year}-${String(season[1]).padStart(2, "0")}`;
   return !!from && mid >= from.slice(0, 7) && (!to || mid <= to.slice(0, 7));
@@ -2738,6 +2785,7 @@ export function localDecisions(input: MapInput): Map<string, Decision> {
       languagesDecision(f, input.profile) ??
       skillsDecision(f, input.profile) ??
       internshipsDecision(f, input.profile.experience) ??
+      firstTermDecision(f, input.profile) ??
       pronunciationDecision(f, input.profile.personal) ??
       attachedDecision(f, input.uploads) ??
       cohortDecision(f, input.profile.preferences) ??

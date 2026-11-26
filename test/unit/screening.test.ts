@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { isScreeningQuestion, screeningDecision, SCREENING_SOURCE } from "../../src/shared/screening";
-import { emptyProfile } from "../../src/shared/profileSchema";
+import { emptyProfile, ExperienceSchema } from "../../src/shared/profileSchema";
 import { defaultSettings } from "../../src/shared/settings";
 import { normalize } from "../../src/shared/normalize";
 import { todayIso } from "../../src/shared/time";
@@ -266,6 +266,54 @@ describe("screening thresholds", () => {
     expect(localDecisions({ fields: [duration], profile: p, documents: [], job: null }).get("q")).toMatchObject({
       optionIndexes: [0],
     });
+  });
+
+  it("answers a first-internship question from experience, and a co-op one from the work term number", () => {
+    const p = emptyProfile();
+    p.coop.workTermNumber = "1st work term";
+    p.experience = [
+      ExperienceSchema.parse({
+        title: "Software Developer Intern",
+        employmentType: "Internship ",
+        startDate: "2026-06",
+        endDate: "2026-09",
+      }),
+    ];
+    const yn = { kind: "radio_group" as const, options: ["Yes", "No"] };
+    const ask = (label: string) =>
+      localDecisions({ fields: [field(label, yn)], profile: p, documents: [], job: null }).get("q")?.optionIndexes;
+    // An internship before: not the first internship, even on the first school work term.
+    expect(ask("Is this your first internship?")).toEqual([1]);
+    expect(ask("Will this be your first internship or co-op?")).toEqual([1]);
+    // The co-op term itself: the school's count.
+    expect(ask("Is this your first co-op work term?")).toEqual([0]);
+    expect(ask("Will this be your first work term?")).toEqual([0]);
+    p.coop.workTermNumber = "2nd work term";
+    expect(ask("Is this your first co-op?")).toEqual([1]);
+    // Unreadable term number: left to the model.
+    p.coop.workTermNumber = "TBD";
+    expect(ask("Is this your first co-op?")).toBeUndefined();
+    // No internships before: the first.
+    p.experience = [];
+    expect(ask("Is this your first internship?")).toEqual([0]);
+  });
+
+  it("reads available co-op terms written as months", () => {
+    const p = emptyProfile();
+    p.preferences.earliestStartDate = "2027-01-01";
+    p.preferences.availableUntil = "2028-08-31";
+    const terms = field("Which term(s) would you like to be considered for?", {
+      kind: "checkbox_group",
+      options: ["Winter 2027", "Summer 2027", "Fall 2027"],
+    });
+    const pick = () =>
+      localDecisions({ fields: [terms], profile: p, documents: [], job: null }).get("q")?.optionIndexes;
+    p.coop.availableTerms = ["Jan–Apr 2027", "May - Aug 2027"];
+    expect(pick()).toEqual([0, 1]);
+    p.coop.availableTerms = ["All"];
+    expect(pick()).toEqual([0, 1, 2]);
+    p.coop.availableTerms = ["Sep–Dec 2028"];
+    expect(pick()).toBeUndefined();
   });
 
   it("leaves an optional pay question blank when the profile asks, and answers a required one", () => {
