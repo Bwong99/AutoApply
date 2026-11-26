@@ -1,6 +1,7 @@
 // The AI review of a filled page (content/review): a second, independent read of the page as shown, which checks
 // every answer against the candidate's data, names the controls the scan missed, and says what is left. Its answers
 // pass the same profile guards as the mapping's (mapFields.ts) before the page is changed.
+import { GPA_KEPT, withoutOptionalGpa } from "../../shared/gpa";
 import { RE_SENSITIVE_LABEL } from "../../shared/constants";
 import { matchesProfileConsent } from "../../shared/consents";
 import { plainDashes, RE_AI_TELL, trapLabel } from "../../shared/injection";
@@ -164,7 +165,7 @@ export function covered<T extends { fields: { fieldId: string }[] }>(r: T, field
 }
 
 export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<ReviewResult> {
-  const { resumeText, learnedAnswers } = input.profile;
+  const { resumeText, learnedAnswers } = withoutOptionalGpa(input.profile);
   const job = input.job?.location ? jobCountry(input.job.location) : undefined;
   const base = mappingPayloadBase(
     { ...input, documents: [] },
@@ -312,7 +313,12 @@ export async function reviewForm(ctx: ServiceCtx, input: ReviewInput): Promise<R
             input.yolo,
             input.job,
           );
-      } else if ((policy?.action === "skip" && fix.answer !== "") || policy?.action === "consent") fix = null;
+      } else if (
+        (policy?.action === "skip" && (fix.answer !== "" || !!policy.sources?.includes(GPA_KEPT))) ||
+        policy?.action === "consent"
+      )
+        // An optional GPA question kept blank by "Share GPA: Only when required" stays blank: not even flagged.
+        fix = null;
     }
     if (fix) fixes.push(fix);
   }

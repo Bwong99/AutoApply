@@ -3,6 +3,7 @@ import { ensureContentScript, type Message, type Responses } from "../shared/mes
 import { createStorage, migrate, session } from "../shared/storage";
 import { normalize } from "../shared/normalize";
 import { needsNoCanadianPermit } from "../shared/constants";
+import { withoutOptionalGpa } from "../shared/gpa";
 import { formatTime } from "../shared/time";
 import type { ApiError, EntryCounts, ModelCaps, Profile, Settings, TabStatus } from "../shared/types";
 import { defaultSettings, type AiTask, type ClaudeTask } from "../shared/settings";
@@ -344,14 +345,18 @@ const handlers: Handlers = {
           consentToJobOpportunities: s.profile.background.consentToJobOpportunities,
           consentToMarketing: s.profile.background.consentToMarketing,
         },
-        learnedAnswers: s.profile.learnedAnswers.map(({ id, question, normalizedQuestion, kind, options, answer }) => ({
-          id,
-          question,
-          normalizedQuestion,
-          kind,
-          options,
-          answer,
-        })),
+        // A saved GPA answer would fill an optional GPA box on the page: with "GPA only when required" it goes
+        // through mapping, which leaves optional ones blank.
+        learnedAnswers: withoutOptionalGpa(s.profile).learnedAnswers.map(
+          ({ id, question, normalizedQuestion, kind, options, answer }) => ({
+            id,
+            question,
+            normalizedQuestion,
+            kind,
+            options,
+            answer,
+          }),
+        ),
         hasSin: s.profile.workAuthorization.hasSin,
         noCanadianPermitNeeded: needsNoCanadianPermit(s.profile.workAuthorization.entries),
       },

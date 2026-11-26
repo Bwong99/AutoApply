@@ -186,6 +186,16 @@ export const PROFILE_GROUPS: GroupSpec[] = [
           t("currentlyEnrolled", "Currently enrolled", "Answers “Are you currently a student?”.", "yn"),
           t("gpa", "GPA", "As you would write it, e.g. 3.8."),
           t("gpaScale", "GPA scale", "e.g. 4.0 or 4.33."),
+          {
+            k: "select",
+            path: "gpaWhenOptional",
+            label: "Share GPA",
+            help: "Only when required: AutoApply enters your GPA only where a form requires it, and never mentions it anywhere else (not in optional fields, essays or cover letters).",
+            options: [
+              ["", "Whenever asked"],
+              ["blank", "Only when required"],
+            ],
+          },
           t("yearLevel", "Year level", "e.g. 3rd year."),
           t("creditsCompleted", "Credits completed", "Answers “How many credits have you completed?”, e.g. 90."),
           t("honors", "Honours / awards", "Dean's list, scholarships, etc."),

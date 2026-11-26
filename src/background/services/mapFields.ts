@@ -34,6 +34,7 @@ import {
 } from "../../shared/screening";
 import { normalize } from "../../shared/normalize";
 import { emptyProfile } from "../../shared/profileSchema";
+import { GPA_KEPT, gpaOnlyWhenRequired, RE_GPA_Q, withoutOptionalGpa } from "../../shared/gpa";
 import { todayIso } from "../../shared/time";
 import type { Gemini } from "../gemini/client";
 import { AllKeysExhaustedError, BadOutputError, BlockedError } from "../gemini/errors";
@@ -1559,6 +1560,28 @@ function gpaDecision(f: FieldDescriptor, education: Profile["education"]): Decis
   };
 }
 
+/**
+ * "Share GPA: Only when required" (`gpaWhenOptional`): an optional GPA question stays blank; a required one gets the
+ * GPA by `gpaDecision`, else as written in the profile for a box asking it plainly, else the user answers. The AI never
+ * sees the GPA then (`withoutOptionalGpa`), so this is the only way it reaches a form.
+ */
+function gpaGateDecision(f: FieldDescriptor, profile: Profile): Decision | null {
+  if (!gpaOnlyWhenRequired(profile) || !RE_GPA_Q.test(f.label)) return null;
+  if (!f.required) return { fieldId: f.id, action: "skip", confidence: "high", sources: [GPA_KEPT] };
+  const own = gpaDecision(f, profile.education);
+  if (own) return own;
+  const e = profile.education.find((x) => x.gpa);
+  const plain =
+    !!e &&
+    (f.kind === "text" || f.kind === "number") &&
+    /\b(c?gpa|grade[- ]point average)\b/i.test(f.label) &&
+    !/\b(graduate|doctorate|master'?s?|ph\.?d|high school|%|percent(age)?|threshold|above|below|at least|minimum)\b/i.test(
+      `${f.label} ${f.hint ?? ""}`,
+    );
+  if (plain) return { fieldId: f.id, action: "fill", text: e.gpa.trim(), confidence: "high", sources: ["education"] };
+  return flag(f.id, "Required GPA question: answer it yourself (your GPA is shared only where required)");
+}
+
 /** Current-student attestations, including a lone checkbox such as "I currently attend". */
 const RE_CURRENT_STUDENT =
   /\b(?:currently|presently|now)\b[^?.]{0,40}\b(?:attend(?:ing)?|enrol(?:led|ment)?|stud(?:y|ying)|student)\b|\b(?:attend(?:ing)?|enrol(?:led|ment)?|stud(?:y|ying)|student)\b[^?.]{0,40}\b(?:currently|presently|now)\b|\bcurrent(?:ly)?\s+(?:enrol(?:led|ment)|student)\b|\b(?:currently|presently|now)\b[^?.]{0,40}\bpursu(?:e|ing)\b[^?.]{0,20}\b(?:degree|program|course|education)\b/i;
@@ -2700,7 +2723,7 @@ export const withoutEssayStyle = <P extends Pick<Profile, "essayGuidance">>(p: P
 });
 
 export function mappingPayloadBase(input: Omit<MapInput, "fields">, pay: PayTarget | null = null) {
-  const { resumeText, learnedAnswers, ...rest } = input.profile;
+  const { resumeText, learnedAnswers, ...rest } = withoutOptionalGpa(input.profile);
   // The model gets the pay to answer for this job, not the rule for choosing it.
   const { strategy: _, whenOptional: __, ...comp } = rest.preferences.desiredCompensation;
   const asked = (p: PayTarget) => ({
@@ -2756,6 +2779,7 @@ export function localDecisions(input: MapInput): Map<string, Decision> {
     const excluding = /\b(excluding|not including|other than|besides)\b[^?]*\b(internships?|co-?ops?)\b/i.test(f.label);
     const d =
       aiUseDecision(f) ??
+      gpaGateDecision(f, input.profile) ??
       profileConsentDecision(f, input.profile.background) ??
       schoolEmailDecision(f) ??
       exerciseDecision(f) ??

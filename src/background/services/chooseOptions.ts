@@ -1,5 +1,6 @@
 // §10.8.2 follow-up option choice for options discovered late.
 import type { Choice, ChooseItem, Profile } from "../../shared/types";
+import { withoutOptionalGpa } from "../../shared/gpa";
 import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { CHOOSE_OPTIONS_PROMPT } from "../gemini/prompts";
@@ -41,7 +42,7 @@ export async function chooseOptions(ctx: ServiceCtx, items: ChooseItem[], profil
     if (d)
       local.set(i.fieldId, { fieldId: i.fieldId, optionIndexes: d.optionIndexes ?? null, confidence: d.confidence });
   }
-  const { resumeText: _resume, learnedAnswers: _learned, ...rest } = profile;
+  const { resumeText: _resume, learnedAnswers: _learned, ...rest } = withoutOptionalGpa(profile);
   const pending = items.filter((i) => !local.has(i.fieldId));
   const batches: ChooseItem[][] = [];
   for (let i = 0; i < pending.length; i += 20) batches.push(pending.slice(i, i + 20));

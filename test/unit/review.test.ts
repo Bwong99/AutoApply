@@ -6,7 +6,7 @@ import { BadOutputError } from "../../src/background/gemini/errors";
 import { REVIEW_SCHEMA, ReviewZ, type ReviewReply } from "../../src/background/gemini/schemas";
 import { adoption, opForAnswer, revealable } from "../../src/content/review/reconcile";
 import { newScanState, scan, type FieldHandle } from "../../src/content/scan/fields";
-import { emptyProfile } from "../../src/shared/profileSchema";
+import { EducationSchema, emptyProfile } from "../../src/shared/profileSchema";
 import type { ReviewField, ReviewFix } from "../../src/shared/review";
 import { defaultSettings } from "../../src/shared/settings";
 import type { Profile } from "../../src/shared/types";
@@ -294,6 +294,24 @@ describe("reviewForm", () => {
     ]);
     expect(r.missed).toEqual([expect.objectContaining({ refs: ["c4"], question: "Pronouns" })]);
     expect(r.reveal).toEqual(["c9"]);
+  });
+
+  it.each([false, true])("keeps an optional GPA blank under Share GPA: Only when required (YOLO %s)", async (yolo) => {
+    const i = input([field({ question: "GPA" }), field({ id: "f2", question: "GPA (required)", required: true })]);
+    i.yolo = yolo;
+    i.profile.education = [EducationSchema.parse({ gpa: "3.8", gpaScale: "4.0", gpaWhenOptional: "blank" })];
+    for (const verdict of ["fill", "needs_user"] as const) {
+      const { ctx, calls } = harness({
+        data: reply([
+          fix({ verdict, answer: verdict === "fill" ? "3.7" : "", sources: ["guess"] }),
+          { fieldId: "f2", verdict: "ok" },
+        ]),
+      });
+      const r = await reviewForm(ctx, i);
+      expect(r.fixes.filter((f) => f.fieldId === "f1")).toEqual([]);
+      // The AI never saw the GPA.
+      expect(JSON.stringify(calls[0].spec)).not.toContain("3.8");
+    }
   });
 
   it("uses one call when every field has a verdict", async () => {

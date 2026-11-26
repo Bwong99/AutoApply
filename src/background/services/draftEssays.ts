@@ -2,6 +2,7 @@
 import { stripMarkdown, trimToLimits } from "../../shared/essay";
 import { plainDashes, RE_AI_TELL } from "../../shared/injection";
 import type { EssayItem, JobContext, Profile } from "../../shared/types";
+import { withoutOptionalGpa } from "../../shared/gpa";
 import { screeningDecision } from "../../shared/screening";
 import { BadOutputError, BlockedError } from "../gemini/errors";
 import { ESSAYS_PROMPT, INSTRUCTION_RULE } from "../gemini/prompts";
@@ -39,7 +40,7 @@ export async function draftEssays(
     );
     if (d) local.set(i.fieldId, { fieldId: i.fieldId, text: d.text ?? null, ...(d.note ? { note: d.note } : {}) });
   }
-  const { resumeText, learnedAnswers: _l, ...rest } = profile;
+  const { resumeText, learnedAnswers: _l, ...rest } = withoutOptionalGpa(profile);
   const resume = resumeText.slice(0, 12000);
   const letterContext = { profile: compactProfile(rest) ?? {}, resume };
   // The cover letter template goes only with cover letters: beside a "Why us?" question, the model wrote a letter

@@ -64,6 +64,8 @@ export const EducationSchema = o({
   currentlyEnrolled: yn(),
   gpa: s(),
   gpaScale: s(),
+  // "blank" gives the GPA only to questions that require it; "" answers every GPA question.
+  gpaWhenOptional: z.enum(["", "blank"]).optional().catch(""),
   yearLevel: s(),
   creditsCompleted: s(),
   honors: s(),
