@@ -695,6 +695,20 @@ describe("filters", () => {
     expect(titleMatches("International Sales Associate", "Intern")).toBe(false);
   });
 
+  it("matches one-word and two-word spellings of a role, in any case", () => {
+    expect(titleMatches("Back-End Developer Co-op", "backend intern")).toBe(true);
+    expect(titleMatches("Backend Engineer Intern", "Back End Intern")).toBe(true);
+    expect(titleMatches("Fullstack Engineer Intern", "full stack intern")).toBe(true);
+    expect(titleMatches("Full-Stack Engineering Intern", "fullstack intern")).toBe(true);
+    expect(titleMatches("Dev Ops Intern", "devops intern")).toBe(true);
+    expect(titleMatches("Front End Web Developer Co-op", "frontend intern")).toBe(true);
+    expect(titleMatches("WEB DEVELOPER CO-OP", "Web Developer Intern")).toBe(true);
+    expect(titleMatches("devops engineer intern", "DEVOPS INTERN")).toBe(true);
+    // Each half alone is not the role.
+    expect(titleMatches("Stack Overflow Intern", "fullstack intern")).toBe(false);
+    expect(titleMatches("Back Office Intern", "backend intern")).toBe(false);
+  });
+
   it("matches places by country, city or remote", () => {
     expect(locationMatches("Toronto, ON, Canada", ["Canada"], false)).toBe(true);
     expect(locationMatches("Waterloo, ON", ["Canada"], false)).toBe(true);

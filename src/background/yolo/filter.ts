@@ -3,12 +3,22 @@ import { normalize } from "../../shared/normalize";
 import type { Listing, Yolo } from "../../shared/yolo";
 import { resolvePlace, within } from "./places";
 
-const SYNONYMS = [
+/** Roles written as one word or two; a query's two-word form is read as the one word, so it matches either. */
+const SPLIT = [
+  ["backend", "back end"],
+  ["frontend", "front end"],
+  ["fullstack", "full stack"],
+  ["devops", "dev ops"],
+] as const;
+
+const SYNONYMS: string[][] = [
   ["intern", "internship", "coop", "co op", "work term", "placement"],
   ["engineer", "engineering", "developer", "development", "swe", "sde"],
   ["software", "swe", "sde", "sw"],
   ["data", "analytics"],
   ["ml", "machine learning", "ai"],
+  // One word or two: "Back-End Developer", "Full Stack Engineer", "Dev Ops".
+  ...SPLIT.map(([one, two]) => [one, two]),
 ];
 const forms = (w: string) => [w, `${w}s`, `${w}es`, `${w}ing`, `${w}ship`, `${w}ships`, w.replace(/s$/, "")];
 
@@ -18,7 +28,7 @@ const words = (s: string) => normalize(s.replace(/[^\p{L}\p{N}+#]+/gu, " "));
 /** Every word of the query appears in the title, as itself, a plural/-ing/-ship form, or a synonym. */
 export function titleMatches(title: string, query: string): boolean {
   const t = ` ${words(title)} `;
-  return words(query)
+  return SPLIT.reduce((q, [one, two]) => ` ${q} `.replace(` ${two} `, ` ${one} `).trim(), words(query))
     .split(" ")
     .filter(Boolean)
     .every((w) => {
